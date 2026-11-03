@@ -34,6 +34,8 @@ _PIPELINE_STAGES = ("script", "terms", "audio", "subtitle", "materials", "video"
 # 与 app.models.schema.MaterialTagRelevance 保持一致；这里不导入模型，避免
 # ``cli.py -h`` 初始化应用配置。
 _MATERIAL_TAG_RELEVANCE_MODES = ("off", "rank", "strict")
+# 与 app.models.schema.VideoTermsStyle 保持一致。
+_VIDEO_TERMS_STYLES = ("legacy", "visual")
 _CUSTOM_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
 _BATCH_FILE_MAX_BYTES = 1024 * 1024
 _BATCH_TASK_MAX_COUNT = 100
@@ -329,6 +331,27 @@ Batch manifests:
         "--video-terms",
         default=None,
         help="comma-separated material search terms; generated automatically when omitted",
+    )
+    content_group.add_argument(
+        "--video-anchors",
+        default=None,
+        help=(
+            "comma-separated place/subject words, such as \"istanbul,turkey\", that "
+            "rank equally relevant Pixabay candidates after their search-term score "
+            "when --material-tag-relevance is rank or strict; never used to drop "
+            "candidates. Without it, only anchors generated together with the "
+            "terms (visual style) are used"
+        ),
+    )
+    content_group.add_argument(
+        "--video-terms-style",
+        default=None,
+        choices=_VIDEO_TERMS_STYLES,
+        help=(
+            "prompt used when search terms are generated: legacy adds the main "
+            "subject to every term; visual asks for concrete visual noun phrases "
+            "and separate anchors (default: [app].video_terms_style, else legacy)"
+        ),
     )
     content_group.add_argument(
         "--video-language",
@@ -978,6 +1001,13 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         video_terms = [
             term.strip() for term in re.split(r"[,，]", video_terms) if term.strip()
         ]
+    video_anchors = args.video_anchors
+    if video_anchors:
+        video_anchors = [
+            anchor.strip()
+            for anchor in re.split(r"[,，]", video_anchors)
+            if anchor.strip()
+        ]
 
     video_materials = None
     materials_arg = args.video_materials or ""
@@ -993,6 +1023,7 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         "video_subject": args.video_subject.strip(),
         "video_script": args.video_script,
         "video_terms": video_terms,
+        "video_anchors": video_anchors or None,
         "video_source": args.video_source,
         "video_materials": video_materials,
         "video_count": args.video_count,
@@ -1016,6 +1047,7 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         "crop_materials_to_aspect",
         "material_tag_relevance",
         "exclude_ai_generated_materials",
+        "video_terms_style",
         "n_threads",
         "voice_volume",
         "voice_rate",
