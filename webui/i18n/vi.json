@@ -54,6 +54,8 @@
     "Advanced Script Settings": "Cài Đặt Kịch Bản Nâng Cao",
     "Script Paragraph Number": "Số Đoạn Kịch Bản",
     "Custom Script Requirements": "Yêu Cầu Kịch Bản Tùy Chỉnh",
+    "Script Accuracy Rules": "Quy Tắc Chính Xác Khoa Học",
+    "Script Accuracy Rules Help": "Thêm quy tắc vào prompt kịch bản: chỉ nêu các sự thật đã được xác lập và ghi rõ các ước tính hoặc điểm còn tranh cãi, tránh các ngộ nhận phổ biến và giữ ẩn dụ dễ nhận ra là ẩn dụ. Khi dùng system prompt tùy chỉnh, các quy tắc được thêm thành một phần riêng.",
     "Custom Script Requirements Placeholder": "Ví dụ: dùng giọng văn nhẹ nhàng hơn, phù hợp phong cách TikTok, hướng đến khán giả trẻ, mở đầu kịch tính hơn",
     "Custom System Prompt": "Prompt hệ thống",
     "Restore Default System Prompt": "Khôi phục Prompt mặc định",

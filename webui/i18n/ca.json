@@ -54,6 +54,8 @@
     "Advanced Script Settings": "Configuració avançada del guió",
     "Script Paragraph Number": "Nombre de paràgrafs",
     "Custom Script Requirements": "Indicacions per al guió",
+    "Script Accuracy Rules": "Regles de rigor científic",
+    "Script Accuracy Rules Help": "Afegeix regles al prompt del guió: afirmar només fets ben establerts i indicar estimacions o punts debatuts, evitar idees errònies populars i mantenir les metàfores reconeixibles com a tals. Amb un prompt de sistema personalitzat, les regles s'afegeixen en una secció a part.",
     "Custom Script Requirements Placeholder": "Per exemple: un to proper, estil TikTok, adreçat a joves i amb un inici que desperti curiositat",
     "Custom System Prompt": "Instruccions del sistema",
     "Restore Default System Prompt": "Restableix les instruccions per defecte",

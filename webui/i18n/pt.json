@@ -54,6 +54,8 @@
     "Advanced Script Settings": "Configurações avançadas do roteiro",
     "Script Paragraph Number": "Número de parágrafos do roteiro",
     "Custom Script Requirements": "Requisitos personalizados do roteiro",
+    "Script Accuracy Rules": "Regras de rigor científico",
+    "Script Accuracy Rules Help": "Adiciona regras ao prompt do roteiro: afirmar apenas fatos bem estabelecidos e indicar estimativas ou pontos em debate, evitar equívocos populares e manter as metáforas reconhecíveis como metáforas. Com um prompt de sistema personalizado, as regras são adicionadas numa seção separada.",
     "Custom Script Requirements Placeholder": "Exemplo: use um tom mais leve, estilo TikTok, voltado para o público jovem e com uma abertura mais intrigante",
     "Custom System Prompt": "Prompt do sistema",
     "Restore Default System Prompt": "Restaurar prompt padrão",

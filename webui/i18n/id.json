@@ -54,6 +54,8 @@
     "Advanced Script Settings": "Pengaturan Skrip Lanjutan",
     "Script Paragraph Number": "Jumlah Paragraf Skrip",
     "Custom Script Requirements": "Persyaratan Skrip Khusus",
+    "Script Accuracy Rules": "Aturan Akurasi Ilmiah",
+    "Script Accuracy Rules Help": "Menambahkan aturan ke prompt naskah: hanya menyatakan fakta yang mapan dan menandai perkiraan atau hal yang masih diperdebatkan, menghindari miskonsepsi populer, serta menjaga metafora tetap dikenali sebagai metafora. Dengan prompt sistem kustom, aturan ditambahkan sebagai bagian tersendiri.",
     "Custom Script Requirements Placeholder": "Contoh: gunakan nada ringan, cocok untuk gaya TikTok, target penonton muda, buat pembukaan lebih menegangkan",
     "Custom System Prompt": "Prompt Sistem",
     "Restore Default System Prompt": "Pulihkan Prompt Bawaan",

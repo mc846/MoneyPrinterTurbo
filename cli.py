@@ -350,6 +350,17 @@ Batch manifests:
         default=None,
         help="replace the default LLM system prompt for script generation",
     )
+    content_group.add_argument(
+        "--script-accuracy-rules",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "add scientific-accuracy rules to the script system prompt: established "
+            "facts only, no popular misconceptions, metaphors kept as metaphors; with "
+            "--custom-system-prompt they are appended as a separate section "
+            "(default: disabled)"
+        ),
+    )
 
     material_group = parser.add_argument_group("materials and pipeline")
     material_group.add_argument(
@@ -972,6 +983,7 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         "paragraph_number",
         "video_script_prompt",
         "custom_system_prompt",
+        "script_accuracy_rules",
         "video_fit_mode",
         "image_motion",
         "video_concat_mode",

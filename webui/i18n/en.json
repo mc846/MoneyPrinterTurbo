@@ -48,6 +48,8 @@
     "Advanced Script Settings": "Advanced Script Settings",
     "Script Paragraph Number": "Script Paragraph Count",
     "Custom Script Requirements": "Custom Script Requirements",
+    "Script Accuracy Rules": "Scientific Accuracy Rules",
+    "Script Accuracy Rules Help": "Adds rules to the script prompt: state only well-established facts and mark estimates or debated points, avoid popular misconceptions, and keep metaphors recognisable as metaphors. With a custom system prompt, the rules are appended as a separate section.",
     "Custom Script Requirements Placeholder": "Example: use a lighter tone, fit TikTok style, target young viewers, make the opening more suspenseful",
     "Custom System Prompt": "System Prompt",
     "Restore Default System Prompt": "Restore Default Prompt",

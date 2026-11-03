@@ -54,6 +54,8 @@
     "Advanced Script Settings": "Configuración avanzada del guion",
     "Script Paragraph Number": "Número de párrafos del guion",
     "Custom Script Requirements": "Requisitos personalizados del guion",
+    "Script Accuracy Rules": "Reglas de rigor científico",
+    "Script Accuracy Rules Help": "Añade reglas al prompt del guion: afirmar solo hechos bien establecidos y señalar estimaciones o puntos debatidos, evitar ideas erróneas populares y mantener las metáforas reconocibles como tales. Con un prompt de sistema personalizado, las reglas se añaden como una sección aparte.",
     "Custom Script Requirements Placeholder": "Ejemplo: usa un tono más ligero, estilo TikTok, dirigido a jóvenes y crea una apertura más intrigante",
     "Custom System Prompt": "Prompt del sistema",
     "Restore Default System Prompt": "Restaurar prompt predeterminado",

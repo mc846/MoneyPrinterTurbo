@@ -707,6 +707,7 @@ def _initialize_session_state():
             llm.DEFAULT_SCRIPT_SYSTEM_PROMPT,
             llm.MAX_SCRIPT_SYSTEM_PROMPT_LENGTH,
         ),
+        "script_accuracy_rules": bool(config.app.get("script_accuracy_rules", False)),
         "match_materials_to_script": bool(
             config.app.get("match_materials_to_script", False)
         ),
@@ -1566,6 +1567,9 @@ def _apply_restored_params(params):
     st.session_state["video_script_prompt"] = params.get("video_script_prompt") or ""
     st.session_state["custom_system_prompt"] = (
         params.get("custom_system_prompt") or llm.DEFAULT_SCRIPT_SYSTEM_PROMPT
+    )
+    st.session_state["script_accuracy_rules"] = bool(
+        params.get("script_accuracy_rules", False)
     )
 
     # 视频设置。素材上传控件不能由服务端写入，因此本地素材需要用户重新选择。
@@ -5492,6 +5496,7 @@ def _render_local_script_generation(params):
                 video_script_prompt=params.video_script_prompt,
                 custom_system_prompt=params.custom_system_prompt,
                 app_config=app_config_snapshot,
+                script_accuracy_rules=params.script_accuracy_rules,
             )
             if not script:
                 # No keyword request for a script that was not generated.
@@ -5933,6 +5938,14 @@ def _render_script_settings(panel, params):
                     _set_runtime_config(
                         "ui", "video_script_prompt", params.video_script_prompt
                     )
+                    params.script_accuracy_rules = st.checkbox(
+                        tr("Script Accuracy Rules"),
+                        help=tr("Script Accuracy Rules Help"),
+                        key="script_accuracy_rules",
+                    )
+                    _set_runtime_config(
+                        "app", "script_accuracy_rules", params.script_accuracy_rules
+                    )
 
                     system_prompt = st.text_area(
                         tr("Custom System Prompt"),
@@ -5973,6 +5986,7 @@ def _render_script_settings(panel, params):
                                 paragraph_number=params.paragraph_number,
                                 video_script_prompt=params.video_script_prompt,
                                 custom_system_prompt=params.custom_system_prompt,
+                                script_accuracy_rules=params.script_accuracy_rules,
                             )
                         )
 
