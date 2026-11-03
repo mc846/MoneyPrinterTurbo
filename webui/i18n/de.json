@@ -54,6 +54,8 @@
     "Advanced Script Settings": "Erweiterte Skripteinstellungen",
     "Script Paragraph Number": "Anzahl der Drehbuchabsätze",
     "Custom Script Requirements": "Individuelle Skriptvorgaben",
+    "Script Accuracy Rules": "Regeln für wissenschaftliche Genauigkeit",
+    "Script Accuracy Rules Help": "Ergänzt den Skript-Prompt um Regeln: nur gesicherte Fakten nennen und Schätzungen oder umstrittene Punkte kennzeichnen, verbreitete Irrtümer vermeiden und Metaphern als Metaphern erkennbar lassen. Bei einem eigenen System-Prompt werden die Regeln als eigener Abschnitt angehängt.",
     "Custom Script Requirements Placeholder": "Beispiel: leichterer Ton, TikTok-Stil, junge Zielgruppe, spannenderer Einstieg",
     "Custom System Prompt": "System-Prompt",
     "Restore Default System Prompt": "Standard-Prompt wiederherstellen",

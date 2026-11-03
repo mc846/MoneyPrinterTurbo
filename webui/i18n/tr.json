@@ -54,6 +54,8 @@
     "Advanced Script Settings": "Gelişmiş Senaryo Ayarları",
     "Script Paragraph Number": "Senaryo Paragraf Sayısı",
     "Custom Script Requirements": "Özel Senaryo Gereksinimleri",
+    "Script Accuracy Rules": "Bilimsel Doğruluk Kuralları",
+    "Script Accuracy Rules Help": "Metin prompt'una kurallar ekler: yalnız yerleşik bilgileri söyle, tahminleri ve tartışmalı noktaları belirt, yaygın yanılgılardan kaçın, mecazları mecaz olarak tanınır bırak. Özel sistem prompt'u kullanılıyorsa kurallar ayrı bir bölüm olarak eklenir.",
     "Custom Script Requirements Placeholder": "Örnek: daha yumuşak bir ton kullan, TikTok tarzına uygun olsun, genç izleyicileri hedeflesin, açılışı daha merak uyandırıcı yap",
     "Custom System Prompt": "Sistem Promptu",
     "Restore Default System Prompt": "Varsayılan Promptu Geri Yükle",

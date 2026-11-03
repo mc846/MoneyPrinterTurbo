@@ -48,6 +48,8 @@
     "Advanced Script Settings": "高级脚本设置",
     "Script Paragraph Number": "文案段落数量",
     "Custom Script Requirements": "自定义文案要求",
+    "Script Accuracy Rules": "科学准确性规则",
+    "Script Accuracy Rules Help": "在文案提示词中加入规则：只陈述公认的事实，并注明估计值或仍有争议的内容；避免常见误解；比喻要能被识别为比喻。使用自定义系统提示词时，规则作为单独一节追加。",
     "Custom Script Requirements Placeholder": "例如：语气更轻松，适合小红书风格，面向年轻用户，开头更有悬念",
     "Custom System Prompt": "系统提示词",
     "Restore Default System Prompt": "恢复默认提示词",
