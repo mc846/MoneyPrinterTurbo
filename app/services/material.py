@@ -370,9 +370,31 @@ def _matches_video_aspect(
     return False
 
 
+# 只有按分辨率筛选库存素材的来源支持跨方向裁剪（crop_materials_to_aspect）。
+CROP_TO_ASPECT_SOURCES = frozenset({"pexels", "pixabay"})
+
+
+def _center_crop_size(
+    width: int, height: int, video_aspect: VideoAspect
+) -> tuple[int, int]:
+    """
+    返回素材按目标画面比例居中裁剪后保留的最大尺寸（宽, 高）。
+
+    与合成阶段 cover 模式的裁剪区域一致：比目标更宽的素材保留完整高度并裁掉
+    左右两侧，更窄的素材保留完整宽度并裁掉上下两侧。使用整数运算向下取整，
+    避免浮点误差把恰好达到或略低于目标分辨率的素材判断错。
+    """
+    target_width, target_height = VideoAspect(video_aspect).to_resolution()
+    if width * target_height > height * target_width:
+        return height * target_width // target_height, height
+    return width, width * target_height // target_width
+
+
 def _filter_materials_by_aspect(
     items: List[MaterialInfo],
     video_aspect: VideoAspect,
+    *,
+    crop_to_aspect: bool = False,
 ) -> List[MaterialInfo]:
     """
     对缓存结果再次校验方向。
@@ -380,6 +402,8 @@ def _filter_materials_by_aspect(
     素材搜索缓存最长保留 24 小时，升级前写入的缓存可能包含方向不匹配的素材。
     在统一缓存入口过滤可以让修复立即生效，也能防御第三方 Provider 或旧缓存
     遗漏远端筛选。无法读取 rendition 尺寸的旧条目按未验证处理并跳过。
+    ``crop_to_aspect`` 开启时改用与搜索阶段相同的规则：居中裁剪后仍满足目标
+    分辨率的素材不论方向都保留。
     """
     aspect = VideoAspect(video_aspect)
     if aspect == VideoAspect.square:
@@ -387,11 +411,22 @@ def _filter_materials_by_aspect(
         # 接受可用候选并交给视频合成阶段裁剪，避免升级后 1:1 任务无素材。
         return list(items)
 
+    video_width, video_height = aspect.to_resolution()
     filtered_items = []
     for item in items:
         source_info = item.source_info if isinstance(item.source_info, dict) else {}
         rendition = source_info.get("rendition")
         rendition = rendition if isinstance(rendition, dict) else {}
+        if crop_to_aspect:
+            try:
+                width = int(rendition.get("width"))
+                height = int(rendition.get("height"))
+            except (OverflowError, TypeError, ValueError):
+                continue
+            crop_width, crop_height = _center_crop_size(width, height, aspect)
+            if crop_width >= video_width and crop_height >= video_height:
+                filtered_items.append(item)
+            continue
         if _matches_video_aspect(
             rendition.get("width"),
             rendition.get("height"),
@@ -405,6 +440,8 @@ def search_videos_pexels(
     search_term: str,
     minimum_duration: int,
     video_aspect: VideoAspect = VideoAspect.portrait,
+    *,
+    crop_to_aspect: bool = False,
 ) -> List[MaterialInfo]:
     aspect = VideoAspect(video_aspect)
     video_width, video_height = aspect.to_resolution()
@@ -415,7 +452,9 @@ def search_videos_pexels(
     }
     # Build URL
     params = {"query": search_term, "per_page": 20}
-    if aspect != VideoAspect.square:
+    # 跨方向裁剪需要另一方向的候选，因此不再让 Pexels 按方向过滤，
+    # 由下面的裁剪尺寸规则在本地筛选，并保留 Pexels 自身的相关度顺序。
+    if aspect != VideoAspect.square and not crop_to_aspect:
         params["orientation"] = aspect.name
     query_url = f"https://api.pexels.com/v1/videos/search?{urlencode(params)}"
     logger.info(f"searching videos on pexels: term={search_term!r}")
@@ -463,11 +502,16 @@ def search_videos_pexels(
                 video_url = video.get("link")
                 if not isinstance(video_url, str) or not video_url:
                     continue
-                if (
-                    (aspect == VideoAspect.square or _matches_video_aspect(w, h, aspect))
-                    and w >= video_width
-                    and h >= video_height
-                ):
+                if crop_to_aspect:
+                    crop_width, crop_height = _center_crop_size(w, h, aspect)
+                    fits_canvas = crop_width >= video_width and crop_height >= video_height
+                else:
+                    fits_canvas = (
+                        (aspect == VideoAspect.square or _matches_video_aspect(w, h, aspect))
+                        and w >= video_width
+                        and h >= video_height
+                    )
+                if fits_canvas:
                     renditions.append((w * h, video, w, h, video_url))
             if renditions:
                 _, video, w, h, video_url = min(renditions, key=lambda candidate: candidate[0])
@@ -508,6 +552,8 @@ def search_videos_pixabay(
     search_term: str,
     minimum_duration: int,
     video_aspect: VideoAspect = VideoAspect.portrait,
+    *,
+    crop_to_aspect: bool = False,
 ) -> List[MaterialInfo]:
     aspect = VideoAspect(video_aspect)
 
@@ -593,6 +639,8 @@ def search_videos_pixabay(
             if not isinstance(video_files, dict):
                 continue
             # loop through each url to determine the best quality
+            chosen = None
+            crop_renditions = []
             for video_type, video in video_files.items():
                 if not isinstance(video, dict):
                     continue
@@ -604,37 +652,50 @@ def search_videos_pixabay(
                 video_url = video.get("url")
                 if not isinstance(video_url, str) or not video_url:
                     continue
+                if crop_to_aspect:
+                    # 跨方向裁剪时任何方向都可用；选裁剪后仍满足目标分辨率的
+                    # 最小规格，避免为一段 1080p 成片下载 4K 原片。
+                    crop_width, crop_height = _center_crop_size(w, h, aspect)
+                    if crop_width >= video_width and crop_height >= video_height:
+                        crop_renditions.append((w * h, video_type, video, w, video_url))
+                    continue
                 # Pixabay 很少返回原生方形视频；1:1 输出继续接受满足分辨率的
                 # 候选并由合成阶段裁剪。横竖屏则必须严格匹配目标方向。
                 orientation_matches = aspect == VideoAspect.square or (
                     _matches_video_aspect(w, h, aspect)
                 )
                 if orientation_matches and w >= video_width and h >= video_height:
-                    item = MaterialInfo()
-                    item.provider = "pixabay"
-                    item.url = video_url
-                    item.duration = duration
-                    item.source_info = {
-                        "provider": "pixabay",
-                        "search_term": search_term,
-                        "asset_id": (
-                            str(v.get("id")) if v.get("id") is not None else None
-                        ),
-                        "source_page": _safe_public_url(v.get("pageURL")),
-                        "creator": _creator_info(
-                            {
-                                "id": v.get("user_id"),
-                                "name": v.get("user"),
-                            }
-                        ),
-                        "rendition": {
-                            "id": video_type,
-                            "width": w,
-                            "height": video.get("height"),
-                        },
-                    }
-                    video_items.append(item)
+                    chosen = (video_type, video, w, video_url)
                     break
+            if crop_renditions:
+                chosen = min(crop_renditions, key=lambda candidate: candidate[0])[1:]
+            if chosen is None:
+                continue
+            video_type, video, w, video_url = chosen
+            item = MaterialInfo()
+            item.provider = "pixabay"
+            item.url = video_url
+            item.duration = duration
+            item.source_info = {
+                "provider": "pixabay",
+                "search_term": search_term,
+                "asset_id": (
+                    str(v.get("id")) if v.get("id") is not None else None
+                ),
+                "source_page": _safe_public_url(v.get("pageURL")),
+                "creator": _creator_info(
+                    {
+                        "id": v.get("user_id"),
+                        "name": v.get("user"),
+                    }
+                ),
+                "rendition": {
+                    "id": video_type,
+                    "width": w,
+                    "height": video.get("height"),
+                },
+            }
+            video_items.append(item)
         return video_items
     except Exception as e:
         error_message = _redact_request_error(e, api_key)
@@ -2054,6 +2115,8 @@ def _search_videos_with_cache(
     search_term: str,
     minimum_duration: int,
     video_aspect: VideoAspect,
+    *,
+    crop_to_aspect: bool = False,
 ) -> List[MaterialInfo]:
     """
     统一处理三个在线素材源的 24 小时搜索缓存。
@@ -2061,6 +2124,7 @@ def _search_videos_with_cache(
     缓存只包裹搜索 API，不改变后续视频下载与去重逻辑。远端返回空列表时不写
     缓存，因为现有 provider 接口使用空列表同时表示“没有结果”和“请求失败”；
     在两者尚未拆分为明确结果类型前，宁可下次重试，也不能把临时故障缓存一天。
+    跨方向裁剪的候选集合不同，使用独立的缓存键；关闭时缓存键与调用方式不变。
     """
     cache_args = {
         "provider": provider,
@@ -2068,6 +2132,10 @@ def _search_videos_with_cache(
         "minimum_duration": minimum_duration,
         "video_aspect": video_aspect,
     }
+    search_options = {}
+    if crop_to_aspect:
+        cache_args["crop_to_aspect"] = True
+        search_options["crop_to_aspect"] = True
 
     def load_cache_safely() -> List[MaterialInfo] | None:
         try:
@@ -2089,6 +2157,7 @@ def _search_videos_with_cache(
         filtered_cached_items = _filter_materials_by_aspect(
             cached_items,
             video_aspect,
+            crop_to_aspect=crop_to_aspect,
         )
         ignored_count = len(cached_items) - len(filtered_cached_items)
         if ignored_count:
@@ -2119,6 +2188,7 @@ def _search_videos_with_cache(
             search_term=search_term,
             minimum_duration=minimum_duration,
             video_aspect=video_aspect,
+            **search_options,
         )
         # Provider 正常会写入当前关键词，但测试替身、第三方扩展或旧实现可能
         # 遗漏或携带错误值。缓存读取会根据缓存键恢复该字段，因此远端结果也在
@@ -2371,6 +2441,7 @@ def download_videos(
     image_motion: ImageMotion = ImageMotion.zoom,
     jalapeno_video_endpoint: volcengine_seedance.SeedanceEndpoint | None = None,
     codex_image_context=None,
+    crop_to_aspect: bool = False,
 ) -> List[str]:
     """
     搜索并下载覆盖配音时长所需的素材，返回本地文件路径。
@@ -2378,7 +2449,13 @@ def download_videos(
     ``progress_callback`` 可选：库存素材（Pexels、Pixabay、Coverr）每下完一个
     文件就以 0~1 的完成比例调用一次，供任务层推进进度条。按需生成的付费
     素材源不报告下载进度。
+
+    ``crop_to_aspect`` 开启时，Pexels 和 Pixabay 也接受另一方向的素材，只要
+    居中裁剪到目标比例后仍满足目标分辨率；其它素材源忽略该选项。
     """
+    search_cache_options = {}
+    if crop_to_aspect and source in CROP_TO_ASPECT_SOURCES:
+        search_cache_options["crop_to_aspect"] = True
     provider = "pexels"
     remote_search_videos = search_videos_pexels
     if source == "pixabay":
@@ -2399,6 +2476,7 @@ def download_videos(
             search_term=search_term,
             minimum_duration=minimum_duration,
             video_aspect=video_aspect,
+            **search_cache_options,
         )
 
     material_directory = config.app.get("material_directory", "").strip()

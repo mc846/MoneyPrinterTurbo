@@ -142,6 +142,8 @@
     "Number of Videos Generated Simultaneously": "Video per esecuzione",
     "Match Materials to Script Order": "Adatta il materiale visivo all'ordine del testo",
     "Match Materials to Script Order Help": "Genera parole chiave e abbina il materiale nell'ordine del testo in modo che le immagini seguano la voce fuori campo.",
+    "Crop Materials to Aspect": "Usa materiali nell’altro orientamento (ritaglio centrale)",
+    "Crop Materials to Aspect Help": "Accetta anche i video di Pexels e Pixabay nell’altro orientamento se un ritaglio centrale al formato di uscita raggiunge ancora la risoluzione di uscita, ad esempio filmati orizzontali 4K per il 9:16. Queste clip vengono sempre ritagliate al centro, anche con «Adatta (bande nere)».",
     "Audio Settings": "**Impostazioni audio**",
     "Voiceover Mode": "Modalità voce fuori campo",
     "Automatic Voiceover": "Automatica",

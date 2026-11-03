@@ -249,6 +249,15 @@ twelvelabs_rerank_terms = false
 # 默认关闭，开启后会减少随机性，使素材顺序更贴近文案结构。
 match_materials_to_script = false
 
+# Accept Pexels/Pixabay footage of either orientation when a centered crop to
+# the output aspect ratio still meets the output resolution. For 9:16
+# (1080x1920), 3840x2160 landscape footage crops to 1215x2160 and is accepted,
+# while 1920x1080 footage is not. The smallest qualifying rendition is
+# downloaded, and such clips are always center-cropped, even when
+# video_fit_mode is "contain".
+# 默认关闭；开启后横竖屏素材只要居中裁剪后满足目标分辨率即可使用。
+crop_materials_to_aspect = false
+
 # Optional Sonilo video-matched original background music.
 # Create a key at https://platform.sonilo.com/dashboard. The WebUI can also save
 # this value, or you can set the SONILO_API_KEY environment variable instead.

@@ -121,21 +121,27 @@ def _cache_key(
     search_term: str,
     minimum_duration: int,
     video_aspect: VideoAspect | str,
+    *,
+    crop_to_aspect: bool = False,
 ) -> str:
     """
     根据会影响搜索结果的业务参数生成稳定文件名。
 
     API Key 只负责鉴权，不影响公开搜索结果，因此不能写入缓存键或缓存内容。
     使用 SHA-256 可以避免关键词直接出现在文件名中，同时保持路径长度固定。
+    跨方向裁剪只在开启时写入缓存键，关闭时的缓存文件名与此前完全一致。
     """
     aspect_value = getattr(video_aspect, "value", video_aspect)
+    key_fields = {
+        "provider": str(provider).strip().lower(),
+        "search_term": str(search_term).strip(),
+        "minimum_duration": int(minimum_duration),
+        "video_aspect": str(aspect_value),
+    }
+    if crop_to_aspect:
+        key_fields["crop_to_aspect"] = True
     cache_key = json.dumps(
-        {
-            "provider": str(provider).strip().lower(),
-            "search_term": str(search_term).strip(),
-            "minimum_duration": int(minimum_duration),
-            "video_aspect": str(aspect_value),
-        },
+        key_fields,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -148,12 +154,15 @@ def _cache_path(
     search_term: str,
     minimum_duration: int,
     video_aspect: VideoAspect | str,
+    *,
+    crop_to_aspect: bool = False,
 ) -> Path:
     digest = _cache_key(
         provider=provider,
         search_term=search_term,
         minimum_duration=minimum_duration,
         video_aspect=video_aspect,
+        crop_to_aspect=crop_to_aspect,
     )
     return _cache_dir() / f"{digest}.json"
 
@@ -163,6 +172,8 @@ def get_material_search_cache_lock(
     search_term: str,
     minimum_duration: int,
     video_aspect: VideoAspect | str,
+    *,
+    crop_to_aspect: bool = False,
 ) -> threading.Lock:
     """返回当前搜索条件对应的进程内锁分片。"""
     digest = _cache_key(
@@ -170,6 +181,7 @@ def get_material_search_cache_lock(
         search_term=search_term,
         minimum_duration=minimum_duration,
         video_aspect=video_aspect,
+        crop_to_aspect=crop_to_aspect,
     )
     return _CACHE_LOCKS[int(digest[:8], 16) % len(_CACHE_LOCKS)]
 
@@ -207,6 +219,7 @@ def load_material_search_cache(
     video_aspect: VideoAspect | str,
     *,
     now: float | None = None,
+    crop_to_aspect: bool = False,
 ) -> list[MaterialInfo] | None:
     """
     读取仍在 24 小时有效期内的素材搜索结果。
@@ -239,6 +252,7 @@ def load_material_search_cache(
             search_term=search_term,
             minimum_duration=minimum_duration,
             video_aspect=video_aspect,
+            crop_to_aspect=crop_to_aspect,
         )
     except Exception as exc:
         # 缓存目录创建、路径解析等异常不能阻断远端素材搜索。这里保留完整异常
@@ -330,6 +344,8 @@ def save_material_search_cache(
     minimum_duration: int,
     video_aspect: VideoAspect | str,
     items: Iterable[MaterialInfo],
+    *,
+    crop_to_aspect: bool = False,
 ) -> bool:
     """
     原子保存一次成功的非空素材搜索结果。
@@ -364,6 +380,7 @@ def save_material_search_cache(
             search_term=search_term,
             minimum_duration=minimum_duration,
             video_aspect=video_aspect,
+            crop_to_aspect=crop_to_aspect,
         )
         cleanup_expired_material_search_cache()
         payload = {

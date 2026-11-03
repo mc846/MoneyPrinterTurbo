@@ -821,6 +821,8 @@ def get_video_materials(
         )
         if params.video_source == "codex_image":
             generation_options["codex_image_context"] = codex_image_context
+        if params.crop_materials_to_aspect:
+            generation_options["crop_to_aspect"] = True
         # 顺序匹配模式只在用户显式开启时生效。这里强制素材下载按关键词顺序
         # 轮询，避免某个早期关键词下载太多素材，把后续脚本主题挤出最终时间线。
         try:
@@ -1068,6 +1070,13 @@ def generate_final_videos(
         # 每条视频占 50% 进度中的一份，合成与最终编码各占一半。片段处理是
         # 合成里最耗时的部分，逐段推进这一半的进度。
         combine_share = 50 / params.video_count / 2
+        combine_options = dict(batch_options)
+        # 跨方向裁剪接受的素材必须居中裁剪，即使用户选择了 contain 也不能留黑边。
+        if (
+            params.crop_materials_to_aspect
+            and params.video_source in material.CROP_TO_ASPECT_SOURCES
+        ):
+            combine_options["crop_cross_orientation_clips"] = True
         video.combine_videos(
             combined_video_path=combined_video_path,
             video_paths=downloaded_videos,
@@ -1082,7 +1091,7 @@ def generate_final_videos(
             progress_callback=_stage_progress_reporter(
                 task_id, _progress, _progress + combine_share
             ),
-            **batch_options,
+            **combine_options,
         )
         if allocate_batch_materials:
             selected_sources = list(dict.fromkeys(used_video_paths))
