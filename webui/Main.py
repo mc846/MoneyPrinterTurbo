@@ -39,6 +39,7 @@ from app.models.llm_provider import (
 from app.models.schema import (
     ImageMotion,
     MaterialInfo,
+    MaterialTagRelevance,
     VideoAspect,
     VideoConcatMode,
     VideoFitMode,
@@ -712,6 +713,9 @@ def _initialize_session_state():
         ),
         "crop_materials_to_aspect": bool(
             config.app.get("crop_materials_to_aspect", False)
+        ),
+        "exclude_ai_generated_materials": bool(
+            config.app.get("exclude_ai_generated_materials", False)
         ),
         "custom_bgm_file_input": _saved_ui_text("custom_bgm_file"),
         "sonilo_bgm_prompt_input": _saved_ui_text(
@@ -1535,6 +1539,13 @@ def _set_stable_widget_value(key, value):
         st.session_state[localized_widget_key(key)] = value
 
 
+def _material_tag_relevance_value(value):
+    """配置或历史任务中的标签相关度设置；非法值回退为 off。"""
+    candidate = str(getattr(value, "value", value) or "").strip().lower()
+    valid = {mode.value for mode in MaterialTagRelevance}
+    return candidate if candidate in valid else MaterialTagRelevance.off.value
+
+
 def _apply_pending_task_restore():
     payload = st.session_state.pop("task_restore_payload", None)
     if not payload:
@@ -1608,6 +1619,13 @@ def _apply_restored_params(params):
     )
     st.session_state["crop_materials_to_aspect"] = bool(
         params.get("crop_materials_to_aspect", False)
+    )
+    _set_stable_widget_value(
+        "material_tag_relevance_select",
+        _material_tag_relevance_value(params.get("material_tag_relevance")),
+    )
+    st.session_state["exclude_ai_generated_materials"] = bool(
+        params.get("exclude_ai_generated_materials", False)
     )
 
     # 音频设置。TTS server 未写入旧任务，根据历史 voice_name 推断。
@@ -6165,6 +6183,39 @@ def _render_video_settings(panel, params):
                 "app",
                 "crop_materials_to_aspect",
                 params.crop_materials_to_aspect,
+            )
+
+            tag_relevance_labels = {
+                MaterialTagRelevance.off.value: tr("Tag Relevance Off"),
+                MaterialTagRelevance.rank.value: tr("Tag Relevance Rank"),
+                MaterialTagRelevance.strict.value: tr("Tag Relevance Strict"),
+            }
+            params.material_tag_relevance = MaterialTagRelevance(
+                stable_selectbox(
+                    tr("Material Tag Relevance"),
+                    options=list(tag_relevance_labels),
+                    default_value=_material_tag_relevance_value(
+                        config.app.get("material_tag_relevance")
+                    ),
+                    key="material_tag_relevance_select",
+                    format_func=lambda value: tag_relevance_labels[value],
+                    help=tr("Material Tag Relevance Help"),
+                )
+            )
+            _set_runtime_config(
+                "app",
+                "material_tag_relevance",
+                params.material_tag_relevance.value,
+            )
+            params.exclude_ai_generated_materials = st.checkbox(
+                tr("Exclude AI-Generated Materials"),
+                help=tr("Exclude AI-Generated Materials Help"),
+                key="exclude_ai_generated_materials",
+            )
+            _set_runtime_config(
+                "app",
+                "exclude_ai_generated_materials",
+                params.exclude_ai_generated_materials,
             )
 
             # 视频转场模式

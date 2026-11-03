@@ -33,6 +33,9 @@ UI_VOICE_MODE_UPLOAD = "upload"
 # 这两种保存的配音方式都表示不要自动配音。
 UI_VOICE_MODES_WITHOUT_TTS = frozenset({UI_VOICE_MODE_NONE, UI_VOICE_MODE_UPLOAD})
 _PIPELINE_STAGES = ("script", "terms", "audio", "subtitle", "materials", "video")
+# 与 app.models.schema.MaterialTagRelevance 保持一致；这里不导入模型，避免
+# ``cli.py -h`` 初始化应用配置。
+_MATERIAL_TAG_RELEVANCE_MODES = ("off", "rank", "strict")
 _CUSTOM_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
 _BATCH_FILE_MAX_BYTES = 1024 * 1024
 _BATCH_TASK_MAX_COUNT = 100
@@ -508,6 +511,26 @@ Batch manifests:
             "fall back to footage of the other orientation whose centered crop to "
             "--video-aspect still meets the output resolution; such clips are always "
             "center-cropped (default: disabled)"
+        ),
+    )
+    video_group.add_argument(
+        "--material-tag-relevance",
+        default=None,
+        choices=_MATERIAL_TAG_RELEVANCE_MODES,
+        help=(
+            "order Pixabay candidates by how many words of their search term appear "
+            "in their tags (rank), or also drop candidates whose tags miss any word "
+            "(strict); no effect for sources without tags such as Pexels and Coverr "
+            "(default: off)"
+        ),
+    )
+    video_group.add_argument(
+        "--exclude-ai-generated-materials",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "skip Pixabay footage that Pixabay flags as AI-generated; no effect for "
+            "other sources (default: disabled)"
         ),
     )
     video_group.add_argument(
@@ -1025,6 +1048,8 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         "video_clip_speed",
         "match_materials_to_script",
         "crop_materials_to_aspect",
+        "material_tag_relevance",
+        "exclude_ai_generated_materials",
         "n_threads",
         "voice_volume",
         "voice_rate",
