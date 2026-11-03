@@ -3547,8 +3547,7 @@ def _download_videos_by_script_order(
     """
     logger.info("downloading videos with script-order material matching")
     candidate_groups = []
-    valid_video_urls = set()
-    found_duration = 0.0
+    candidate_durations = {}
 
     for search_term, video_items in _search_terms_in_parallel(
         search_terms=search_terms,
@@ -3556,19 +3555,23 @@ def _download_videos_by_script_order(
         minimum_duration=max_clip_duration,
         video_aspect=video_aspect,
     ):
+        # 这里只在同一关键词内去重。跨关键词的重复素材到选中时再排除：
+        # 前一个关键词只是列出、并未选中的素材，仍然可以作为后续关键词的候选。
         term_items = []
+        term_urls = set()
         for item in video_items:
-            if item.url in valid_video_urls:
+            if item.url in term_urls:
                 continue
             term_items.append(item)
-            valid_video_urls.add(item.url)
-            found_duration += item.duration
+            term_urls.add(item.url)
+            candidate_durations.setdefault(item.url, item.duration)
 
         if term_items:
             candidate_groups.append((search_term, term_items))
 
+    found_duration = sum(candidate_durations.values())
     logger.info(
-        f"found total ordered video candidates: {sum(len(items) for _, items in candidate_groups)}, "
+        f"found total ordered video candidates: {len(candidate_durations)}, "
         f"required duration: {audio_duration} seconds, found duration: {found_duration} seconds"
     )
 
@@ -3581,24 +3584,31 @@ def _download_videos_by_script_order(
     # 每个关键词独立推进候选下标：只有本轮真正被选中下载的候选才推进，
     # 未被选中的候选保留到下一轮，避免被整轮统一的下标跳过。
     next_candidate_indices = [0] * len(candidate_groups)
+    # 已选中下载的素材（含下载失败的）不再分配给其它关键词，避免重复下载。
+    selected_video_urls = set()
     while candidate_groups and total_duration <= audio_duration:
-        round_materials = [
-            (
-                group_position,
-                search_term,
-                term_items[next_candidate_indices[group_position]],
-            )
-            for group_position, (search_term, term_items) in enumerate(
-                candidate_groups
-            )
-            if next_candidate_indices[group_position] < len(term_items)
-        ]
+        round_materials = []
+        round_video_urls = set()
+        for group_position, (search_term, term_items) in enumerate(candidate_groups):
+            candidate_index = next_candidate_indices[group_position]
+            # 跳过已被选中的素材，以及本轮前面关键词刚取到的同一素材。
+            while candidate_index < len(term_items) and (
+                term_items[candidate_index].url in selected_video_urls
+                or term_items[candidate_index].url in round_video_urls
+            ):
+                candidate_index += 1
+            if candidate_index < len(term_items):
+                item = term_items[candidate_index]
+                round_materials.append(
+                    (group_position, candidate_index, search_term, item)
+                )
+                round_video_urls.add(item.url)
         if not round_materials:
             break
 
         selected_materials = _select_materials_until_duration(
             materials=[
-                (search_term, item) for _, search_term, item in round_materials
+                (search_term, item) for _, _, search_term, item in round_materials
             ],
             max_clip_duration=max_clip_duration,
             audio_duration=audio_duration,
@@ -3607,8 +3617,11 @@ def _download_videos_by_script_order(
         # _select_materials_until_duration 返回候选列表的前缀子集，
         # 因此前 len(selected_materials) 个即本轮实际尝试下载的候选，
         # 只推进这些候选所在分组的下标。
-        for group_position, _, _ in round_materials[: len(selected_materials)]:
-            next_candidate_indices[group_position] += 1
+        for group_position, candidate_index, _, item in round_materials[
+            : len(selected_materials)
+        ]:
+            next_candidate_indices[group_position] = candidate_index + 1
+            selected_video_urls.add(item.url)
 
         downloaded_materials = _download_materials_in_parallel(
             materials=selected_materials,
