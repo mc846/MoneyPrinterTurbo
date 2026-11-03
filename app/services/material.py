@@ -3526,6 +3526,22 @@ def _download_videos_metaso_minimax_on_demand(
     return video_paths
 
 
+def _even_spread_indices(count: int, needed: int) -> List[int]:
+    """
+    从按文案顺序排列的 ``count`` 个关键词中等间距选出 ``needed`` 个下标。
+
+    下标为 round(i·(count−1)/(needed−1))，首尾关键词总会被选中；只需要一段素材时
+    选第一个关键词。``needed >= count`` 时全部保留。
+    """
+    if needed >= count:
+        return list(range(count))
+    if needed <= 1:
+        return [0]
+    step = (count - 1) / (needed - 1)
+    # step > 1，四舍五入后的下标严格递增，不会重复。
+    return [round(index * step) for index in range(needed)]
+
+
 def _download_videos_by_script_order(
     task_id: str,
     search_terms: List[str],
@@ -3575,6 +3591,25 @@ def _download_videos_by_script_order(
         f"required duration: {audio_duration} seconds, found duration: {found_duration} seconds"
     )
 
+    # 配音只需要 k 段素材而关键词更多时，按顺序轮询会让最后几个关键词因时长已满
+    # 而整体落选。这里等间距选出 k 个关键词（首尾必选）排在第一轮，其余关键词保持
+    # 原顺序作为后备排在后面：短素材需要更多片段或下载失败时才会用到。
+    needed_clips = max(1, math.ceil(audio_duration / max(1, max_clip_duration)))
+    reserve_positions = set()
+    if needed_clips < len(candidate_groups):
+        spread_indices = _even_spread_indices(len(candidate_groups), needed_clips)
+        spread_set = set(spread_indices)
+        reserve_groups = [
+            group for index, group in enumerate(candidate_groups) if index not in spread_set
+        ]
+        candidate_groups = [candidate_groups[index] for index in spread_indices] + reserve_groups
+        reserve_positions = set(range(len(spread_indices), len(candidate_groups)))
+        logger.info(
+            f"script-order matching needs {needed_clips} clips for {len(candidate_groups)} terms; "
+            f"evenly spaced terms: {[term for term, _ in candidate_groups[:len(spread_indices)]]}, "
+            f"reserve terms: {[term for term, _ in reserve_groups]}"
+        )
+
     video_paths = []
     material_sources: list[dict[str, Any]] = []
     total_duration = 0.0
@@ -3586,10 +3621,17 @@ def _download_videos_by_script_order(
     next_candidate_indices = [0] * len(candidate_groups)
     # 已选中下载的素材（含下载失败的）不再分配给其它关键词，避免重复下载。
     selected_video_urls = set()
+    attempted_positions = set()
     while candidate_groups and total_duration <= audio_duration:
         round_materials = []
         round_video_urls = set()
-        for group_position, (search_term, term_items) in enumerate(candidate_groups):
+        group_positions = range(len(candidate_groups))
+        if reserve_positions:
+            # 第一轮之后（例如有素材下载失败），尚未用过的后备关键词排在已用过的
+            # 关键词前面，先补上被跳过的文案主题，而不是重复前面的关键词。
+            group_positions = sorted(group_positions, key=attempted_positions.__contains__)
+        for group_position in group_positions:
+            search_term, term_items = candidate_groups[group_position]
             candidate_index = next_candidate_indices[group_position]
             # 跳过已被选中的素材，以及本轮前面关键词刚取到的同一素材。
             while candidate_index < len(term_items) and (
@@ -3622,6 +3664,7 @@ def _download_videos_by_script_order(
         ]:
             next_candidate_indices[group_position] = candidate_index + 1
             selected_video_urls.add(item.url)
+            attempted_positions.add(group_position)
 
         downloaded_materials = _download_materials_in_parallel(
             materials=selected_materials,
