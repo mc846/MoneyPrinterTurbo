@@ -390,6 +390,30 @@ def _center_crop_size(
     return width, width * target_height // target_width
 
 
+def _split_by_native_orientation(
+    items: List[MaterialInfo], video_aspect: VideoAspect
+) -> tuple[List[MaterialInfo], List[MaterialInfo]]:
+    """
+    把候选拆成（与目标同方向的素材, 需要跨方向裁剪的素材），两组都保持原顺序。
+
+    跨方向裁剪只是同方向素材不够用时的后备：裁剪会丢掉大部分画面，并且只有
+    4K 横屏素材才能裁出 1080x1920。方形输出不区分方向，全部视为同方向。
+    """
+    aspect = VideoAspect(video_aspect)
+    if aspect == VideoAspect.square:
+        return list(items), []
+    native_items, cropped_items = [], []
+    for item in items:
+        source_info = item.source_info if isinstance(item.source_info, dict) else {}
+        rendition = source_info.get("rendition")
+        rendition = rendition if isinstance(rendition, dict) else {}
+        if _matches_video_aspect(rendition.get("width"), rendition.get("height"), aspect):
+            native_items.append(item)
+        else:
+            cropped_items.append(item)
+    return native_items, cropped_items
+
+
 def _filter_materials_by_aspect(
     items: List[MaterialInfo],
     video_aspect: VideoAspect,
@@ -2451,7 +2475,9 @@ def download_videos(
     素材源不报告下载进度。
 
     ``crop_to_aspect`` 开启时，Pexels 和 Pixabay 也接受另一方向的素材，只要
-    居中裁剪到目标比例后仍满足目标分辨率；其它素材源忽略该选项。
+    居中裁剪到目标比例后仍满足目标分辨率；其它素材源忽略该选项。这类素材
+    只作后备：按脚本顺序匹配时，每个关键词先用完自己的同方向素材；默认的
+    合并候选池不按关键词分配，因此整个候选池的同方向素材排在前面。
     """
     search_cache_options = {}
     if crop_to_aspect and source in CROP_TO_ASPECT_SOURCES:
@@ -2470,7 +2496,7 @@ def download_videos(
         minimum_duration: int,
         video_aspect: VideoAspect,
     ) -> List[MaterialInfo]:
-        return _search_videos_with_cache(
+        items = _search_videos_with_cache(
             provider=provider,
             search_videos=remote_search_videos,
             search_term=search_term,
@@ -2478,6 +2504,14 @@ def download_videos(
             video_aspect=video_aspect,
             **search_cache_options,
         )
+        if search_cache_options:
+            # 每个关键词先排同方向素材，再排裁剪素材；组内保持素材源顺序。
+            # 放在缓存之后排序，旧缓存里按素材源顺序保存的结果同样生效。
+            native_items, cropped_items = _split_by_native_orientation(
+                items, video_aspect
+            )
+            return native_items + cropped_items
+        return items
 
     material_directory = config.app.get("material_directory", "").strip()
     if material_directory == "task":
@@ -2607,7 +2641,18 @@ def download_videos(
     material_sources: list[dict[str, Any]] = []
 
     concat_mode_value = getattr(video_concat_mode, "value", video_concat_mode)
-    if concat_mode_value == VideoConcatMode.random.value:
+    if search_cache_options:
+        # 合并候选池不按关键词分配素材，"同方向优先"因此作用于整个候选池：
+        # 所有同方向素材排在前面，只有它们不足以覆盖配音时长（或下载失败）
+        # 时才会用到裁剪素材。随机模式在两组内分别打乱，不让两组互相混合。
+        native_items, cropped_items = _split_by_native_orientation(
+            valid_video_items, video_aspect
+        )
+        if concat_mode_value == VideoConcatMode.random.value:
+            random.shuffle(native_items)
+            random.shuffle(cropped_items)
+        valid_video_items = native_items + cropped_items
+    elif concat_mode_value == VideoConcatMode.random.value:
         random.shuffle(valid_video_items)
 
     total_duration = 0.0

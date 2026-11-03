@@ -497,9 +497,10 @@ Batch manifests:
         default=None,
         action=argparse.BooleanOptionalAction,
         help=(
-            "accept Pexels/Pixabay footage of either orientation when a centered crop "
-            "to --video-aspect still meets the output resolution; such clips are "
-            "always center-cropped (default: disabled)"
+            "when there are not enough native-orientation Pexels/Pixabay candidates, "
+            "fall back to footage of the other orientation whose centered crop to "
+            "--video-aspect still meets the output resolution; such clips are always "
+            "center-cropped (default: disabled)"
         ),
     )
     video_group.add_argument(

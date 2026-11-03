@@ -249,13 +249,17 @@ twelvelabs_rerank_terms = false
 # 默认关闭，开启后会减少随机性，使素材顺序更贴近文案结构。
 match_materials_to_script = false
 
-# Accept Pexels/Pixabay footage of either orientation when a centered crop to
-# the output aspect ratio still meets the output resolution. For 9:16
-# (1080x1920), 3840x2160 landscape footage crops to 1215x2160 and is accepted,
-# while 1920x1080 footage is not. The smallest qualifying rendition is
-# downloaded, and such clips are always center-cropped, even when
-# video_fit_mode is "contain".
-# 默认关闭；开启后横竖屏素材只要居中裁剪后满足目标分辨率即可使用。
+# Fall back to Pexels/Pixabay footage of the other orientation when there are
+# not enough native-orientation candidates. Such footage qualifies when a
+# centered crop to the output aspect ratio still meets the output resolution:
+# for 9:16 (1080x1920), 3840x2160 landscape footage crops to 1215x2160 and
+# qualifies, while 1920x1080 footage does not. Native-orientation candidates
+# always come first: with match_materials_to_script, cropped footage is used
+# only after a search term runs out of native candidates; otherwise only when
+# the native candidates of all terms cannot cover the voiceover. The smallest
+# qualifying rendition is downloaded, and cropped clips are always
+# center-cropped, even when video_fit_mode is "contain".
+# 默认关闭；开启后同方向素材不够用时，才用居中裁剪后满足目标分辨率的另一方向素材。
 crop_materials_to_aspect = false
 
 # Optional Sonilo video-matched original background music.
