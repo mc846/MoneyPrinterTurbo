@@ -379,15 +379,22 @@ def reuse_existing_llm_provider(config_path: Path) -> str:
     return current_provider
 
 
-def selected_video_source(cli_args: list[str]) -> str:
-    """Read the effective material source from forwarded CLI arguments."""
-    source = "pexels"
+def selected_video_source(cli_args: list[str], config_text: str = "") -> str:
+    """
+    Read the effective material source the same way cli.py resolves it:
+    forwarded --video-source, then [app].video_source, then pexels.
+    """
+    source = None
     for index, item in enumerate(cli_args):
         if item == "--video-source" and index + 1 < len(cli_args):
             source = cli_args[index + 1].strip().lower()
         if item.startswith("--video-source="):
             source = item.split("=", 1)[1].strip().lower()
-    return source
+    if source is not None:
+        return source
+    # cli.py ignores saved sources it does not support and falls back to pexels.
+    saved = _plain_config_value(config_text, "video_source").strip().lower()
+    return saved if saved in SUPPORTED_SOURCES else "pexels"
 
 
 def has_cli_option(cli_args: list[str], option: str) -> bool:
@@ -405,10 +412,10 @@ def _last_cli_value(cli_args: list[str], option: str) -> str:
     return value.strip()
 
 
-def _requires_llm(cli_args: list[str]) -> bool:
+def _requires_llm(cli_args: list[str], config_text: str = "") -> bool:
     # Match task.generate_script and the local-material terms bypass.
     return not _last_cli_value(cli_args, "--video-script") or (
-        selected_video_source(cli_args) != "local"
+        selected_video_source(cli_args, config_text) != "local"
         and not _last_cli_value(cli_args, "--video-terms")
     )
 
@@ -418,7 +425,7 @@ def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[st
     text = config_path.read_text(encoding="utf-8")
     provider = (_plain_config_value(text, "llm_provider") or "moonshot").lower()
     missing: list[str] = []
-    needs_llm = _requires_llm(cli_args)
+    needs_llm = _requires_llm(cli_args, text)
     if needs_llm and provider not in KEYLESS_LLM_PROVIDERS and not _has_configured_value(
         _plain_config_value(text, f"{provider}_api_key")
     ):
@@ -432,7 +439,7 @@ def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[st
             if not _has_configured_value(_plain_config_value(text, field)):
                 missing.append(field)
 
-    source = selected_video_source(cli_args)
+    source = selected_video_source(cli_args, text)
     if source not in SUPPORTED_SOURCES:
         raise SkillError(f"unsupported video source: {source}")
     if source == "local" and not has_cli_option(cli_args, "--video-materials"):
@@ -669,10 +676,10 @@ def validate_pexels_config(config_path: Path, cli_args: list[str]) -> bool:
     one key is verified, remove only explicitly rejected keys. If validation is impossible
     because of a transient network failure, keep the original configuration.
     """
-    if selected_video_source(cli_args) != "pexels":
+    text = config_path.read_text(encoding="utf-8")
+    if selected_video_source(cli_args, text) != "pexels":
         return True
 
-    text = config_path.read_text(encoding="utf-8")
     keys = _parse_string_list(_plain_config_value(text, "pexels_api_keys"))
     if not keys:
         return False
