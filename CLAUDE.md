@@ -7,7 +7,7 @@ MoneyPrinterTurbo, bir konu ya da anahtar kelimeden kendiliğinden kısa video �
 **Giriş noktaları**
 - `main.py`: FastAPI uygulamasını (`app.asgi:app`) uvicorn ile `listen_host:listen_port` adresinde başlatır.
 - `webui/Main.py`: Streamlit WebUI (tek dosya, ~9,5 bin satır). API'yi kullanmaz, görevi aynı süreçte `app/services/webui_task.py` → `task.start` üzerinden çalıştırır. Metinler `tr("key")` ile `webui/i18n/*.json` dosyalarından gelir.
-- `cli.py`: tarayıcısız üretim yolu, `run_cli` → `build_video_params` → `task.start`. `--stop-at` şu aşamalardan biri olabilir: script, terms, audio, subtitle, materials, video. `--batch-file` JSON ya da JSONL alır.
+- `cli.py`: tarayıcısız üretim yolu, `run_cli` → `build_video_params` → `task.start`. `--stop-at` şu aşamalardan biri olabilir: script, terms, audio, subtitle, materials, video. `--batch-file` JSON ya da JSONL alır. `--video-source` verilmezse `[app].video_source` kullanılır, o da yoksa `pexels`.
 - `app/launcher.py`: pip ile kurulan `mpt` komutunun girişi (`mpt webui`, `mpt cli`).
 
 **API katmanı**
@@ -80,14 +80,14 @@ Yerel çalıştırma ve Docker aynı portları kullanır: WebUI 8501, API 8080 (
 
 ## Test baz durumu
 
-03.11.2026, Windows 11, Python 3.11.18. Redis yok, API anahtarı yok, PATH'te ffmpeg yok. `pytest -q test` yaklaşık 14 dakika sürer.
-**3098 geçti, 4 kaldı, 148 atlandı** (ayrıca 12 884 alt test geçti). CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
+03.11.2026, Windows 11, Python 3.11.18. Redis yok, API anahtarı yok, PATH'te ffmpeg yok. `pytest -q test` 12–18 dakika sürer.
+**3114 geçti, 3 kaldı, 148 atlandı** (ayrıca 12 884 alt test geçti; iki düzeltmenin 15 yeni testi dahil). CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
 
 Kalan 4 testin hiçbiri bir özelliğin bozulduğunu göstermiyor; nedenleri Windows ya da ortam:
 - `test_image_sanitize_identity.py::test_long_source_name_renders_without_exceeding_filesystem_name_limit`: tam yol 260 karakteri aşıyor ve `LongPathsEnabled=0` (MAX_PATH sınırı).
 - `test_material.py::TestMaterialTlsVerification::test_metadata_probe_failure_preserves_existing_cache`: test yolun `\` ile kurulmasını bekliyor, kod `/` kullanıyor.
 - `test_utils_ffmpeg_check.py::TestGetFfmpegBinaryEnvExpansion::test_normalizes_home_path_in_os_environ`: test `HOME`'u değiştiriyor, oysa Windows'ta `expanduser` `USERPROFILE`'ı okur.
-- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 3098–3099 geçti, 3–4 kaldı arasında değişir.
+- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 3113–3114 geçti, 3–4 kaldı arasında değişir.
 
 Atlananların dağılımı: 91 native ffmpeg/ffprobe ister, 38 Redis ister (`MPT_TEST_REDIS_HOST`), 8 Kokoro test sunucusu ister, 7 canlı sağlayıcı ister (`MPT_RUN_INTEGRATION_TESTS=1`), 3 `twelvelabs` extra'sı kurulu olmadığı için, 1 Windows'ta geçersiz bir yol yüzünden atlanıyor.
 
@@ -101,6 +101,19 @@ Testler `test/conftest.py` fixture'ı sayesinde izole çalışır; gerçek `conf
 - upstream güncellemeleri merge ile alınır: `git switch main; git fetch upstream; git merge upstream/main; git push origin main`.
 - Commit mesajları upstream'in biçimini izler: `fix(webui): …`, `feat(tts): …`, `docs: …`, `test: …`.
 - upstream `.gitignore`'u `CLAUDE.md`'yi yok sayar; fork bu dosyayı `git add -f` ile izliyor. upstream'e PR açılacaksa dalı `upstream/main`'den aç ki bu commit PR'a girmesin.
+- `upstream/main` tabanlı dallarda `test/conftest.py` yoktur ve testler gerçek `config.toml`'u okur ya da bozar. Bu dallarda testleri geçici bir `MPT_HOME` ile çalıştır: dizine `config.example.toml`'u `config.toml` olarak kopyala, sonra `$env:MPT_HOME="<dizin>"; uv run python -X utf8 -m pytest -q <testler>`.
+
+## Planlanan iyileştirmeler
+
+Sırası önceliğe göre. `[x]` ile işaretliler tamamlandı ve `main`'e alındı.
+
+- [x] Sıra koruma kipinde tekilleştirme (`fix/script-order-dedup`): `material._download_videos_by_script_order` artık yalnız seçilip indirmeye gönderilen URL'leri sonraki terimlerden çıkarıyor. Eskiden önceki terimin listelediği her aday siliniyordu.
+- [x] CLI kaynak varsayılanı (`fix/cli-video-source-default`): `--video-source` verilmezse `[app].video_source` okunuyor. PR öncesi `docs/skill/mpt_agent.py::selected_video_source` da aynı varsayılanı izlemeli; şu an bayrak yoksa `pexels` sayıyor.
+- [ ] Yatay 4K kabulü: 9:16 çıktıda, kırpıldıktan sonra da hedef çözünürlüğü sağlayan yatay kopyalar kabul edilsin. Örneğin 3840×2160'tan kırpınca 1215×2160 kalır. Kırpmayı `video_fit_mode=cover` yapar (`material.search_videos_pixabay`, `search_videos_pexels`).
+- [ ] Pixabay `tags` ile uygunluk filtresi: terim kelimeleriyle örtüşmeyen adaylar elensin ya da sona atılsın, `ai generated` etiketli klipler isteğe bağlı olarak dışlansın.
+- [ ] `per_page` ve Pixabay `category` config'e taşınsın; şu an `per_page` kodda sabit (Pixabay 50, Pexels ve Coverr 20).
+- [ ] `llm.generate_terms` prompt'u: "always add the main subject" kuralı yumuşatılsın, stok sitelerinin etiketlediği somut görsel isimler istensin.
+- [ ] Çoklu kaynak desteği: `video_source` bir liste ya da sırayla denenen kaynaklar olsun (`material.download_videos`, `task._SUPPORTED_VIDEO_SOURCES`, `VideoParams`, `cli.py`).
 
 ## Kod kuralları
 
