@@ -44,6 +44,7 @@ from app.models.schema import (
     VideoConcatMode,
     VideoFitMode,
     VideoParams,
+    VideoTermsStyle,
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
@@ -692,6 +693,7 @@ def _initialize_session_state():
         "video_subject": "",
         "video_script": "",
         "video_terms": "",
+        "video_anchors": "",
         "paragraph_number_input": _saved_ui_number(
             "paragraph_number",
             1,
@@ -1546,6 +1548,13 @@ def _material_tag_relevance_value(value):
     return candidate if candidate in valid else MaterialTagRelevance.off.value
 
 
+def _video_terms_style_value(value):
+    """历史任务中的关键词风格；未保存（跟随配置）或非法时返回 None。"""
+    candidate = str(getattr(value, "value", value) or "").strip().lower()
+    valid = {style.value for style in VideoTermsStyle}
+    return candidate if candidate in valid else None
+
+
 def _apply_pending_task_restore():
     payload = st.session_state.pop("task_restore_payload", None)
     if not payload:
@@ -1573,6 +1582,14 @@ def _apply_restored_params(params):
     st.session_state["video_subject"] = params.get("video_subject") or ""
     st.session_state["video_script"] = params.get("video_script") or ""
     st.session_state["video_terms"] = str(video_terms)
+    video_anchors = params.get("video_anchors") or ""
+    if isinstance(video_anchors, list):
+        video_anchors = ", ".join(str(anchor) for anchor in video_anchors)
+    st.session_state["video_anchors"] = str(video_anchors)
+    _set_stable_widget_value(
+        "video_terms_style_select",
+        _video_terms_style_value(params.get("video_terms_style")),
+    )
     _set_stable_widget_value(
         "script_language_select", params.get("video_language") or ""
     )
@@ -1890,7 +1907,9 @@ def _render_top_bar():
                     # 切换语言会先重跑顶部栏，正文控件尚未渲染就触发 rerun。
                     # 显式保留本次创作内容，防止 Streamlit 清理旧控件状态后，
                     # 新语言页面把已经输入的主题、文案和关键词重置为空。
-                    for content_key in ("video_subject", "video_script", "video_terms"):
+                    for content_key in (
+                        "video_subject", "video_script", "video_terms", "video_anchors"
+                    ):
                         if content_key in st.session_state:
                             st.session_state[content_key] = st.session_state[content_key]
                     # 切换语言后强制刷新，避免 selectbox 继续展示旧语言文案。
@@ -5519,7 +5538,16 @@ def _render_local_script_generation(params):
             )
             if not script:
                 # No keyword request for a script that was not generated.
-                return "", []
+                return "", [], None
+            if params.video_terms_style == VideoTermsStyle.visual:
+                terms, anchors = llm.generate_visual_terms(
+                    params.video_subject,
+                    script,
+                    amount=8 if params.match_materials_to_script else 5,
+                    match_script_order=params.match_materials_to_script,
+                    app_config=app_config_snapshot,
+                )
+                return script, terms, anchors
             terms = llm.generate_terms(
                 params.video_subject,
                 script,
@@ -5527,9 +5555,9 @@ def _render_local_script_generation(params):
                 match_script_order=params.match_materials_to_script,
                 app_config=app_config_snapshot,
             )
-            return script, terms
+            return script, terms, None
 
-        script, terms = _run_llm_read_operation(
+        script, terms, anchors = _run_llm_read_operation(
             "generate_script_and_terms",
             generate_script_and_terms,
         )
@@ -5541,6 +5569,9 @@ def _render_local_script_generation(params):
         else:
             st.session_state["video_script"] = script
             st.session_state["video_terms"] = ", ".join(terms)
+            # 旧风格不生成锚点，保留用户已填写的内容。
+            if terms and anchors is not None:
+                st.session_state["video_anchors"] = ", ".join(anchors)
             st.session_state["loomloom_video_scene_autofill_digest"] = (
                 hashlib.sha256(script.strip().encode("utf-8")).hexdigest()
             )
@@ -5947,6 +5978,23 @@ def _render_script_settings(panel, params):
                     _set_runtime_config(
                         "ui", "paragraph_number", params.paragraph_number
                     )
+                    terms_style_labels = {
+                        VideoTermsStyle.legacy.value: tr("Video Terms Style Legacy"),
+                        VideoTermsStyle.visual.value: tr("Video Terms Style Visual"),
+                    }
+                    params.video_terms_style = VideoTermsStyle(
+                        stable_selectbox(
+                            tr("Video Terms Style"),
+                            options=list(terms_style_labels),
+                            default_value=llm.resolve_video_terms_style().value,
+                            key="video_terms_style_select",
+                            format_func=lambda value: terms_style_labels[value],
+                            help=tr("Video Terms Style Help"),
+                        )
+                    )
+                    _set_runtime_config(
+                        "app", "video_terms_style", params.video_terms_style.value
+                    )
                     params.video_script_prompt = st.text_area(
                         tr("Custom Script Requirements"),
                         height=100,
@@ -6026,25 +6074,45 @@ def _render_script_settings(panel, params):
                     st.warning(tr("Please Enter the Video Subject"))
                 else:
                     with st.spinner(tr("Generating Video Keywords")):
-                        terms = _run_llm_read_operation(
-                            "generate_terms",
-                            lambda app_config_snapshot: llm.generate_terms(
-                                params.video_subject,
-                                params.video_script,
-                                amount=8 if params.match_materials_to_script else 5,
-                                match_script_order=params.match_materials_to_script,
-                                app_config=app_config_snapshot,
-                            ),
-                        )
+                        anchors = None
+                        if params.video_terms_style == VideoTermsStyle.visual:
+                            terms, anchors = _run_llm_read_operation(
+                                "generate_terms",
+                                lambda app_config_snapshot: llm.generate_visual_terms(
+                                    params.video_subject,
+                                    params.video_script,
+                                    amount=8 if params.match_materials_to_script else 5,
+                                    match_script_order=params.match_materials_to_script,
+                                    app_config=app_config_snapshot,
+                                ),
+                            )
+                        else:
+                            terms = _run_llm_read_operation(
+                                "generate_terms",
+                                lambda app_config_snapshot: llm.generate_terms(
+                                    params.video_subject,
+                                    params.video_script,
+                                    amount=8 if params.match_materials_to_script else 5,
+                                    match_script_order=params.match_materials_to_script,
+                                    app_config=app_config_snapshot,
+                                ),
+                            )
                         if not terms:
                             st.error(tr("Video Keywords Generation Failed"))
                         else:
                             st.session_state["video_terms"] = ", ".join(terms)
+                            if anchors is not None:
+                                st.session_state["video_anchors"] = ", ".join(anchors)
 
             params.video_terms = st.text_area(
                 tr("Video Keywords"),
                 help=tr("Video Keywords Help"),
                 key="video_terms",
+            )
+            params.video_anchors = st.text_input(
+                tr("Video Anchors"),
+                help=tr("Video Anchors Help"),
+                key="video_anchors",
             )
 
 

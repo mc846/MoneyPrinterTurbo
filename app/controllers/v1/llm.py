@@ -10,6 +10,7 @@ from app.models.schema import (
     VideoSocialMetadataResponse,
     VideoTermsRequest,
     VideoTermsResponse,
+    VideoTermsStyle,
 )
 from app.services import llm
 from app.utils import utils
@@ -47,12 +48,17 @@ def generate_video_script(request: Request, body: VideoScriptRequest):
     summary="Generate video terms based on the video script",
 )
 def generate_video_terms(request: Request, body: VideoTermsRequest):
-    video_terms = llm.generate_terms(
-        video_subject=body.video_subject,
-        video_script=body.video_script,
-        amount=body.amount,
-        match_script_order=body.match_materials_to_script,
-    )
+    terms_kwargs = {
+        "video_subject": body.video_subject,
+        "video_script": body.video_script,
+        "amount": body.amount,
+        "match_script_order": body.match_materials_to_script,
+    }
+    # 响应结构保持 {"video_terms": [...]}；视觉风格生成的锚点不在这里返回。
+    if llm.resolve_video_terms_style(body.video_terms_style) == VideoTermsStyle.visual:
+        video_terms, _anchors = llm.generate_visual_terms(**terms_kwargs)
+    else:
+        video_terms = llm.generate_terms(**terms_kwargs)
     if not video_terms:
         raise HttpException(
             task_id=base.get_task_id(request), status_code=503,

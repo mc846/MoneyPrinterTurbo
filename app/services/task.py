@@ -15,7 +15,12 @@ from loguru import logger
 
 from app.config import config
 from app.models import const
-from app.models.schema import MaterialTagRelevance, VideoConcatMode, VideoParams
+from app.models.schema import (
+    MaterialTagRelevance,
+    VideoConcatMode,
+    VideoParams,
+    VideoTermsStyle,
+)
 from app.services import bgm as bgm_service
 from app.services import (
     codex_image,
@@ -389,12 +394,23 @@ def generate_terms(task_id, params, video_script):
         # 开启素材按文案顺序匹配后，关键词本身也必须按脚本叙事顺序生成；
         # 否则后续即使顺序下载和顺序拼接，也只能复用一组全局主题词，
         # 无法改善“后面内容的画面提前出现”的问题。
-        video_terms = llm.generate_terms(
-            video_subject=params.video_subject,
-            video_script=utils.remove_pause_tags(video_script),
-            amount=8 if params.match_materials_to_script else 5,
-            match_script_order=params.match_materials_to_script,
-        )
+        terms_kwargs = {
+            "video_subject": params.video_subject,
+            "video_script": utils.remove_pause_tags(video_script),
+            "amount": 8 if params.match_materials_to_script else 5,
+            "match_script_order": params.match_materials_to_script,
+        }
+        if (
+            llm.resolve_video_terms_style(params.video_terms_style)
+            == VideoTermsStyle.visual
+        ):
+            video_terms, video_anchors = llm.generate_visual_terms(**terms_kwargs)
+            # 用户自己给出的锚点优先。模型给出的锚点写回 params，素材阶段据此
+            # 排序，并随 script.json 一起保存。
+            if not _video_anchor_list(params.video_anchors) and video_anchors:
+                params.video_anchors = video_anchors
+        else:
+            video_terms = llm.generate_terms(**terms_kwargs)
     else:
         if isinstance(video_terms, str):
             video_terms = [term.strip() for term in re.split(r"[,，]", video_terms)]
@@ -425,6 +441,15 @@ def generate_terms(task_id, params, video_script):
         )
 
     return video_terms
+
+
+def _video_anchor_list(video_anchors) -> list[str]:
+    """锚点与关键词一样接受逗号分隔的字符串或字符串列表。"""
+    if isinstance(video_anchors, str):
+        video_anchors = re.split(r"[,，]", video_anchors)
+    elif not isinstance(video_anchors, list):
+        return []
+    return [str(anchor).strip() for anchor in video_anchors if str(anchor).strip()]
 
 
 def save_script_data(task_id, video_script, video_terms, params):
@@ -825,6 +850,10 @@ def get_video_materials(
             generation_options["crop_to_aspect"] = True
         if params.material_tag_relevance != MaterialTagRelevance.off:
             generation_options["tag_relevance"] = params.material_tag_relevance
+            # 锚点只是标签相关度的次级排序键，相关度关闭时没有作用。
+            video_anchors = _video_anchor_list(params.video_anchors)
+            if video_anchors:
+                generation_options["anchors"] = video_anchors
         if params.exclude_ai_generated_materials:
             generation_options["exclude_ai_generated"] = True
         # 顺序匹配模式只在用户显式开启时生效。这里强制素材下载按关键词顺序

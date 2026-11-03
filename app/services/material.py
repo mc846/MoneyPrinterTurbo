@@ -13,7 +13,7 @@ import time
 import uuid
 import warnings
 from pathlib import Path
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Sequence
 from urllib.parse import quote_plus, urlencode, urlsplit, urlunsplit
 
 import requests
@@ -432,10 +432,20 @@ _RELEVANCE_STOP_WORDS = frozenset({
     "these", "those", "to", "under", "with",
 })
 _RELEVANCE_WORD_SPLIT = re.compile(r"[^\w']+")
+# 后缀规则处理不了的常见不规则复数，例如 "leaves" 会被还原成 "leave"。
+_IRREGULAR_PLURALS = {
+    "leaves": "leaf", "wolves": "wolf", "knives": "knife", "shelves": "shelf",
+    "loaves": "loaf", "calves": "calf", "halves": "half", "people": "person",
+    "men": "man", "women": "woman", "children": "child", "feet": "foot",
+    "teeth": "tooth", "geese": "goose", "mice": "mouse", "oxen": "ox",
+    "cacti": "cactus",
+}
 
 
 def _singular_word(word: str) -> str:
     """简单的英文复数还原；搜索词和标签使用同一规则，能互相匹配即可。"""
+    if word in _IRREGULAR_PLURALS:
+        return _IRREGULAR_PLURALS[word]
     if len(word) > 4 and word.endswith("ies"):
         return word[:-3] + "y"
     if len(word) > 4 and word.endswith(("ches", "shes", "sses", "xes", "zes")):
@@ -528,14 +538,17 @@ def _order_material_candidates(
     tag_relevance: MaterialTagRelevance = MaterialTagRelevance.off,
     exclude_ai_generated: bool = False,
     shuffle: bool = False,
+    anchors: Sequence[str] = (),
 ) -> List[MaterialInfo]:
     """
-    按优先级排列候选：标签相关度 > 方向（同方向优先）> 原有顺序。
+    按优先级排列候选：标签相关度 > 锚点命中数 > 方向（同方向优先）> 原有顺序。
 
     相关度按带来该素材的关键词（``source_info["search_term"]``）计算，因此同一
     函数既用于单个关键词的候选，也用于合并候选池。strict 只保留标签覆盖全部
     内容词的素材。任一候选缺少标签信息时（素材源不提供标签）不做相关度排序。
-    ``shuffle`` 用于合并候选池的随机模式：只在同一优先级内打乱。
+    ``anchors`` 是整个任务共用的地点/主体词（例如 "istanbul"），只在相关度开启
+    时作为次级排序键：锚点的全部内容词都出现在标签里才算命中。锚点不参与
+    strict 过滤。``shuffle`` 用于合并候选池的随机模式：只在同一优先级内打乱。
     """
     relevance = MaterialTagRelevance(tag_relevance)
     if exclude_ai_generated:
@@ -552,12 +565,19 @@ def _order_material_candidates(
     if relevance == MaterialTagRelevance.strict:
         items = [item for item in items if term_relevance(item)[0] == 1]
 
+    anchor_word_sets = [
+        set(words) for words in (_relevance_words(anchor) for anchor in anchors) if words
+    ]
+
     groups: dict[tuple, List[MaterialInfo]] = {}
     for item in items:
         priority = ()
         if relevance != MaterialTagRelevance.off:
             ratio, hits = term_relevance(item)
             priority += (-ratio, -hits)
+            if anchor_word_sets:
+                tag_words = _material_tag_words(item) or set()
+                priority += (-sum(1 for words in anchor_word_sets if words <= tag_words),)
         if crop_to_aspect:
             native_items, _ = _split_by_native_orientation([item], video_aspect)
             priority += (0 if native_items else 1,)
@@ -2647,6 +2667,7 @@ def download_videos(
     crop_to_aspect: bool = False,
     tag_relevance: MaterialTagRelevance = MaterialTagRelevance.off,
     exclude_ai_generated: bool = False,
+    anchors: Sequence[str] | None = None,
 ) -> List[str]:
     """
     搜索并下载覆盖配音时长所需的素材，返回本地文件路径。
@@ -2662,7 +2683,8 @@ def download_videos(
 
     ``tag_relevance`` 按标签相关度排序（rank）或另外剔除不完全匹配的素材
     （strict），``exclude_ai_generated`` 剔除素材源标记为 AI 生成的素材。两者只对
-    Pixabay 生效。排序优先级：相关度 > 方向 > 素材源顺序。
+    Pixabay 生效。``anchors`` 是任务级的地点/主体词，只在相关度开启时作为次级
+    排序键，不参与 strict 过滤。排序优先级：相关度 > 锚点 > 方向 > 素材源顺序。
     """
     crop_enabled = bool(crop_to_aspect) and source in CROP_TO_ASPECT_SOURCES
     tag_relevance = MaterialTagRelevance(tag_relevance or MaterialTagRelevance.off)
@@ -2681,6 +2703,9 @@ def download_videos(
         "tag_relevance": tag_relevance,
         "exclude_ai_generated": bool(exclude_ai_generated),
     }
+    anchors = [str(anchor) for anchor in (anchors or ()) if str(anchor).strip()]
+    if tag_relevance != MaterialTagRelevance.off and anchors:
+        order_options["anchors"] = tuple(anchors)
     provider = "pexels"
     remote_search_videos = search_videos_pexels
     if source == "pixabay":
