@@ -27,6 +27,8 @@ UI_VOICE_MODE_NONE = "none"
 # 保证“非法保存值回退到默认值”对命令行始终成立。
 DEFAULT_SUBTITLE_POSITION = "bottom"
 DEFAULT_CUSTOM_POSITION = 70.0
+# config.toml 的 [app].video_source 缺失或不可用时使用的素材来源。
+DEFAULT_VIDEO_SOURCE = "pexels"
 UI_VOICE_MODE_UPLOAD = "upload"
 # 这两种保存的配音方式都表示不要自动配音。
 UI_VOICE_MODES_WITHOUT_TTS = frozenset({UI_VOICE_MODE_NONE, UI_VOICE_MODE_UPLOAD})
@@ -257,7 +259,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description=(
             "Generate MoneyPrinterTurbo videos without the WebUI.\n\n"
             "Provider settings and credentials are read from config.toml.\n"
-            "Default full-video generation requires a configured LLM and Pexels API key.\n"
+            "Default full-video generation requires a configured LLM and an API key for\n"
+            "the material source ([app].video_source in config.toml, Pexels when unset).\n"
             "The default Edge TTS voice requires no API key."
         ),
         epilog="""
@@ -354,9 +357,13 @@ Batch manifests:
     material_group = parser.add_argument_group("materials and pipeline")
     material_group.add_argument(
         "--video-source",
-        default="pexels",
+        default=None,
         choices=_CLI_VIDEO_SOURCES,
-        help="video material provider; online providers require matching API keys in config.toml",
+        help=(
+            "video material provider; online providers require matching API keys in "
+            "config.toml (default: [app].video_source from config.toml; pexels when "
+            "unset)"
+        ),
     )
     material_group.add_argument(
         "--video-materials",
@@ -726,6 +733,8 @@ Batch manifests:
         ),
     )
     args = parser.parse_args(argv)
+    # 付费来源确认等校验依赖最终使用的来源，因此在校验之前补上配置中的来源。
+    args.video_source = _resolve_video_source(args)
 
     if (
         not args.batch_file
@@ -931,8 +940,33 @@ def _resolve_voice_name(args: argparse.Namespace, ui_config) -> str:
     return _ui_config_value(ui_config, "voice_name", str) or DEFAULT_VOICE_NAME
 
 
+def _resolve_video_source(args: argparse.Namespace) -> str:
+    """
+    按优先级解析素材来源：命令行 > config.toml 的 [app].video_source > 内置默认值。
+
+    WebUI 把选择的素材来源保存在 [app] 段。CLI 只接受自己公开支持的来源，
+    配置中的 WebUI 专属来源（如 loomloom）或非法值回退到默认值。只有未显式
+    指定来源时才读取配置，因此 ``cli.py -h`` 仍不会初始化应用配置。
+    """
+    if args.video_source is not None:
+        return args.video_source
+
+    from app.config import config
+
+    saved = config.app.get("video_source")
+    if isinstance(saved, str) and saved.strip().lower() in _CLI_VIDEO_SOURCES:
+        return saved.strip().lower()
+    if isinstance(saved, str) and saved.strip():
+        logger.warning(
+            f"[app].video_source={saved!r} is not supported by the CLI, "
+            f"using {DEFAULT_VIDEO_SOURCE}"
+        )
+    return DEFAULT_VIDEO_SOURCE
+
+
 def build_video_params(args: argparse.Namespace) -> VideoParams:
-    # 参数帮助和校验不需要加载应用配置。仅在真正构建任务参数时导入模型，
+    # 参数帮助和校验不需要加载应用配置（未指定 --video-source 时除外，见
+    # _resolve_video_source）。仅在真正构建任务参数时导入模型，
     # 避免执行 ``cli.py -h`` 时产生配置初始化日志。
     from app.config import config
     from app.models.schema import MaterialInfo, VideoParams
