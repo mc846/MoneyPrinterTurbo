@@ -42,9 +42,12 @@ Generate a script for a video, depending on the subject of the video.
 7. you must not mention the prompt, or anything about the script itself. also, never talk about the amount of paragraphs or lines. just write the script.
 8. respond in the same language as the video subject."""
 RULE_1 = (
-    "be scientifically accurate: state only well-established facts. If something is an "
-    "estimate, a hypothesis or still debated, say so, and never give figures more "
-    "precisely or confidently than current research supports."
+    "be scientifically accurate without losing the story: state only well-established "
+    "facts, and keep an engaging opening and concrete real-world examples. Say that "
+    "something is an estimate, a hypothesis or still debated only where this changes the "
+    'meaning, briefly and inside the sentence (for example "about", "scientists think"); '
+    "never give figures more precisely or confidently than current research supports, and "
+    "do not end the script with a general caveat or a sentence about uncertainty."
 )
 RULE_2 = (
     "avoid popular misconceptions and include every effect that matters when comparing "
@@ -53,8 +56,9 @@ RULE_2 = (
     "entanglement cannot carry information faster than light)."
 )
 RULE_3 = (
-    "keep metaphors recognisable as metaphors, and do not describe a result or technology "
-    'as absolute ("unbreakable", "infinite", "a single point") unless it is.'
+    'mark a comparison as a comparison through its wording ("like a city", "as if") '
+    "instead of commenting on the comparison itself, and do not describe a result or "
+    'technology as absolute ("unbreakable", "infinite", "a single point") unless it is.'
 )
 INITIALIZATION = "\n\n# Initialization:\n- video subject: Kara delikler\n- number of paragraphs: 1\n- language: tr-TR"
 

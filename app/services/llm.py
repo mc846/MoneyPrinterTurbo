@@ -75,15 +75,19 @@ Generate a script for a video, depending on the subject of the video.
 # 编号接在约束列表末尾；自定义 system prompt 时作为单独一节追加（见
 # _script_system_prompt）。
 SCRIPT_ACCURACY_RULES = (
-    "be scientifically accurate: state only well-established facts. If something is an "
-    "estimate, a hypothesis or still debated, say so, and never give figures more "
-    "precisely or confidently than current research supports.",
+    "be scientifically accurate without losing the story: state only well-established "
+    "facts, and keep an engaging opening and concrete real-world examples. Say that "
+    "something is an estimate, a hypothesis or still debated only where this changes the "
+    'meaning, briefly and inside the sentence (for example "about", "scientists think"); '
+    "never give figures more precisely or confidently than current research supports, and "
+    "do not end the script with a general caveat or a sentence about uncertainty.",
     "avoid popular misconceptions and include every effect that matters when comparing "
     "cases (for example, a clock in orbit is affected by both its speed and gravity; far "
     "from a black hole its gravity equals that of any object with the same mass; "
     "entanglement cannot carry information faster than light).",
-    "keep metaphors recognisable as metaphors, and do not describe a result or technology "
-    'as absolute ("unbreakable", "infinite", "a single point") unless it is.',
+    'mark a comparison as a comparison through its wording ("like a city", "as if") '
+    "instead of commenting on the comparison itself, and do not describe a result or "
+    'technology as absolute ("unbreakable", "infinite", "a single point") unless it is.',
 )
 
 # Claude Code CLI 默认使用编码 agent 的系统提示词，其中大量约束与文案写作
