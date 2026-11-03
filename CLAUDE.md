@@ -22,7 +22,7 @@ MoneyPrinterTurbo, bir konu ya da anahtar kelimeden kendiliğinden kısa video �
 
 **Video görevinin akışı**: `app/services/task.py::start` → `_run_pipeline`. Görev durumu `app/services/state.py`'de (bellekte ya da Redis'te) tutulur, çıktılar `storage/tasks/<task_id>/` altına yazılır.
 1. Metin: `llm.generate_script`
-2. Arama kelimeleri: `llm.generate_terms` (`video_source=local` ise atlanır). İkisi birlikte `script.json`'a kaydedilir.
+2. Arama kelimeleri: `llm.generate_terms` (`video_source=local` ise atlanır). İkisi birlikte `script.json`'a kaydedilir. `video_terms_style = "visual"` iken `llm.generate_visual_terms` çağrılır; terimlerle birlikte yer/özne çapaları (`video_anchors`) döner ve `params`'a yazılır.
 3. Ses: `voice.tts` → `audio.mp3`. Sağlayıcıyı ses adı belirler (`voice._single_tts` içindeki `is_<x>_voice` dalları). Edge (Azure V1) anahtarsız çalışır.
 4. Altyazı: `task.generate_subtitle` → `subtitle.srt`. `app.subtitle_provider` iki değer alabilir: `edge` zaman damgalarını TTS'den alır (`voice.create_subtitle`); `whisper` faster-whisper ile üretir (`subtitle.create`), ardından metne göre düzeltir (`subtitle.correct`).
 5. Materyal: `material.download_videos`. Kaynaklar `task._SUPPORTED_VIDEO_SOURCES`'ta listeli: pexels, pixabay, coverr, local, wavespeed, volcengine_seedance, ofox, metaso_minimax, muapi, loomloom, openai_image, codex_image, infistar, jalapeno. Önbellek `material_cache.py`'de. `crop_materials_to_aspect` açıkken Pexels ve Pixabay için yön filtresi yerine `material._center_crop_size` kuralı kullanılır; kırpılan adaylar yerel yöndekilerden sonra gelir. `material_tag_relevance` ve `exclude_ai_generated_materials` adayları `material._order_material_candidates` içinde sıralar ve süzer (yalnız Pixabay).
@@ -81,13 +81,13 @@ Yerel çalıştırma ve Docker aynı portları kullanır: WebUI 8501, API 8080 (
 ## Test baz durumu
 
 03.11.2026, Windows 11, Python 3.11.18. Redis yok, API anahtarı yok, PATH'te ffmpeg yok. `pytest -q test` 12–18 dakika sürer.
-**3221 geçti, 3 kaldı, 148 atlandı** (ayrıca 13 100 alt test geçti; düzeltmelerin, kırpma ve etiket uygunluğu özelliklerinin 122 yeni testi dahil). CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
+**3289 geçti, 3 kaldı, 148 atlandı** (ayrıca 13 244 alt test geçti; düzeltmelerin, kırpma, etiket uygunluğu ve görsel arama terimi özelliklerinin 190 yeni testi dahil). CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
 
 Kalan 4 testin hiçbiri bir özelliğin bozulduğunu göstermiyor; nedenleri Windows ya da ortam:
 - `test_image_sanitize_identity.py::test_long_source_name_renders_without_exceeding_filesystem_name_limit`: tam yol 260 karakteri aşıyor ve `LongPathsEnabled=0` (MAX_PATH sınırı).
 - `test_material.py::TestMaterialTlsVerification::test_metadata_probe_failure_preserves_existing_cache`: test yolun `\` ile kurulmasını bekliyor, kod `/` kullanıyor.
 - `test_utils_ffmpeg_check.py::TestGetFfmpegBinaryEnvExpansion::test_normalizes_home_path_in_os_environ`: test `HOME`'u değiştiriyor, oysa Windows'ta `expanduser` `USERPROFILE`'ı okur.
-- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 3220–3221 geçti, 3–4 kaldı arasında değişir.
+- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 3288–3289 geçti, 3–4 kaldı arasında değişir.
 - `test_webui_startup.py::TestWebuiStartup::test_external_directory_prefers_project_app_package` tam turun yükü altında bazen alt süreç zaman aşımına (60 sn) takılıyor; tek başına 9–14 sn'de geçiyor.
 
 Atlananların dağılımı: 91 native ffmpeg/ffprobe ister, 38 Redis ister (`MPT_TEST_REDIS_HOST`), 8 Kokoro test sunucusu ister, 7 canlı sağlayıcı ister (`MPT_RUN_INTEGRATION_TESTS=1`), 3 `twelvelabs` extra'sı kurulu olmadığı için, 1 Windows'ta geçersiz bir yol yüzünden atlanıyor.
@@ -102,7 +102,7 @@ Testler `test/conftest.py` fixture'ı sayesinde izole çalışır; gerçek `conf
 - upstream güncellemeleri merge ile alınır: `git switch main; git fetch upstream; git merge upstream/main; git push origin main`.
 - Commit mesajları upstream'in biçimini izler: `fix(webui): …`, `feat(tts): …`, `docs: …`, `test: …`.
 - upstream `.gitignore`'u `CLAUDE.md`'yi yok sayar; fork bu dosyayı `git add -f` ile izliyor. upstream'e PR açılacaksa dalı `upstream/main`'den aç ki bu commit PR'a girmesin.
-- `upstream/main` tabanlı dallarda `test/conftest.py` yoktur ve testler gerçek `config.toml`'u okur ya da bozar. Bu dallarda testleri geçici bir `MPT_HOME` ile çalıştır: dizine `config.example.toml`'u `config.toml` olarak kopyala, sonra `$env:MPT_HOME="<dizin>"; uv run python -X utf8 -m pytest -q <testler>`.
+- `upstream/main` tabanlı dallarda ve bunların üzerine kurulan özellik dallarında (`feat/cross-orientation-crop` → `feat/material-relevance` → `feat/visual-search-terms`) `test/conftest.py` yoktur; testler gerçek `config.toml`'u okur ya da bozar, `storage/tasks`'a da yazar. Bu dallarda testleri geçici bir `MPT_HOME` ile çalıştır: dizine `config.example.toml`'u `config.toml` olarak kopyala, sonra `$env:MPT_HOME="<dizin>"; uv run python -X utf8 -m pytest -q <testler>`.
 
 ## Planlanan iyileştirmeler
 
@@ -125,7 +125,18 @@ Sırası önceliğe göre. `[x]` ile işaretliler tamamlandı ve `main`'e alınd
   - Uçtan uca gözlem (03.11): `rank` ve `strict` "Galata tower" için Belgrad Kulesi yerine Galata etiketli klibi seçti; 6 klipten 5'i İstanbul. Ama o klip kırpılmış ve merkez kırpma kuleyi kadrajın dışında bırakıyor. "autumn leaves" için seçilen Fuji klibi de etiket açısından tam eşleşiyor, yani terim seçimi hâlâ belirleyici.
 - [x] `per_page` config'e taşındı (`feat/material-relevance`): `pixabay_per_page` (50, 3–200), `pexels_per_page` (20, 1–80). Sınır dışı değerler sınıra çekilir. Önbellek anahtarına yalnız varsayılandan farklı değer girer. Coverr'ın `page_size` değeri (20) sabit kaldı.
 - [ ] Pixabay `category` **global ayar yapılmadı**: kategori bütün aramayı süzer, oysa terimler farklı kategorilere düşer (Sultanahmet "places/religion", vapur "transportation", yapraklar "nature"). Tek bir global değer başka terimlerin doğru adaylarını eler. Gerekirse terim başına ya da görev başına bir seçenek olarak düşünülmeli.
-- [ ] `llm.generate_terms` prompt'u: "always add the main subject" kuralı yumuşatılsın, stok sitelerinin etiketlediği somut görsel isimler istensin.
+- [x] Görsel arama terimleri ve çapalar (`feat/visual-search-terms`; ayar `video_terms_style` = `legacy` | `visual`, varsayılan `legacy`; `VideoParams.video_terms_style = None` `[app]` değerini izler).
+  - `visual` prompt'u stok sitelerinin etiketlediği 1-3 kelimelik somut isimler ister. Konuyu her terime ekleme kuralı kalktı; yer adı yalnız birkaç terimde (ünlü yapılar) geçebilir. Yer ve özne ayrı bir `anchors` listesi olarak döner. Sıra koruma kipindeki hedef, terim sayısı (8) ve sıra kuralı legacy ile aynı.
+  - API uyumluluğu: `llm.generate_terms`'in imzası, prompt'u ve `List[str]` dönüşü değişmedi. Yeni `llm.generate_visual_terms` `(terimler, çapalar)` döndürür. Ayrıştırılamayan yanıtta legacy prompt'a düşer; sağlayıcı hatasında hemen boş döner. `/api/v1/terms` isteğe bağlı `video_terms_style` alır, yanıt yine yalnız `{"video_terms": [...]}`. Çapaları API'de almak için `/videos`'a `video_anchors` verilir ya da terimler boş bırakılır.
+  - `video_anchors` (CLI `--video-anchors`, WebUI'da terimlerin altında): `material_tag_relevance` `rank`/`strict` iken sıralama puan > çapa eşleşmesi > yön > sağlayıcı sırası. Çapalar strict filtresine girmez. Üretilen çapalar yalnız terimler de üretildiyse kullanılır; kullanıcının çapaları önceliklidir.
+  - Normalleştirmeye düzensiz çoğul tablosu eklendi (`leaves` → `leaf`, `people` → `person`, …).
+  - **PR sırası:** `feat/cross-orientation-crop` → `feat/material-relevance` → `feat/visual-search-terms`.
+  - Değerlendirme (03.11, `claude_code`, 8 terim, kırpma + `rank` + yapay zeka dışlaması):
+    - `visual` en üst adayın terimi tam karşılama oranını artırdı: İstanbul 5/8 (legacy 2/8), Kapadokya 4/8 (1/8), kahve 7/8 (2/8).
+    - Konu uygunluğu artmadı. Kahvede eşit. Kapadokya'da daha kötü: "fairy chimneys" fabrika bacası, "cave houses" Mallorca getirdi; legacy'nin "cave houses goreme" terimi Kapadokya klibi buldu.
+    - İstanbul videosunda İstanbul karesi legacy'de 3/5, visual'da 1/5.
+    - Sebep: çapalar yalnız terimin kendi sonuçları içinde sıralar. "seagulls flying" gibi genel bir aramanın sonuçlarında İstanbul klibi yoksa çapa yardım edemez.
+- [ ] Çapa destekli ek arama: bir terimin sonuçlarında yer çapası taşıyan aday yoksa "terim + yer çapası" ile ek arama yapılıp sonuçlar birleştirilsin. Yer çapaları özne çapalarından ("autumn") ağır bassın; şu an ikisi eşit sayılıyor.
 - [ ] Çoklu kaynak desteği: `video_source` bir liste ya da sırayla denenen kaynaklar olsun (`material.download_videos`, `task._SUPPORTED_VIDEO_SOURCES`, `VideoParams`, `cli.py`).
 
 ## Kod kuralları
