@@ -87,19 +87,17 @@ Kalan 4 testin hiçbiri bir özelliğin bozulduğunu göstermiyor; nedenleri Win
 - `test_image_sanitize_identity.py::test_long_source_name_renders_without_exceeding_filesystem_name_limit`: tam yol 260 karakteri aşıyor ve `LongPathsEnabled=0` (MAX_PATH sınırı).
 - `test_material.py::TestMaterialTlsVerification::test_metadata_probe_failure_preserves_existing_cache`: test yolun `\` ile kurulmasını bekliyor, kod `/` kullanıyor.
 - `test_utils_ffmpeg_check.py::TestGetFfmpegBinaryEnvExpansion::test_normalizes_home_path_in_os_environ`: test `HOME`'u değiştiriyor, oysa Windows'ta `expanduser` `USERPROFILE`'ı okur.
-- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: yalnız tam turda kalıyor, tek başına geçiyor. Sıraya bağlı; hangi testin etkilediği bulunamadı.
+- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 3098–3099 geçti, 3–4 kaldı arasında değişir.
 
 Atlananların dağılımı: 91 native ffmpeg/ffprobe ister, 38 Redis ister (`MPT_TEST_REDIS_HOST`), 8 Kokoro test sunucusu ister, 7 canlı sağlayıcı ister (`MPT_RUN_INTEGRATION_TESTS=1`), 3 `twelvelabs` extra'sı kurulu olmadığı için, 1 Windows'ta geçersiz bir yol yüzünden atlanıyor.
 
-**Dikkat:** `test_kimi_login_review.py`, `test_webui_bgm.py` ve `test_webui_startup.py` gerçek `config.toml`'u yeniden yazar; yorumlar ve `[app]` ayarları gider. Testlerden önce dosyayı yedekle, sonra geri koy:
-`Copy-Item config.toml $env:TEMP\mpt-config.toml.bak` … `Copy-Item $env:TEMP\mpt-config.toml.bak config.toml -Force`
-Takım ayrıca `storage/tasks/` altına `infistar-preflight/` ve `jalapeno-frozen-pipeline/` klasörlerini bırakır.
+Testler `test/conftest.py` fixture'ı sayesinde izole çalışır; gerçek `config.toml`'a dokunmaz. `pytest_configure`, toplama aşamasından önce `MPT_HOME`'u pytest'in geçici dizinine yönlendirir (`%TEMP%\pytest-of-<kullanıcı>\pytest-N\mpt-home`) ve oraya `config.example.toml`'un bir kopyasını koyar. `storage/` ve `resource/` da bu dizine gider; kaynaklar ilk kullanımda kopyalanır, oturum başına yaklaşık 198 MB. Alt süreçler `MPT_HOME`'u ortamdan devralır. `isolated_runtime_home` adlı session fixture'ı, `app.config` yönlendirmeden önce yüklendiyse çalıştırmayı durdurur.
 
 ## Git akışı
 
 - `origin` = https://github.com/mc846/MoneyPrinterTurbo (fork), `upstream` = https://github.com/harry0703/MoneyPrinterTurbo. `main` dalı `origin/main`'i izler.
 - Her özellik ayrı bir dalda geliştirilir: `git switch -c feat/<ad> main`, ardından `git push -u origin feat/<ad>`.
-- **upstream'e asla push edilmez.**
+- **upstream'e asla push edilmez.** upstream'in push adresi `DISABLE` yapıldı (`git remote set-url --push upstream DISABLE`), bu yüzden `git push upstream` hata verir.
 - upstream güncellemeleri merge ile alınır: `git switch main; git fetch upstream; git merge upstream/main; git push origin main`.
 - Commit mesajları upstream'in biçimini izler: `fix(webui): …`, `feat(tts): …`, `docs: …`, `test: …`.
 - upstream `.gitignore`'u `CLAUDE.md`'yi yok sayar; fork bu dosyayı `git add -f` ile izliyor. upstream'e PR açılacaksa dalı `upstream/main`'den aç ki bu commit PR'a girmesin.
