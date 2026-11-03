@@ -113,6 +113,13 @@ pexels_api_keys = []
 # Register at https://pixabay.com/api/docs/
 pixabay_api_keys = []
 
+# Search results requested per keyword: Pexels accepts 1-80, Pixabay 3-200.
+# More results give more candidates but slower searches; values outside the
+# range are clamped. A non-default value uses its own search cache entries.
+# 每个关键词请求的搜索结果数；超出范围的值会被收敛到允许范围。
+pexels_per_page = 20
+pixabay_per_page = 50
+
 # Register at https://coverr.co/developers?ctx=header_navigation
 coverr_api_keys = []
 
@@ -261,6 +268,23 @@ match_materials_to_script = false
 # center-cropped, even when video_fit_mode is "contain".
 # 默认关闭；开启后同方向素材不够用时，才用居中裁剪后满足目标分辨率的另一方向素材。
 crop_materials_to_aspect = false
+
+# Order Pixabay candidates by their tags. "rank" puts candidates whose tags
+# contain more words of their search term first; "strict" also drops the
+# candidates whose tags miss any word of the term. Words are compared in lower
+# case without punctuation or possessives ("Maiden's" -> "maiden"), with simple
+# plurals reduced and common English stop words ignored. Tag relevance comes
+# before orientation (crop_materials_to_aspect) and provider order. In the
+# default pooled mode each candidate is scored against the term that found it.
+# Pexels and Coverr return no tags, so the setting has no effect for them.
+# Accepted values: "off", "rank", "strict".
+# 默认关闭；rank 按标签与搜索词的匹配程度排序，strict 另外剔除未完全匹配的素材。
+material_tag_relevance = "off"
+
+# Skip Pixabay footage that Pixabay flags as AI-generated (isAiGenerated). Other
+# sources provide no such flag, so the setting has no effect for them.
+# 默认关闭；开启后跳过 Pixabay 标记为 AI 生成的素材。
+exclude_ai_generated_materials = false
 
 # Optional Sonilo video-matched original background music.
 # Create a key at https://platform.sonilo.com/dashboard. The WebUI can also save

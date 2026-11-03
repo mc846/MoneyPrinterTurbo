@@ -1,10 +1,12 @@
 import base64
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
+from fractions import Fraction
 import io
 import math
 import os
 import random
+import re
 import tempfile
 import threading
 import time
@@ -22,7 +24,13 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 from PIL import Image, UnidentifiedImageError
 
 from app.config import config
-from app.models.schema import ImageMotion, MaterialInfo, VideoAspect, VideoConcatMode
+from app.models.schema import (
+    ImageMotion,
+    MaterialInfo,
+    MaterialTagRelevance,
+    VideoAspect,
+    VideoConcatMode,
+)
 from app.services import (
     codex_image,
     generation_progress,
@@ -414,6 +422,156 @@ def _split_by_native_orientation(
     return native_items, cropped_items
 
 
+# Pixabay 的搜索结果带有标签（tags）和 isAiGenerated 标记。Pexels 的视频资源没有
+# 标签字段，页面地址也不一定带描述性的 slug；Coverr 未接入。标签相关度和 AI 素材
+# 排除因此只对 Pixabay 生效，其它素材源保持原有顺序。
+MATERIAL_TAG_SOURCES = frozenset({"pixabay"})
+_RELEVANCE_STOP_WORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "by", "for", "from", "in", "into", "is",
+    "it", "its", "of", "off", "on", "onto", "or", "over", "the", "this", "that",
+    "these", "those", "to", "under", "with",
+})
+_RELEVANCE_WORD_SPLIT = re.compile(r"[^\w']+")
+
+
+def _singular_word(word: str) -> str:
+    """简单的英文复数还原；搜索词和标签使用同一规则，能互相匹配即可。"""
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 4 and word.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return word[:-2]
+    if len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        return word[:-1]
+    return word
+
+
+def _relevance_words(text: str) -> list[str]:
+    """
+    把搜索词或标签拆成用于比较的内容词。
+
+    转为小写，去掉英文所有格（"Maiden's" → "maiden"）、其它撇号和标点，做简单
+    的复数还原并丢弃英文停用词。结果去重并保持出现顺序。
+    """
+    words = []
+    for raw_word in _RELEVANCE_WORD_SPLIT.split(str(text or "").lower().replace("’", "'")):
+        word = raw_word.removesuffix("'s").replace("'", "").replace("_", "")
+        if word and word not in _RELEVANCE_STOP_WORDS:
+            words.append(_singular_word(word))
+    return list(dict.fromkeys(words))
+
+
+def _material_tag_words(item: MaterialInfo) -> set[str] | None:
+    """返回素材标签中的内容词；素材源没有提供标签信息时返回 None。"""
+    source_info = item.source_info if isinstance(item.source_info, dict) else {}
+    tags = source_info.get("tags")
+    if not isinstance(tags, list):
+        return None
+    return {word for tag in tags for word in _relevance_words(tag)}
+
+
+def _tag_relevance(search_term: str, item: MaterialInfo) -> tuple[Fraction, int]:
+    """
+    返回素材相对搜索词的（命中比例, 命中数）。
+
+    命中数是搜索词的内容词中出现在素材标签里的个数，比例是它占全部内容词的
+    份额。同一关键词内两者给出相同的顺序；合并候选池里不同长度的关键词之间
+    按比例比较。没有内容词的搜索词视为全部命中。
+    """
+    term_words = _relevance_words(search_term)
+    tag_words = _material_tag_words(item) or set()
+    hits = sum(1 for word in term_words if word in tag_words)
+    return (Fraction(hits, len(term_words)) if term_words else Fraction(1)), hits
+
+
+# 每次搜索请求的结果数：（默认值, 下限, 上限）。上下限来自 Pixabay（3-200）和
+# Pexels（最多 80）的 API 文档；默认值与此前写死的数值一致。
+_SEARCH_PER_PAGE_LIMITS = {"pixabay": (50, 3, 200), "pexels": (20, 1, 80)}
+
+
+def _search_per_page(provider: str) -> int:
+    """读取 ``<provider>_per_page``；非法值回退默认值，越界值收敛到允许范围。"""
+    default, minimum, maximum = _SEARCH_PER_PAGE_LIMITS[provider]
+    key = f"{provider}_per_page"
+    value = config.app.get(key)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return default
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        per_page = int(value)
+    except (TypeError, ValueError):
+        logger.warning(f"invalid {key}={value!r}, using {default}")
+        return default
+    limited = min(max(per_page, minimum), maximum)
+    if limited != per_page:
+        logger.warning(f"{key}={per_page} is outside {minimum}-{maximum}, using {limited}")
+    return limited
+
+
+def _pixabay_tags(raw_tags) -> List[str]:
+    """Pixabay 以逗号分隔的字符串返回标签，例如 "galata, tower, istanbul"。"""
+    if not isinstance(raw_tags, str):
+        return []
+    return [tag.strip() for tag in raw_tags.split(",") if tag.strip()][:50]
+
+
+def _is_ai_generated(item: MaterialInfo) -> bool:
+    source_info = item.source_info if isinstance(item.source_info, dict) else {}
+    return source_info.get("ai_generated") is True
+
+
+def _order_material_candidates(
+    items: List[MaterialInfo],
+    video_aspect: VideoAspect,
+    *,
+    crop_to_aspect: bool = False,
+    tag_relevance: MaterialTagRelevance = MaterialTagRelevance.off,
+    exclude_ai_generated: bool = False,
+    shuffle: bool = False,
+) -> List[MaterialInfo]:
+    """
+    按优先级排列候选：标签相关度 > 方向（同方向优先）> 原有顺序。
+
+    相关度按带来该素材的关键词（``source_info["search_term"]``）计算，因此同一
+    函数既用于单个关键词的候选，也用于合并候选池。strict 只保留标签覆盖全部
+    内容词的素材。任一候选缺少标签信息时（素材源不提供标签）不做相关度排序。
+    ``shuffle`` 用于合并候选池的随机模式：只在同一优先级内打乱。
+    """
+    relevance = MaterialTagRelevance(tag_relevance)
+    if exclude_ai_generated:
+        items = [item for item in items if not _is_ai_generated(item)]
+    if relevance != MaterialTagRelevance.off and any(
+        _material_tag_words(item) is None for item in items
+    ):
+        relevance = MaterialTagRelevance.off
+
+    def term_relevance(item):
+        source_info = item.source_info if isinstance(item.source_info, dict) else {}
+        return _tag_relevance(str(source_info.get("search_term") or ""), item)
+
+    if relevance == MaterialTagRelevance.strict:
+        items = [item for item in items if term_relevance(item)[0] == 1]
+
+    groups: dict[tuple, List[MaterialInfo]] = {}
+    for item in items:
+        priority = ()
+        if relevance != MaterialTagRelevance.off:
+            ratio, hits = term_relevance(item)
+            priority += (-ratio, -hits)
+        if crop_to_aspect:
+            native_items, _ = _split_by_native_orientation([item], video_aspect)
+            priority += (0 if native_items else 1,)
+        groups.setdefault(priority, []).append(item)
+
+    ordered = []
+    for priority in sorted(groups):
+        group = groups[priority]
+        if shuffle:
+            random.shuffle(group)
+        ordered.extend(group)
+    return ordered
+
+
 def _filter_materials_by_aspect(
     items: List[MaterialInfo],
     video_aspect: VideoAspect,
@@ -475,7 +633,7 @@ def search_videos_pexels(
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
     }
     # Build URL
-    params = {"query": search_term, "per_page": 20}
+    params = {"query": search_term, "per_page": _search_per_page("pexels")}
     # 跨方向裁剪需要另一方向的候选，因此不再让 Pexels 按方向过滤，
     # 由下面的裁剪尺寸规则在本地筛选，并保留 Pexels 自身的相关度顺序。
     if aspect != VideoAspect.square and not crop_to_aspect:
@@ -588,7 +746,7 @@ def search_videos_pixabay(
     params = {
         "q": search_term,
         "video_type": "all",  # Accepted values: "all", "film", "animation"
-        "per_page": 50,
+        "per_page": _search_per_page("pixabay"),
         "key": api_key,
     }
     query_url = f"https://pixabay.com/api/videos/?{urlencode(params)}"
@@ -718,6 +876,10 @@ def search_videos_pixabay(
                     "width": w,
                     "height": video.get("height"),
                 },
+                # 标签和 AI 标记未写入 API 文档，但出现在实际响应中；用于
+                # material_tag_relevance 和 exclude_ai_generated_materials。
+                "tags": _pixabay_tags(v.get("tags")),
+                "ai_generated": v.get("isAiGenerated") is True,
             }
             video_items.append(item)
         return video_items
@@ -2141,6 +2303,7 @@ def _search_videos_with_cache(
     video_aspect: VideoAspect,
     *,
     crop_to_aspect: bool = False,
+    require_tag_data: bool = False,
 ) -> List[MaterialInfo]:
     """
     统一处理三个在线素材源的 24 小时搜索缓存。
@@ -2149,6 +2312,8 @@ def _search_videos_with_cache(
     缓存，因为现有 provider 接口使用空列表同时表示“没有结果”和“请求失败”；
     在两者尚未拆分为明确结果类型前，宁可下次重试，也不能把临时故障缓存一天。
     跨方向裁剪的候选集合不同，使用独立的缓存键；关闭时缓存键与调用方式不变。
+    每页结果数不是默认值时同样写入缓存键。``require_tag_data`` 为真时，没有
+    标签和 AI 标记的旧缓存按未命中处理，避免相关度设置在缓存有效期内失效。
     """
     cache_args = {
         "provider": provider,
@@ -2160,6 +2325,10 @@ def _search_videos_with_cache(
     if crop_to_aspect:
         cache_args["crop_to_aspect"] = True
         search_options["crop_to_aspect"] = True
+    if provider in _SEARCH_PER_PAGE_LIMITS:
+        per_page = _search_per_page(provider)
+        if per_page != _SEARCH_PER_PAGE_LIMITS[provider][0]:
+            cache_args["per_page"] = per_page
 
     def load_cache_safely() -> List[MaterialInfo] | None:
         try:
@@ -2176,6 +2345,16 @@ def _search_videos_with_cache(
     def load_matching_cache() -> tuple[List[MaterialInfo] | None, int]:
         cached_items = load_cache_safely()
         if cached_items is None:
+            return None, 0
+        if require_tag_data and any(
+            not isinstance((item.source_info or {}).get("tags"), list)
+            or "ai_generated" not in (item.source_info or {})
+            for item in cached_items
+        ):
+            logger.info(
+                "material search cache has no tag data, refresh from provider: "
+                f"provider={provider}, term={search_term!r}"
+            )
             return None, 0
 
         filtered_cached_items = _filter_materials_by_aspect(
@@ -2466,6 +2645,8 @@ def download_videos(
     jalapeno_video_endpoint: volcengine_seedance.SeedanceEndpoint | None = None,
     codex_image_context=None,
     crop_to_aspect: bool = False,
+    tag_relevance: MaterialTagRelevance = MaterialTagRelevance.off,
+    exclude_ai_generated: bool = False,
 ) -> List[str]:
     """
     搜索并下载覆盖配音时长所需的素材，返回本地文件路径。
@@ -2478,10 +2659,28 @@ def download_videos(
     居中裁剪到目标比例后仍满足目标分辨率；其它素材源忽略该选项。这类素材
     只作后备：按脚本顺序匹配时，每个关键词先用完自己的同方向素材；默认的
     合并候选池不按关键词分配，因此整个候选池的同方向素材排在前面。
+
+    ``tag_relevance`` 按标签相关度排序（rank）或另外剔除不完全匹配的素材
+    （strict），``exclude_ai_generated`` 剔除素材源标记为 AI 生成的素材。两者只对
+    Pixabay 生效。排序优先级：相关度 > 方向 > 素材源顺序。
     """
+    crop_enabled = bool(crop_to_aspect) and source in CROP_TO_ASPECT_SOURCES
+    tag_relevance = MaterialTagRelevance(tag_relevance or MaterialTagRelevance.off)
+    tag_enabled = source in MATERIAL_TAG_SOURCES and (
+        tag_relevance != MaterialTagRelevance.off or bool(exclude_ai_generated)
+    )
+    if not tag_enabled:
+        tag_relevance, exclude_ai_generated = MaterialTagRelevance.off, False
     search_cache_options = {}
-    if crop_to_aspect and source in CROP_TO_ASPECT_SOURCES:
+    if crop_enabled:
         search_cache_options["crop_to_aspect"] = True
+    if tag_enabled:
+        search_cache_options["require_tag_data"] = True
+    order_options = {
+        "crop_to_aspect": crop_enabled,
+        "tag_relevance": tag_relevance,
+        "exclude_ai_generated": bool(exclude_ai_generated),
+    }
     provider = "pexels"
     remote_search_videos = search_videos_pexels
     if source == "pixabay":
@@ -2504,13 +2703,10 @@ def download_videos(
             video_aspect=video_aspect,
             **search_cache_options,
         )
-        if search_cache_options:
-            # 每个关键词先排同方向素材，再排裁剪素材；组内保持素材源顺序。
-            # 放在缓存之后排序，旧缓存里按素材源顺序保存的结果同样生效。
-            native_items, cropped_items = _split_by_native_orientation(
-                items, video_aspect
-            )
-            return native_items + cropped_items
+        if crop_enabled or tag_enabled:
+            # 每个关键词的候选按 相关度 > 同方向优先 > 素材源顺序 排列。放在缓存
+            # 之后排序，旧缓存里按素材源顺序保存的结果同样生效。
+            return _order_material_candidates(items, video_aspect, **order_options)
         return items
 
     material_directory = config.app.get("material_directory", "").strip()
@@ -2641,17 +2837,17 @@ def download_videos(
     material_sources: list[dict[str, Any]] = []
 
     concat_mode_value = getattr(video_concat_mode, "value", video_concat_mode)
-    if search_cache_options:
-        # 合并候选池不按关键词分配素材，"同方向优先"因此作用于整个候选池：
-        # 所有同方向素材排在前面，只有它们不足以覆盖配音时长（或下载失败）
-        # 时才会用到裁剪素材。随机模式在两组内分别打乱，不让两组互相混合。
-        native_items, cropped_items = _split_by_native_orientation(
-            valid_video_items, video_aspect
+    if crop_enabled or tag_enabled:
+        # 合并候选池不按关键词分配素材，优先级因此作用于整个候选池：相关度按
+        # 带来该素材的关键词计算（去重时保留第一次出现的位置），同方向素材排在
+        # 裁剪素材前面，只有前面的素材不足以覆盖配音时长（或下载失败）时才会
+        # 用到后面的。随机模式只在同一优先级内打乱，不让不同优先级互相混合。
+        valid_video_items = _order_material_candidates(
+            valid_video_items,
+            video_aspect,
+            shuffle=concat_mode_value == VideoConcatMode.random.value,
+            **order_options,
         )
-        if concat_mode_value == VideoConcatMode.random.value:
-            random.shuffle(native_items)
-            random.shuffle(cropped_items)
-        valid_video_items = native_items + cropped_items
     elif concat_mode_value == VideoConcatMode.random.value:
         random.shuffle(valid_video_items)
 

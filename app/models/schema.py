@@ -58,6 +58,14 @@ class ImageMotion(str, Enum):
     zoom = "zoom"
 
 
+class MaterialTagRelevance(str, Enum):
+    """How stock-footage tags affect candidate order (Pixabay only)."""
+
+    off = "off"
+    rank = "rank"
+    strict = "strict"
+
+
 SubtitleDisplayMode = Literal["sentence", "word_by_word"]
 SubtitleAnimation = Literal["none", "pop_spring"]
 _SUBTITLE_DISPLAY_MODES = ("sentence", "word_by_word")
@@ -123,6 +131,11 @@ class VideoParams(BaseModel):
     # crop to video_aspect still meets the output resolution, when there are not
     # enough native-orientation candidates.
     crop_materials_to_aspect: bool = False
+    # Rank (or, with strict, also filter) Pixabay candidates by how many of the
+    # search term's words appear in their tags.
+    material_tag_relevance: MaterialTagRelevance = MaterialTagRelevance.off
+    # Skip Pixabay footage that the provider flags as AI-generated.
+    exclude_ai_generated_materials: bool = False
     video_count: int = Field(default=1, ge=1)
 
     video_source: Optional[str] = "pexels"
