@@ -102,11 +102,14 @@ Testler `test/conftest.py` fixture'ı sayesinde izole çalışır; gerçek `conf
 - upstream güncellemeleri merge ile alınır: `git switch main; git fetch upstream; git merge upstream/main; git push origin main`.
 - Commit mesajları upstream'in biçimini izler: `fix(webui): …`, `feat(tts): …`, `docs: …`, `test: …`.
 - upstream `.gitignore`'u `CLAUDE.md`'yi yok sayar; fork bu dosyayı `git add -f` ile izliyor. upstream'e PR açılacaksa dalı `upstream/main`'den aç ki bu commit PR'a girmesin.
-- `upstream/main` tabanlı dallarda ve bunların üzerine kurulan özellik dallarında (`feat/cross-orientation-crop` → `feat/material-relevance` → `feat/visual-search-terms`) `test/conftest.py` yoktur; testler gerçek `config.toml`'u okur ya da bozar, `storage/tasks`'a da yazar. Bu dallarda testleri geçici bir `MPT_HOME` ile çalıştır: dizine `config.example.toml`'u `config.toml` olarak kopyala, sonra `$env:MPT_HOME="<dizin>"; uv run python -X utf8 -m pytest -q <testler>`.
+- **PR yığını** (upstream'de bu sırayla birleşmeli): `upstream/main` → `fix/test-config-isolation` → `feat/cross-orientation-crop` → `feat/material-relevance` → `feat/visual-search-terms`. Yığının bütün dalları `test/conftest.py`'yi içerir. `fix/script-order-dedup` ve `fix/cli-video-source-default` `upstream/main` tabanlı ve bağımsızdır; bu ikisinde `test/conftest.py` yoktur.
+- **Test kuralı:** `test/conftest.py` içermeyen bir dalda test çalıştırma; önce `ls test/conftest.py` ile bak. Böyle bir dalın değişiklikleri `main`'de olduğu için testleri orada çalıştır. conftest yoksa testler gerçek `config.toml`'u okur ya da bozar ve `storage/tasks`'a yazar.
 
 ## Planlanan iyileştirmeler
 
 Sırası önceliğe göre. `[x]` ile işaretliler tamamlandı ve `main`'e alındı.
+
+**Kullanım odağı (03.11):** kullanıcı ağırlıklı olarak genel bilim ve uzay konularında video üretecek: kuantum, uzay, evren, izafiyet, kara delikler, galaksiler. Yer konularına yönelik maddeler bu yüzden ertelendi.
 
 - [x] Sıra koruma kipinde tekilleştirme (`fix/script-order-dedup`): `material._download_videos_by_script_order` artık yalnız seçilip indirmeye gönderilen URL'leri sonraki terimlerden çıkarıyor. Eskiden önceki terimin listelediği her aday siliniyordu.
 - [x] CLI kaynak varsayılanı (`fix/cli-video-source-default`): `--video-source` verilmezse `[app].video_source` okunuyor. Ajan betiği (`docs/skill/mpt_agent.py::selected_video_source`) da aynı sırayı izliyor.
@@ -121,7 +124,7 @@ Sırası önceliğe göre. `[x]` ile işaretliler tamamlandı ve `main`'e alınd
   - `rank` puana göre sıralar; `strict` ayrıca bütün kelimeleri karşılamayanları atar. Öncelik: uygunluk > yön (yerel önce) > sağlayıcı sırası. Karışık havuzda her aday, onu ilk getiren terime göre puanlanır.
   - Yapay zeka sinyali Pixabay'in yanıtındaki `isAiGenerated` alanı; "ai generated" etiketini kapsar ve etiketsiz yapay klipleri de yakalar.
   - Pexels video kaynağında etiket yok, sayfa slug'ı da her zaman bulunmuyor; Coverr'da da etiket yok. Bu yüzden iki ayar yalnız Pixabay'de etkili.
-  - **PR sırası:** `feat/material-relevance`, `feat/cross-orientation-crop`'un üzerine kurulu. Upstream'de önce o birleşmeli.
+  - **PR sırası:** yığında `feat/cross-orientation-crop`'tan sonra gelir (bkz. Git akışı).
   - Uçtan uca gözlem (03.11): `rank` ve `strict` "Galata tower" için Belgrad Kulesi yerine Galata etiketli klibi seçti; 6 klipten 5'i İstanbul. Ama o klip kırpılmış ve merkez kırpma kuleyi kadrajın dışında bırakıyor. "autumn leaves" için seçilen Fuji klibi de etiket açısından tam eşleşiyor, yani terim seçimi hâlâ belirleyici.
 - [x] `per_page` config'e taşındı (`feat/material-relevance`): `pixabay_per_page` (50, 3–200), `pexels_per_page` (20, 1–80). Sınır dışı değerler sınıra çekilir. Önbellek anahtarına yalnız varsayılandan farklı değer girer. Coverr'ın `page_size` değeri (20) sabit kaldı.
 - [ ] Pixabay `category` **global ayar yapılmadı**: kategori bütün aramayı süzer, oysa terimler farklı kategorilere düşer (Sultanahmet "places/religion", vapur "transportation", yapraklar "nature"). Tek bir global değer başka terimlerin doğru adaylarını eler. Gerekirse terim başına ya da görev başına bir seçenek olarak düşünülmeli.
@@ -130,17 +133,22 @@ Sırası önceliğe göre. `[x]` ile işaretliler tamamlandı ve `main`'e alınd
   - API uyumluluğu: `llm.generate_terms`'in imzası, prompt'u ve `List[str]` dönüşü değişmedi. Yeni `llm.generate_visual_terms` `(terimler, çapalar)` döndürür. Ayrıştırılamayan yanıtta legacy prompt'a düşer; sağlayıcı hatasında hemen boş döner. `/api/v1/terms` isteğe bağlı `video_terms_style` alır, yanıt yine yalnız `{"video_terms": [...]}`. Çapaları API'de almak için `/videos`'a `video_anchors` verilir ya da terimler boş bırakılır.
   - `video_anchors` (CLI `--video-anchors`, WebUI'da terimlerin altında): `material_tag_relevance` `rank`/`strict` iken sıralama puan > çapa eşleşmesi > yön > sağlayıcı sırası. Çapalar strict filtresine girmez. Üretilen çapalar yalnız terimler de üretildiyse kullanılır; kullanıcının çapaları önceliklidir.
   - Normalleştirmeye düzensiz çoğul tablosu eklendi (`leaves` → `leaf`, `people` → `person`, …).
-  - **PR sırası:** `feat/cross-orientation-crop` → `feat/material-relevance` → `feat/visual-search-terms`.
+  - **PR sırası:** yığının son dalı, `feat/material-relevance`'tan sonra gelir (bkz. Git akışı).
   - Değerlendirme (03.11, `claude_code`, 8 terim, kırpma + `rank` + yapay zeka dışlaması):
     - `visual` en üst adayın terimi tam karşılama oranını artırdı: İstanbul 5/8 (legacy 2/8), Kapadokya 4/8 (1/8), kahve 7/8 (2/8).
     - Konu uygunluğu artmadı. Kahvede eşit. Kapadokya'da daha kötü: "fairy chimneys" fabrika bacası, "cave houses" Mallorca getirdi; legacy'nin "cave houses goreme" terimi Kapadokya klibi buldu.
     - İstanbul videosunda İstanbul karesi legacy'de 3/5, visual'da 1/5.
     - Sebep: çapalar yalnız terimin kendi sonuçları içinde sıralar. "seagulls flying" gibi genel bir aramanın sonuçlarında İstanbul klibi yoksa çapa yardım edemez.
-- [ ] Çapa destekli ek arama: bir terimin sonuçlarında yer çapası taşıyan aday yoksa "terim + yer çapası" ile ek arama yapılıp sonuçlar birleştirilsin. Yer çapaları özne çapalarından ("autumn") ağır bassın; şu an ikisi eşit sayılıyor.
-- [ ] Çoklu kaynak desteği: `video_source` bir liste ya da sırayla denenen kaynaklar olsun (`material.download_videos`, `task._SUPPORTED_VIDEO_SOURCES`, `VideoParams`, `cli.py`).
+- [ ] Uzay konularında stil ve yapay zeka dışlaması değerlendirmesi: `legacy` ile `visual` terim stilleri ve `exclude_ai_generated_materials` bilim/uzay konularında ölçülsün. Uzay görüntülerinde render ve yapay zeka üretimi klipler yaygınsa dışlama aday sayısını çok düşürebilir; bu, aday sayısı ve konu uygunluğuyla birlikte ölçülmeli.
+- [ ] NASA görsel/video arşivi kaynağı: images.nasa.gov (NASA Image and Video Library) mevcut desende yeni bir video kaynağı olsun (ayrı modül, `material.download_videos`'ta bir dal, `task._SUPPORTED_VIDEO_SOURCES`). API'nin erişim koşulları, dikey video bulunurluğu ve kullanım şartları uygulamadan önce doğrulanmalı.
+- [ ] Soyut kavramlar için somut terim yedeği: kuantum ya da izafiyet gibi doğrudan çekilemeyen kavramlarda terim üretimi somut görsel karşılık istesin (ör. "spacetime" yerine "planet orbit", "galaxy"). Aday bulunamayan terim için bir yedek terim kullanılsın.
+- [ ] Script'lerde bilimsel doğruluk kuralı: `llm.generate_script`'in prompt'una kural eklensin: yerleşik bilgiyi kullan, sayıları ve iddiaları abartma, kesin olmayanı ya da tartışmalı olanı öyle belirt, kurguyu olgu gibi sunma.
+- [ ] **Ertelendi** (kullanım odağı bilim/uzay, bkz. yukarı): çapa destekli ek arama. Bir terimin sonuçlarında yer çapası taşıyan aday yoksa "terim + yer çapası" ile ek arama yapılıp sonuçlar birleştirilsin. Yer çapaları özne çapalarından ("autumn") ağır bassın; şu an ikisi eşit sayılıyor.
+- [ ] **Ertelendi** (aynı gerekçeyle): çoklu kaynak (Pixabay + Coverr). `video_source` bir liste ya da sırayla denenen kaynaklar olsun (`material.download_videos`, `task._SUPPORTED_VIDEO_SOURCES`, `VideoParams`, `cli.py`).
 
 ## Kod kuralları
 
+- **Düzenleme kuralı:** kaynak dosyalar Edit aracıyla değiştirilir. sed, regex yamaları ve heredoc ile dosya yazma kullanılmaz. Mevcut satır sonları korunur: `core.autocrlf=true` olduğu için çalışma alanındaki dosyaların çoğu CRLF, `sed -i` ise CRLF'yi LF'ye çevirir.
 - Mevcut dosya yapısına ve fonksiyon imzalarına uy. API, WebUI ve CLI aynı servis fonksiyonlarını çağırır, testler de bu imzalara bağlı.
 - Yeni servisler `app/services/` altındaki mevcut desenle eklenir: her sağlayıcı kendi modülünde (örneğin `muapi.py`) durur ve var olan dağıtım noktasına bağlanır:
   - LLM: `llm_provider.py`'ye bir `LLMProviderSpec`, gerekiyorsa `llm._generate_response`'a bir dal.
