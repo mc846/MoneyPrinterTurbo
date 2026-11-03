@@ -119,8 +119,9 @@ class VideoParams(BaseModel):
     video_clip_duration: int = Field(default=5, ge=1)
     video_clip_speed: Optional[float] = 1.0
     match_materials_to_script: bool = False
-    # Accept Pexels/Pixabay footage of either orientation when a centered crop
-    # to video_aspect still meets the output resolution.
+    # Fall back to Pexels/Pixabay footage of the other orientation, whose centered
+    # crop to video_aspect still meets the output resolution, when there are not
+    # enough native-orientation candidates.
     crop_materials_to_aspect: bool = False
     video_count: int = Field(default=1, ge=1)
 
