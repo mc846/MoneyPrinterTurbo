@@ -500,6 +500,16 @@ Batch manifests:
         ),
     )
     video_group.add_argument(
+        "--crop-materials-to-aspect",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "accept Pexels/Pixabay footage of either orientation when a centered crop "
+            "to --video-aspect still meets the output resolution; such clips are "
+            "always center-cropped (default: disabled)"
+        ),
+    )
+    video_group.add_argument(
         "--n-threads",
         type=_positive_int,
         default=None,
@@ -1013,6 +1023,7 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         "video_clip_duration",
         "video_clip_speed",
         "match_materials_to_script",
+        "crop_materials_to_aspect",
         "n_threads",
         "voice_volume",
         "voice_rate",

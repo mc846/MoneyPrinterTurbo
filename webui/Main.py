@@ -710,6 +710,9 @@ def _initialize_session_state():
         "match_materials_to_script": bool(
             config.app.get("match_materials_to_script", False)
         ),
+        "crop_materials_to_aspect": bool(
+            config.app.get("crop_materials_to_aspect", False)
+        ),
         "custom_bgm_file_input": _saved_ui_text("custom_bgm_file"),
         "sonilo_bgm_prompt_input": _saved_ui_text(
             "sonilo_bgm_prompt",
@@ -1602,6 +1605,9 @@ def _apply_restored_params(params):
     _set_stable_widget_value("video_count_select", params.get("video_count", 1))
     st.session_state["match_materials_to_script"] = bool(
         params.get("match_materials_to_script", False)
+    )
+    st.session_state["crop_materials_to_aspect"] = bool(
+        params.get("crop_materials_to_aspect", False)
     )
 
     # 音频设置。TTS server 未写入旧任务，根据历史 voice_name 推断。
@@ -6149,6 +6155,17 @@ def _render_video_settings(panel, params):
                 _set_runtime_config(
                     "ui", "video_concat_mode", params.video_concat_mode.value
                 )
+
+            params.crop_materials_to_aspect = st.checkbox(
+                tr("Crop Materials to Aspect"),
+                help=tr("Crop Materials to Aspect Help"),
+                key="crop_materials_to_aspect",
+            )
+            _set_runtime_config(
+                "app",
+                "crop_materials_to_aspect",
+                params.crop_materials_to_aspect,
+            )
 
             # 视频转场模式
             video_transition_modes = [

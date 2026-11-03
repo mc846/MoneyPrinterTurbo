@@ -142,6 +142,8 @@
     "Number of Videos Generated Simultaneously": "Vídeos por execução",
     "Match Materials to Script Order": "Ajustar imagens à ordem do roteiro",
     "Match Materials to Script Order Help": "Gera termos e organiza os materiais conforme o roteiro para acompanhar a narração.",
+    "Crop Materials to Aspect": "Usar material na outra orientação (recorte central)",
+    "Crop Materials to Aspect Help": "Aceita também vídeos do Pexels e do Pixabay na outra orientação se um recorte central para a proporção de saída ainda atingir a resolução de saída, por exemplo imagens horizontais 4K para 9:16. Esses clipes são sempre recortados a partir do centro, mesmo com “Ajustar (barras pretas)”.",
     "Audio Settings": "**Configurações de Áudio**",
     "Voiceover Mode": "Modo de narração",
     "Automatic Voiceover": "Automática",

@@ -142,6 +142,8 @@
     "Number of Videos Generated Simultaneously": "Oluşturulacak Video Sayısı",
     "Match Materials to Script Order": "Görüntüleri Senaryo Sırasıyla Eşleştir",
     "Match Materials to Script Order Help": "Görüntülerin anlatımı izlemesi için anahtar kelimeleri ve materyalleri senaryo sırasına göre düzenler.",
+    "Crop Materials to Aspect": "Diğer Yöndeki Görüntüleri Kullan (ortadan kırp)",
+    "Crop Materials to Aspect Help": "Ortadan kırpıldığında çıktı çözünürlüğünü hâlâ karşılayan diğer yöndeki Pexels ve Pixabay videolarını da kabul eder; örneğin 9:16 için 4K yatay görüntüler. Bu klipler Sığdır (siyah çubuklar) seçiliyken bile her zaman ortadan kırpılır.",
     "Audio Settings": "**Ses Ayarları**",
     "Voiceover Mode": "Seslendirme Yöntemi",
     "Automatic Voiceover": "Otomatik",

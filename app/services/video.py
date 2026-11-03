@@ -970,6 +970,30 @@ def _fit_clip_to_canvas(
     ).with_duration(clip.duration)
 
 
+def _clip_fit_mode(
+    clip_width: int,
+    clip_height: int,
+    target_width: int,
+    target_height: int,
+    fit_mode: VideoFitMode,
+    crop_cross_orientation_clips: bool = False,
+) -> VideoFitMode:
+    """
+    返回单个片段使用的画面适配方式。
+
+    开启 crop_materials_to_aspect 后，素材源会接受居中裁剪后满足目标分辨率的
+    另一方向素材。这类片段必须按 cover 裁剪；按 contain 处理会把横屏素材缩成
+    竖屏画面中间的一条窄带。与目标同方向的片段仍沿用用户选择的方式。
+    """
+    if not crop_cross_orientation_clips or target_width == target_height:
+        return fit_mode
+    if target_height > target_width:
+        matches_orientation = clip_height > clip_width
+    else:
+        matches_orientation = clip_width > clip_height
+    return fit_mode if matches_orientation else VideoFitMode.cover
+
+
 def combine_videos(
     combined_video_path: str,
     video_paths: List[str],
@@ -985,6 +1009,7 @@ def combine_videos(
     source_groups: dict[str, str] | None = None,
     used_video_paths: List[str] | None = None,
     progress_callback: Callable[[float], None] | None = None,
+    crop_cross_orientation_clips: bool = False,
 ) -> str:
     # Direct callers and persisted tasks can still supply the raw string.
     # Normalize it once for all downstream enum access.
@@ -1110,17 +1135,25 @@ def combine_videos(
             if clip_w != video_width or clip_h != video_height:
                 clip_ratio = clip.w / clip.h
                 video_ratio = video_width / video_height
+                clip_fit_mode = _clip_fit_mode(
+                    clip_w,
+                    clip_h,
+                    video_width,
+                    video_height,
+                    fit_mode,
+                    crop_cross_orientation_clips,
+                )
                 logger.debug(
                     "resizing clip, "
                     f"source: {clip_w}x{clip_h}, ratio: {clip_ratio:.2f}, "
                     f"target: {video_width}x{video_height}, ratio: {video_ratio:.2f}, "
-                    f"fit_mode: {fit_mode.value}"
+                    f"fit_mode: {clip_fit_mode.value}"
                 )
                 clip = _fit_clip_to_canvas(
                     clip,
                     target_width=video_width,
                     target_height=video_height,
-                    fit_mode=fit_mode,
+                    fit_mode=clip_fit_mode,
                 )
 
             shuffle_side = random.choice(["left", "right", "top", "bottom"])
