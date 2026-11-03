@@ -66,6 +66,15 @@ class MaterialTagRelevance(str, Enum):
     strict = "strict"
 
 
+class VideoTermsStyle(str, Enum):
+    """Prompt used to generate stock-video search terms."""
+
+    # The upstream prompt: every term includes the main subject.
+    legacy = "legacy"
+    # Concrete visual noun phrases plus separate place/subject anchors.
+    visual = "visual"
+
+
 SubtitleDisplayMode = Literal["sentence", "word_by_word"]
 SubtitleAnimation = Literal["none", "pop_spring"]
 _SUBTITLE_DISPLAY_MODES = ("sentence", "word_by_word")
@@ -119,6 +128,12 @@ class VideoParams(BaseModel):
     video_subject: str
     video_script: str = ""  # Script used to generate the video
     video_terms: Optional[str | List[str]] = None  # Keywords used to generate the video
+    # Place/subject words (e.g. "istanbul, turkey") that rank candidates matching
+    # equally well on their search term when material_tag_relevance is enabled.
+    # Generated with the visual terms style when video_terms is empty.
+    video_anchors: Optional[str | List[str]] = None
+    # None follows [app].video_terms_style.
+    video_terms_style: Optional[VideoTermsStyle] = None
     video_aspect: Optional[VideoAspect] = VideoAspect.portrait
     video_fit_mode: VideoFitMode = VideoFitMode.cover
     image_motion: ImageMotion = ImageMotion.zoom
@@ -249,7 +264,8 @@ class VideoTermsParams:
       "video_subject": "",
       "video_script": "",
       "amount": 5,
-      "match_materials_to_script": false
+      "match_materials_to_script": false,
+      "video_terms_style": null
     }
     """
 
@@ -259,6 +275,8 @@ class VideoTermsParams:
     )
     amount: Optional[int] = 5
     match_materials_to_script: bool = False
+    # None follows [app].video_terms_style. The response only lists the terms.
+    video_terms_style: Optional[VideoTermsStyle] = None
 
 
 class VideoSocialMetadataParams:

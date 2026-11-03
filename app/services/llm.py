@@ -16,6 +16,7 @@ from openai.types.chat import ChatCompletion
 
 from app.config import config
 from app.models.llm_provider import DEFAULT_LLM_PROVIDER_ID, get_llm_provider
+from app.models.schema import VideoTermsStyle
 from app.utils import utils
 from app.utils.request_logging import trace_sdk_call
 
@@ -1146,6 +1147,195 @@ Please note that you must use English for generating video search terms; Chinese
 
     logger.success(f"completed: \n{search_terms}")
     return search_terms
+
+
+# =============================================================================
+# Visual search terms (video_terms_style = "visual")
+#
+# 旧提示词要求每个关键词都带上视频主题，例如 "Istanbul autumn leaves"。素材站
+# 很少给素材打这种组合标签，搜索结果少且常常跑题。视觉风格改为要求素材站会
+# 标注的具体名词，并把地点/主体作为锚点单独返回，供素材标签排序使用。
+# generate_terms 保持旧提示词和 List[str] 返回契约不变。
+# =============================================================================
+
+_MAX_VIDEO_ANCHORS = 5
+_MAX_VIDEO_ANCHOR_WORDS = 3
+
+
+def resolve_video_terms_style(style=None, app_config=None) -> VideoTermsStyle:
+    """显式风格优先；None 时读取 [app].video_terms_style，非法值回退为 legacy。"""
+    candidate = style
+    if candidate is None:
+        candidate = (config.app if app_config is None else app_config).get(
+            "video_terms_style"
+        )
+    candidate = str(getattr(candidate, "value", candidate) or "").strip().lower()
+    try:
+        return VideoTermsStyle(candidate)
+    except ValueError:
+        if candidate:
+            logger.warning(f"invalid video_terms_style={candidate!r}, using legacy")
+        return VideoTermsStyle.legacy
+
+
+def _visual_terms_prompt(
+    video_subject: str, video_script: str, amount: int, match_script_order: bool
+) -> str:
+    # 目标、顺序规则和有序模式的示例数量与 generate_terms 一致，保证按文案
+    # 顺序匹配时关键词数量和叙事顺序的行为不变。
+    if match_script_order:
+        goal = (
+            f"Generate {amount} chronological stock-video search terms that follow "
+            "the order of topics in the video script."
+        )
+        ordering_rule = (
+            "8. keep the terms in the same order as the script narration; "
+            "earlier terms must describe earlier visual moments."
+        )
+        example_terms = [
+            "opening visual",
+            *[f"visual {index}" for index in range(2, max(amount, 1))],
+            "final visual",
+        ][:amount]
+    else:
+        goal = (
+            f"Generate {amount} search terms for stock videos, depending on the "
+            "subject of a video."
+        )
+        ordering_rule = ""
+        example_terms = [f"visual {index}" for index in range(1, 6)]
+    output_example = json.dumps(
+        {"terms": example_terms, "anchors": ["place", "subject"]},
+        ensure_ascii=False,
+    )
+    place_limit = max(1, (amount + 2) // 3)
+
+    return f"""
+# Role: Video Search Terms Generator
+
+## Goals:
+{goal}
+Also name the place and the main subject of the video as separate anchors.
+
+## Constrains:
+1. return a json object with two keys: "terms", an array of {amount} strings, and "anchors", an array of 1-4 strings.
+2. each search term must be a concrete, visual english noun phrase of 1-3 words that a stock video site would use as a tag for what is seen on screen, such as "hot air balloon", "coffee beans" or "ferry".
+3. avoid abstract, emotional or long descriptive terms such as "nostalgia", "peaceful atmosphere" or "beautiful autumn day in the city".
+4. do not add the main subject or the place to every term. at most {place_limit} of the terms may contain a place name, and only for well-known landmarks that are filmed often, such as "Galata Tower" or "Maiden's Tower".
+5. the anchors name where the video takes place, if it is about a place, and its main subject: english, lower case, 1-3 words each, such as ["istanbul", "turkey"] or ["coffee"].
+6. the search terms must be related to the subject and the script of the video.
+7. you must only return the json object. you must not return anything else. you must not return the script.
+{ordering_rule}
+
+## Output Example:
+{output_example}
+
+## Context:
+### Video Subject
+{video_subject}
+
+### Video Script
+{video_script}
+
+Please note that you must use English for the search terms and the anchors; Chinese is not accepted.
+""".strip()
+
+
+def _clean_video_anchors(anchors) -> List[str]:
+    """锚点只用于排序：丢弃非字符串、空值和超过 3 个词的条目，忽略大小写去重。"""
+    if not isinstance(anchors, list):
+        return []
+    cleaned = {}
+    for anchor in anchors:
+        if not isinstance(anchor, str):
+            continue
+        anchor = " ".join(anchor.split())
+        if anchor and len(anchor.split()) <= _MAX_VIDEO_ANCHOR_WORDS:
+            cleaned.setdefault(anchor.lower(), anchor)
+    return list(cleaned.values())[:_MAX_VIDEO_ANCHORS]
+
+
+def _parse_visual_terms_response(response: str, amount: int):
+    """
+    解析视觉风格的回复，返回 (关键词, 锚点)；没有可用关键词时返回 None。
+
+    期望 {"terms": [...], "anchors": [...]}。模型忽略对象格式、只返回字符串
+    数组时仍按关键词接受，锚点为空。
+    """
+    try:
+        data = json.loads(_strip_code_fence(response))
+    except Exception:
+        data = None
+        for opening in ("{", "["):
+            try:
+                data = _extract_embedded_json(response, opening)
+                break
+            except ValueError:
+                continue
+
+    if isinstance(data, dict):
+        terms, anchors = data.get("terms"), data.get("anchors")
+    else:
+        terms, anchors = data, []
+    if not isinstance(terms, list) or not all(isinstance(term, str) for term in terms):
+        return None
+    terms = [term.strip() for term in terms if term.strip()][:amount]
+    if not terms:
+        return None
+    return terms, _clean_video_anchors(anchors)
+
+
+def generate_visual_terms(
+    video_subject: str,
+    video_script: str,
+    amount: int = 5,
+    match_script_order: bool = False,
+    app_config=None,
+) -> tuple[List[str], List[str]]:
+    """
+    以视觉风格生成素材关键词，返回 (关键词, 锚点)。
+
+    只请求一次模型。回复无法解析出关键词时安全回退到 generate_terms 的旧
+    提示词（它自带重试），此时锚点为空。Provider 返回错误时与 generate_terms
+    一样直接返回空结果，不再重复请求。
+    """
+    video_script = utils.remove_pause_tags(video_script or "").strip()
+    prompt = _visual_terms_prompt(video_subject, video_script, amount, match_script_order)
+    logger.info(
+        f"subject: {video_subject}, match_script_order: {match_script_order}, "
+        "video_terms_style: visual"
+    )
+
+    response = ""
+    try:
+        if app_config is None:
+            response = _generate_response(prompt)
+        else:
+            response = _generate_response(prompt, app_config=app_config)
+    except Exception as e:
+        logger.warning(f"failed to generate visual video terms: {str(e)}")
+    if response.startswith("Error: "):
+        logger.error(f"failed to generate video terms: {response}")
+        return [], []
+
+    parsed = _parse_visual_terms_response(response, amount) if response else None
+    if parsed is None:
+        logger.warning("visual video terms are unusable, falling back to the legacy prompt")
+        legacy_kwargs = {"app_config": app_config} if app_config is not None else {}
+        return (
+            generate_terms(
+                video_subject=video_subject,
+                video_script=video_script,
+                amount=amount,
+                match_script_order=match_script_order,
+                **legacy_kwargs,
+            ),
+            [],
+        )
+
+    search_terms, anchors = parsed
+    logger.success(f"completed: \n{search_terms}\nanchors: {anchors}")
+    return search_terms, anchors
 
 
 # =============================================================================

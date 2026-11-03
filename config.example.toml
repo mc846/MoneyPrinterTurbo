@@ -256,6 +256,17 @@ twelvelabs_rerank_terms = false
 # 默认关闭，开启后会减少随机性，使素材顺序更贴近文案结构。
 match_materials_to_script = false
 
+# Prompt used when the LLM generates the stock-video search terms.
+# "legacy" is the original prompt, which adds the main subject of the video to
+# every term (e.g. "Istanbul autumn leaves"). "visual" asks for concrete visual
+# noun phrases of 1-3 words that stock sites tag (e.g. "autumn leaves",
+# "ferry"), allows a place name only in a few terms such as famous landmarks,
+# and also returns the place/subject of the video as separate anchors (e.g.
+# "istanbul", "turkey") for material_tag_relevance. If the reply cannot be
+# parsed, the legacy prompt is used. Accepted values: "legacy", "visual".
+# 默认 legacy（原提示词）；visual 生成素材站常用的具体画面名词，并单独返回地点/主体锚点。
+video_terms_style = "legacy"
+
 # Fall back to Pexels/Pixabay footage of the other orientation when there are
 # not enough native-orientation candidates. Such footage qualifies when a
 # centered crop to the output aspect ratio still meets the output resolution:
@@ -273,9 +284,13 @@ crop_materials_to_aspect = false
 # contain more words of their search term first; "strict" also drops the
 # candidates whose tags miss any word of the term. Words are compared in lower
 # case without punctuation or possessives ("Maiden's" -> "maiden"), with simple
-# plurals reduced and common English stop words ignored. Tag relevance comes
-# before orientation (crop_materials_to_aspect) and provider order. In the
-# default pooled mode each candidate is scored against the term that found it.
+# plurals reduced (including irregular ones such as "leaves" -> "leaf") and
+# common English stop words ignored. Among candidates with the same score, those
+# whose tags contain more of the task's anchors (video_anchors, generated with
+# the "visual" terms style or given by the user) come first; anchors never drop
+# candidates. Tag relevance comes before orientation (crop_materials_to_aspect)
+# and provider order. In the default pooled mode each candidate is scored
+# against the term that found it.
 # Pexels and Coverr return no tags, so the setting has no effect for them.
 # Accepted values: "off", "rank", "strict".
 # 默认关闭；rank 按标签与搜索词的匹配程度排序，strict 另外剔除未完全匹配的素材。
