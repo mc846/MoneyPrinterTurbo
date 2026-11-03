@@ -15,7 +15,7 @@ from loguru import logger
 
 from app.config import config
 from app.models import const
-from app.models.schema import VideoConcatMode, VideoParams
+from app.models.schema import MaterialTagRelevance, VideoConcatMode, VideoParams
 from app.services import bgm as bgm_service
 from app.services import (
     codex_image,
@@ -823,6 +823,10 @@ def get_video_materials(
             generation_options["codex_image_context"] = codex_image_context
         if params.crop_materials_to_aspect:
             generation_options["crop_to_aspect"] = True
+        if params.material_tag_relevance != MaterialTagRelevance.off:
+            generation_options["tag_relevance"] = params.material_tag_relevance
+        if params.exclude_ai_generated_materials:
+            generation_options["exclude_ai_generated"] = True
         # 顺序匹配模式只在用户显式开启时生效。这里强制素材下载按关键词顺序
         # 轮询，避免某个早期关键词下载太多素材，把后续脚本主题挤出最终时间线。
         try:
