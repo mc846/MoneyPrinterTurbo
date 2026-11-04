@@ -287,3 +287,102 @@ def test_task_and_api_forward_the_source_only_for_nasa(source, forwarded):
     with patch.object(llm_controller.llm, "generate_script", return_value="Metin.") as generate:
         llm_controller.generate_video_script(None, body)
     assert ("video_source" in generate.call_args.kwargs) is forwarded
+
+
+# ------------------------------------------------------------------ 第三方署名
+
+
+@pytest.mark.parametrize(
+    ("credit", "allowed"),
+    [
+        ("SpaceX", False),
+        ("Lockheed Martin", False),
+        ("Boeing/John Grant", False),
+        # ESA 官网一般图片：商用需要书面授权
+        ("European Space Agency (ESA) - D. Ducros", False),
+        ("ESA", False),
+        ("ESA/Hubble", True),
+        ("ESA/Webb", True),
+        ("NASA, ESA, CSA, STScI", True),
+        ("JPL", True),
+        ("X-ray: NASA/CXC/SAO; Optical: NASA/STScI", True),
+        ("NASA_Jim Grossmann", True),
+        ("NASA's Goddard Space Flight Center/Scott Wiessinger", True),
+        # 与 NASA 合署的 ESA 署名保留
+        ("ESA/Herschel/PACS/MESS Key Programme Supernova Remnant Team; NASA, ESA and Allison Loll", True),
+        ("NASA", True),
+        # NASA 中心名称算作 NASA（NASA 元数据里漏写的 "ASA"）
+        ("ASA/GSFC/Solar Dynamics Observatory", True),
+        ("SDSS", False),
+        ("ESA and the Planck Collaboration", False),
+        ("ESA/XMM-Newton/Younes et al. 2016", False),
+    ],
+)
+def test_free_use_credit(credit, allowed):
+    assert nasa.free_use_credit(credit) is allowed
+
+
+@pytest.mark.parametrize(
+    ("data", "expected", "allowed"),
+    [
+        # 摄影师字段写的是宇航员或 NASA 摄影师的名字
+        ({"photographer": "Alex Gerst"}, "NASA/Alex Gerst", True),
+        ({"photographer": "EMMETT GIVEN"}, "NASA/EMMETT GIVEN", True),
+        ({"photographer": "NASA/Kim Shiflett"}, "NASA/Kim Shiflett", True),
+        # 写的是机构名
+        ({"photographer": "SpaceX"}, "SpaceX", False),
+        ({"secondary_creator": "SDSS"}, "SDSS", False),
+    ],
+)
+def test_photographer_names_are_nasa_photos_but_companies_are_not(data, expected, allowed):
+    credit = nasa.extract_credit(data)
+
+    assert credit == expected and nasa.free_use_credit(credit) is allowed
+
+
+@pytest.mark.parametrize(
+    ("description", "expected"),
+    [
+        ("Credit: ESA/Hubble & NASA #nasagoddard #space #science #Hubble #star", "ESA/Hubble & NASA"),
+        ("Credit: NASA/JPL-Caltech @NASAJPL Follow us on Twitter", "NASA/JPL-Caltech"),
+        ("Photo credit: NASA/Bill Ingalls https://www.flickr.com/photos/nasahqphoto", "NASA/Bill Ingalls"),
+        ("Credit: NASA/Goddard. Read more: the mission page", "NASA/Goddard"),
+    ],
+)
+def test_credit_drops_hashtags_and_social_media_tails(description, expected):
+    assert nasa.extract_credit({"description": description}) == expected
+
+
+def _detail(description, metadata=None):
+    def fake_get_json(url, params=None):
+        if "/asset/" in url:
+            return {"collection": {"items": [
+                {"href": "https://images-assets.nasa.gov/image/x/x~orig.jpg"},
+                {"href": "https://images-assets.nasa.gov/image/x/metadata.json"},
+            ]}}
+        return {"File:ImageWidth": 4000, "File:ImageHeight": 6000, **(metadata or {})}
+
+    data = {"nasa_id": "x", "title": "Launch", "description": description}
+    with patch.object(nasa, "_get_json", side_effect=fake_get_json):
+        return nasa._detailed_candidate(data, "rocket", 5, PORTRAIT, True, nasa.zoom_margin(5))
+
+
+@pytest.mark.parametrize(
+    ("description", "metadata", "reason"),
+    [
+        ("A Falcon 9 lifts off. Photo credit: SpaceX", None, "third_party_credit"),
+        ("An artist's impression.", {"XMP:Credit": "European Space Agency (ESA) - D. Ducros"}, "third_party_credit"),
+        ("A Falcon 9 lifts off. Photo credit: NASA/Kim Shiflett", None, ""),
+        ("Hubble view. Credit: ESA/Hubble & NASA #nasagoddard", None, ""),
+    ],
+)
+def test_candidates_without_a_free_use_credit_are_dropped(description, metadata, reason):
+    item, why = _detail(description, metadata)
+
+    assert why == reason
+    if not reason:
+        assert "#" not in item.source_info["credit"]
+
+
+def test_filter_version_was_raised_for_the_credit_rules():
+    assert nasa.FILTER_VERSION >= 3
