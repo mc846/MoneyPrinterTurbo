@@ -38,6 +38,8 @@ _PIPELINE_STAGES = ("script", "terms", "audio", "subtitle", "materials", "video"
 _MATERIAL_TAG_RELEVANCE_MODES = ("off", "rank", "strict")
 # 与 app.models.schema.VideoTermsStyle 保持一致。
 _VIDEO_TERMS_STYLES = ("legacy", "visual")
+# 与 app.services.material.FALLBACK_VIDEO_SOURCES 保持一致：只有库存素材源能互为后备。
+_FALLBACK_VIDEO_SOURCES = ("pexels", "pixabay", "coverr", "nasa")
 _CUSTOM_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
 _BATCH_FILE_MAX_BYTES = 1024 * 1024
 _BATCH_TASK_MAX_COUNT = 100
@@ -422,6 +424,19 @@ Batch manifests:
         ),
     )
     material_group.add_argument(
+        "--video-source-fallback",
+        default=None,
+        choices=(*_FALLBACK_VIDEO_SOURCES, "none"),
+        help=(
+            "second stock source for search terms whose --video-source candidates are "
+            "too few after filtering (thresholds: video_source_fallback_min_relevance and "
+            "video_source_fallback_min_candidates in config.toml); each term takes all "
+            "of its clips from one source; the fallback uses the same crop, tag relevance "
+            "and AI settings and is skipped with a warning when its API key is missing "
+            "(default: none)"
+        ),
+    )
+    material_group.add_argument(
         "--video-materials",
         default="",
         metavar="PATH[,PATH...]",
@@ -571,7 +586,7 @@ Batch manifests:
         default=None,
         action=argparse.BooleanOptionalAction,
         help=(
-            'with --video-source nasa, show a short "Images: NASA, ..." line during the '
+            'when NASA images are used, show a short "Images: NASA, ..." line during the '
             "last 2 seconds of the video (default: disabled)"
         ),
     )
@@ -1147,6 +1162,10 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         value = getattr(args, name)
         if value is not None:
             params_kwargs[name] = value
+    if args.video_source_fallback is not None:
+        params_kwargs["video_source_fallback"] = (
+            "" if args.video_source_fallback == "none" else args.video_source_fallback
+        )
 
     # 没有显式传入命令行参数时，使用 WebUI 保存的值。只补充上面尚未由命令行
     # 设置的字段；若保存值缺失，则继续沿用 VideoParams 的默认值。
@@ -1224,6 +1243,24 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
             params_kwargs["text_background_color"] = True
 
     return VideoParams(**params_kwargs)
+
+
+def _validate_video_source_fallback(params: VideoParams) -> None:
+    """后备素材源只能是另一个库存素材源，主素材源也必须是库存素材源。"""
+    fallback = str(params.video_source_fallback or "").strip().lower()
+    if fallback in {"", "none"}:
+        return
+    if fallback not in _FALLBACK_VIDEO_SOURCES:
+        raise ValueError(
+            "video_source_fallback must be one of: " + ", ".join(_FALLBACK_VIDEO_SOURCES)
+        )
+    if params.video_source not in _FALLBACK_VIDEO_SOURCES:
+        raise ValueError(
+            "video_source_fallback needs a stock video_source: "
+            + ", ".join(_FALLBACK_VIDEO_SOURCES)
+        )
+    if fallback == params.video_source:
+        raise ValueError("video_source_fallback must differ from video_source")
 
 
 def _load_batch_manifest(raw_path: str) -> tuple[str, list[dict[str, Any]]]:
@@ -1367,6 +1404,7 @@ def _validate_batch_task_params(
         raise ValueError(
             "video_source must be one of: " + ", ".join(_CLI_VIDEO_SOURCES)
         )
+    _validate_video_source_fallback(params)
     for field_name, value in (
         ("video_aspect", params.video_aspect),
         ("video_concat_mode", params.video_concat_mode),
@@ -1957,6 +1995,7 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
 
     try:
         params = build_video_params(args)
+        _validate_video_source_fallback(params)
         prepare_cli_files(params, stop_at=args.stop_at)
     except (ValueError, OSError) as exc:
         logger.error(f"invalid CLI input: {exc}")

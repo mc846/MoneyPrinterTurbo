@@ -157,6 +157,11 @@ class VideoParams(BaseModel):
     video_count: int = Field(default=1, ge=1)
 
     video_source: Optional[str] = "pexels"
+    # Optional second stock source (pexels, pixabay, coverr or nasa). A search term
+    # whose video_source candidates are too few or too weak after filtering (see
+    # video_source_fallback_min_relevance / _min_candidates in config.toml) takes
+    # all of its clips from this source instead. Empty: no fallback.
+    video_source_fallback: Optional[str] = ""
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
     )

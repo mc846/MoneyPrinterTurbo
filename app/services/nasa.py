@@ -1001,6 +1001,9 @@ CREDITS_FOOTER = "Görüntüler: NASA ve ortakları / Images: NASA and partners"
 CREDITS_DISCLAIMER = (
     "Bu video NASA tarafından onaylanmamıştır. / This video is not endorsed by NASA."
 )
+# credits.txt 每行开头的素材源名称。Pixabay 等库存素材源只在作为 NASA 的后备
+# （video_source_fallback）时出现；它们的许可不要求署名，这里写作者名和素材页面。
+CREDIT_SOURCE_LABELS = {"nasa": "NASA", "pixabay": "Pixabay", "pexels": "Pexels", "coverr": "Coverr"}
 # 屏幕署名最多列出的机构数，其余写成 "ve diğerleri" / "and others"。
 CREDIT_OVERLAY_MAX_AGENCIES = 2
 # 署名里两个以上大写字母的词视为机构缩写（NASA、ESA、JPL、STScI…）；人名不会命中。
@@ -1025,19 +1028,60 @@ def used_sources(material_sources: Any) -> list[dict]:
     return sources
 
 
+def _credited_sources(material_sources: Any) -> list[dict]:
+    """credits.txt 列出的素材：NASA 图片和后备库存素材源的视频，按出现顺序去重。"""
+    sources, seen = [], set()
+    for record in material_sources or []:
+        if not isinstance(record, dict):
+            continue
+        provider = str(record.get("provider") or "").lower()
+        if provider not in CREDIT_SOURCE_LABELS:
+            continue
+        key = (provider, record.get("asset_id") or record.get("source_page") or record.get("local_file"))
+        if key in seen:
+            continue
+        seen.add(key)
+        sources.append(record)
+    return sources
+
+
+def _credit_line(record: dict) -> str:
+    """一条署名：NASA 图片用署名；Pixabay 等不要求署名的素材源写作者名（没有时写素材源）。"""
+    provider = str(record.get("provider") or "").lower()
+    label = CREDIT_SOURCE_LABELS[provider]
+    if provider == "nasa":
+        return f"[{label}] {record.get('credit') or DEFAULT_CREDIT}"
+    creator = record.get("creator") if isinstance(record.get("creator"), dict) else {}
+    return f"[{label}] {str(creator.get('name') or '').strip() or label}"
+
+
 def credits_text(material_sources: Any) -> str:
-    """credits.txt 的内容：每张图片的署名和 images.nasa.gov 页面；没有 NASA 图片时为空。"""
-    sources = used_sources(material_sources)
-    if not sources:
+    """
+    credits.txt 的内容；没有 NASA 图片时为空。
+
+    每行写明素材源（[NASA]、[Pixabay]…）和署名，下一行是素材页面。有后备素材源时
+    它的视频也列出，结尾的来源行加上该素材源。
+    """
+    if not used_sources(material_sources):
         return ""
     lines = [CREDITS_HEADING, "=" * len(CREDITS_HEADING), ""]
-    for index, record in enumerate(sources, start=1):
+    other_labels = []
+    for index, record in enumerate(_credited_sources(material_sources), start=1):
+        provider = str(record.get("provider") or "").lower()
         asset_id = str(record.get("asset_id") or "")
-        page = record.get("source_page") or (DETAILS_PAGE.format(nasa_id=quote(asset_id)) if asset_id else "")
-        lines.append(f"{index}. {record.get('credit') or DEFAULT_CREDIT}")
+        page = record.get("source_page") or (
+            DETAILS_PAGE.format(nasa_id=quote(asset_id)) if asset_id and provider == "nasa" else ""
+        )
+        lines.append(f"{index}. {_credit_line(record)}")
         if page:
             lines.append(f"   {page}")
-    lines += ["", CREDITS_FOOTER, CREDITS_DISCLAIMER, ""]
+        if provider != "nasa" and CREDIT_SOURCE_LABELS[provider] not in other_labels:
+            other_labels.append(CREDIT_SOURCE_LABELS[provider])
+    footer = CREDITS_FOOTER
+    if other_labels:
+        others = ", ".join(other_labels)
+        footer = f"Görüntüler: NASA ve ortakları, {others} / Images: NASA and partners, {others}"
+    lines += ["", footer, CREDITS_DISCLAIMER, ""]
     return "\n".join(lines)
 
 

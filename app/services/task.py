@@ -112,6 +112,16 @@ _SUPPORTED_VIDEO_SOURCES = frozenset({
 })
 
 
+def _video_source_fallback(params) -> str:
+    """任务的后备库存素材源（video_source_fallback）；旧任务记录和其它请求没有该字段。"""
+    return str(getattr(params, "video_source_fallback", "") or "").strip().lower()
+
+
+def _may_use_nasa(params) -> bool:
+    """主素材源或后备素材源是 NASA：文案署名规则、credits.txt 和屏幕署名都要考虑 NASA 图片。"""
+    return "nasa" in (params.video_source, _video_source_fallback(params))
+
+
 def _get_video_music_prompt(params: VideoParams) -> str:
     """
     读取当前视频配乐供应商实际使用的提示词。
@@ -380,7 +390,7 @@ def generate_script(task_id, params):
             # 关闭时不传参，保持与上游完全相同的调用。
             **({"script_accuracy_rules": True} if params.script_accuracy_rules else {}),
             # NASA 素材要求文案不把内容归于 NASA；其它来源调用不变。
-            **({"video_source": "nasa"} if params.video_source == "nasa" else {}),
+            **({"video_source": "nasa"} if _may_use_nasa(params) else {}),
         )
     else:
         logger.debug(f"video script: \n{video_script}")
@@ -861,6 +871,8 @@ def get_video_materials(
                 generation_options["anchors"] = video_anchors
         if params.exclude_ai_generated_materials:
             generation_options["exclude_ai_generated"] = True
+        if _video_source_fallback(params):
+            generation_options["fallback_source"] = _video_source_fallback(params)
         # 顺序匹配模式只在用户显式开启时生效。这里强制素材下载按关键词顺序
         # 轮询，避免某个早期关键词下载太多素材，把后续脚本主题挤出最终时间线。
         try:
@@ -1097,7 +1109,7 @@ def generate_final_videos(
         and bgm_service.should_use_bgm(params.bgm_type, params.bgm_volume)
     )
     credit_text = ""
-    if params.video_source == "nasa" and params.nasa_credit_overlay:
+    if _may_use_nasa(params) and params.nasa_credit_overlay:
         credit_text = nasa.overlay_credit_text(
             _load_material_sources(task_id), params.video_language
         )
@@ -1133,9 +1145,9 @@ def generate_final_videos(
         combine_share = 50 / params.video_count / 2
         combine_options = dict(batch_options)
         # 跨方向裁剪接受的素材必须居中裁剪，即使用户选择了 contain 也不能留黑边。
-        if (
-            params.crop_materials_to_aspect
-            and params.video_source in material.CROP_TO_ASPECT_SOURCES
+        if params.crop_materials_to_aspect and (
+            params.video_source in material.CROP_TO_ASPECT_SOURCES
+            or _video_source_fallback(params) in material.CROP_TO_ASPECT_SOURCES
         ):
             combine_options["crop_cross_orientation_clips"] = True
         video.combine_videos(
@@ -1659,6 +1671,17 @@ def _run_pipeline(
         return _mark_task_failed(
             task_id, "preflight", f"unsupported video source: {params.video_source!r}"
         )
+    fallback_source = _video_source_fallback(params)
+    if (
+        stop_at in {"materials", "video"}
+        and fallback_source not in {"", "none", "off"}
+        and fallback_source not in material.FALLBACK_VIDEO_SOURCES
+    ):
+        return _mark_task_failed(
+            task_id, "preflight",
+            f"unsupported video source fallback: {fallback_source!r}; choose one of "
+            + ", ".join(material.FALLBACK_VIDEO_SOURCES),
+        )
 
     if (
         stop_at in {"materials", "video"}
@@ -1948,7 +1971,7 @@ def _run_pipeline(
             "materials",
             "failed to prepare video materials",
         )
-    if params.video_source == "nasa":
+    if _may_use_nasa(params):
         _write_material_credits(task_id)
 
     if stop_at == "materials":

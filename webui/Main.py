@@ -3671,9 +3671,51 @@ def _render_nasa_settings(app_settings):
         on_change=_save_settings_change,
         args=("app", "nasa_credit_overlay", "nasa_credit_overlay_input", bool),
     )
+    fallback_enabled = st.checkbox(
+        tr("NASA Fallback Pixabay"),
+        value=app_settings.get("video_source_fallback", "") == "pixabay",
+        help=tr("NASA Fallback Pixabay Help"),
+        key="video_source_fallback_input",
+        on_change=_save_settings_change,
+        args=("app", "video_source_fallback", "video_source_fallback_input", _pixabay_fallback_value),
+    )
+    if fallback_enabled:
+        if not _get_material_api_keys("pixabay_api_keys").strip():
+            st.warning(tr("NASA Fallback Missing Key"))
+        min_relevance, min_candidates = material.fallback_thresholds()
+        relevance_column, candidates_column = st.columns(2)
+        relevance_column.number_input(
+            tr("Fallback Min Relevance"),
+            min_value=0.0,
+            max_value=1.0,
+            step=0.05,
+            value=float(min_relevance),
+            help=tr("Fallback Min Relevance Help"),
+            key="video_source_fallback_min_relevance_input",
+            on_change=_save_settings_change,
+            args=("app", "video_source_fallback_min_relevance",
+                  "video_source_fallback_min_relevance_input", float),
+        )
+        candidates_column.number_input(
+            tr("Fallback Min Candidates"),
+            min_value=1,
+            max_value=material.FALLBACK_MAX_CANDIDATES,
+            step=1,
+            value=int(min_candidates),
+            help=tr("Fallback Min Candidates Help"),
+            key="video_source_fallback_min_candidates_input",
+            on_change=_save_settings_change,
+            args=("app", "video_source_fallback_min_candidates",
+                  "video_source_fallback_min_candidates_input", int),
+        )
     st.markdown(
         f"{tr('NASA Usage Terms Note')} [{tr('NASA Usage Guidelines')}]({nasa.USAGE_GUIDELINES_URL})"
     )
+
+
+def _pixabay_fallback_value(checked):
+    """NASA 设置里的复选框：勾选时以 Pixabay 作后备素材源，否则不用后备。"""
+    return "pixabay" if checked else ""
 
 
 def _render_material_provider_settings(provider):
@@ -6216,6 +6258,14 @@ def _render_video_settings(panel, params):
             # 屏幕署名在素材设置窗口里开关，只对 NASA 图片生效。
             params.nasa_credit_overlay = params.video_source == "nasa" and bool(
                 config.snapshot_config_with_pending(config.app).get("nasa_credit_overlay", False)
+            )
+            # Pixabay 后备同样在 NASA 设置里开关，只用于 NASA 素材源。
+            params.video_source_fallback = (
+                "pixabay"
+                if params.video_source == "nasa"
+                and config.snapshot_config_with_pending(config.app).get("video_source_fallback", "")
+                == "pixabay"
+                else ""
             )
 
             loomloom_video_capability = None
