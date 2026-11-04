@@ -425,7 +425,12 @@ def _requires_llm(cli_args: list[str], config_text: str = "") -> bool:
 def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[str]]:
     """Return the active provider and only the fields required by this run."""
     text = config_path.read_text(encoding="utf-8")
-    provider = (_plain_config_value(text, "llm_provider") or "moonshot").lower()
+    # --llm-provider overrides [app].llm_provider for this run only.
+    provider = (
+        _last_cli_value(cli_args, "--llm-provider")
+        or _plain_config_value(text, "llm_provider")
+        or "moonshot"
+    ).lower()
     missing: list[str] = []
     needs_llm = _requires_llm(cli_args, text)
     if needs_llm and provider not in KEYLESS_LLM_PROVIDERS and not _has_configured_value(
@@ -438,6 +443,8 @@ def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[st
     if needs_llm and provider == CUSTOM_OPENAI_PROVIDER:
         for suffix in ("base_url", "model_name"):
             field = f"{provider}_{suffix}"
+            if suffix == "model_name" and _last_cli_value(cli_args, "--llm-model"):
+                continue
             if not _has_configured_value(_plain_config_value(text, field)):
                 missing.append(field)
 
