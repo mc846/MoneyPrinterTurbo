@@ -1,0 +1,404 @@
+{
+ "collection": {
+  "version": "1.0",
+  "href": "https://images-api.nasa.gov/search?q=fixture",
+  "items": [
+   {
+    "href": "https://images-assets.nasa.gov/image/PIA14103/collection.json",
+    "data": [
+     {
+      "center": "JPL",
+      "date_created": "2011-06-13T22:34:01Z",
+      "description": "This image of the Elephant Trunk nebula from NASA Wide-field Survey Explorer shows clouds of dust and gas being pushed and eroded by a massive star. The bright trunk of the nebula near the center is an especially dense cloud.",
+      "description_508": "This image of the Elephant Trunk nebula from NASA Wide-field Survey Explorer shows clouds of dust and gas being pushed and eroded by a massive star. The bright trunk of the nebula near the center is an especially dense cloud.",
+      "keywords": [
+       "Wide-field Infrared Survey Explorer WISE"
+      ],
+      "media_type": "image",
+      "nasa_id": "PIA14103",
+      "secondary_creator": "NASA/JPL-Caltech/UCLA",
+      "title": "Blowin in the Stellar Wind"
+     }
+    ],
+    "links": [
+     {
+      "href": "https://images-assets.nasa.gov/image/PIA14103/PIA14103~medium.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 1280,
+      "size": 266000,
+      "height": 1047
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/PIA14103/PIA14103~small.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 640,
+      "size": 73000,
+      "height": 523
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/PIA14103/PIA14103~thumb.jpg",
+      "rel": "preview",
+      "render": "image",
+      "width": 640,
+      "size": 73000,
+      "height": 523
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/PIA14103/PIA14103~large.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 1920,
+      "size": 528000,
+      "height": 1570
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/PIA14103/PIA14103~orig.jpg",
+      "rel": "canonical",
+      "render": "image",
+      "height": 6300,
+      "width": 7700,
+      "size": 3700000
+     }
+    ]
+   },
+   {
+    "href": "https://images-assets.nasa.gov/image/sl4-143-4707/collection.json",
+    "data": [
+     {
+      "center": "JSC",
+      "date_created": "1974-02-08T00:00:00Z",
+      "description": "SL4-143-4707 (8 Feb. 1974) --- An overhead view of the Skylab space station cluster in Earth orbit as photographed from the Skylab 4 Command and Service Modules (CSM) during the final fly-around by the CSM before returning home. The space station is contrasted against a cloud-covered Earth. Note the solar shield which was deployed by the second crew of Skylab and from which a micrometeoroid shield has been missing since the cluster was launched on May 14, 1973. The OWS solar panel on the left side was also lost on workshop launch day. Photo credit: NASA",
+      "keywords": [
+       "EARTH (PLANET)",
+       "EARTH OBSERVATIONS (FROM SPACE)",
+       "ONBOARD ACTIVITIES",
+       "ORBITS",
+       "ORBITAL SPACE STATIONS",
+       "PHOTOGRAPHY",
+       "SKYLAB 4",
+       "SKYLAB PROGRAM"
+      ],
+      "media_type": "image",
+      "nasa_id": "sl4-143-4707",
+      "title": "View of Skylab space station cluster in Earth orbit from CSM"
+     }
+    ],
+    "links": [
+     {
+      "href": "https://images-assets.nasa.gov/image/sl4-143-4707/sl4-143-4707~medium.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 1280,
+      "size": 274000,
+      "height": 1264
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/sl4-143-4707/sl4-143-4707~small.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 640,
+      "size": 77000,
+      "height": 632
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/sl4-143-4707/sl4-143-4707~thumb.jpg",
+      "rel": "preview",
+      "render": "image",
+      "width": 640,
+      "size": 77000,
+      "height": 632
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/sl4-143-4707/sl4-143-4707~large.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 1920,
+      "size": 556000,
+      "height": 1897
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/sl4-143-4707/sl4-143-4707~orig.jpg",
+      "rel": "canonical",
+      "render": "image"
+     }
+    ]
+   },
+   {
+    "href": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e000504/collection.json",
+    "data": [
+     {
+      "album": [
+       "Test"
+      ],
+      "center": "GSFC",
+      "date_created": "2017-12-08T00:00:00Z",
+      "description": "At the center of this amazing Hubble image is the elliptical galaxy NGC 3610. Surrounding the galaxy are a wealth of other galaxies of all shapes. There are spiral galaxies, galaxies with a bar in their central regions, distorted galaxies and elliptical galaxies, all visible in the background. In fact, almost every bright dot in this image is a galaxy — the few foreground stars are clearly distinguishable due to the diffraction spikes (lines radiating from bright light sources in reflecting telescope images) that overlay their images.  NGC 3610 is of course the most prominent object in this image — and a very interesting one at that! Discovered in 1793 by William Herschel, it was later found that this elliptical galaxy contains a disk. This is very unusual, as disks are one of the main distinguishing features of a spiral galaxy. And the disk in NGC 3610 is remarkably bright.  The reason for the peculiar shape of NGC 3610 stems from its formation history. When galaxies form, they usually resemble our galaxy, the Milky Way, with flat disks and spiral arms where star formation rates are high and which are therefore very bright. An elliptical galaxy is a much more disordered object which results from the merging of two or more disk galaxies. During these violent mergers most of the internal structure of the original galaxies is destroyed. The fact that NGC 3610 still shows some structure in the form of a bright disk implies that it formed only a short time ago. The galaxy’s age has been put at around four billion years and it is an important object for studying the early stages of evolution in elliptical galaxies.  Image credit: ESA/Hubble &amp; NASA, Acknowledgement: Judy Schmidt   <b><a href=\"http://www.nasa.gov/audience/formedia/features/MP_Photo_Guidelines.html\" rel=\"nofollow\">NASA image use policy.</a></b>  <b><a href=\"http://www.nasa.gov/centers/goddard/home/index.html\" rel=\"nofollow\">NASA Goddard Space Flight Center</a></b> enables NASA’s mission through four scientific endeavors: Earth Science, Heliophysics, Solar System Exploration, and Astrophysics. Goddard plays a leading role in NASA’s accomplishments by contributing compelling scientific knowledge to advance the Agency’s mission.  <b>Follow us on <a href=\"http://twitter.com/NASAGoddardPix\" rel=\"nofollow\">Twitter</a></b>  <b>Like us on <a href=\"http://www.facebook.com/pages/Greenbelt-MD/NASA-Goddard/395013845897?ref=tsd\" rel=\"nofollow\">Facebook</a></b>  <b>Find us on <a href=\"http://instagrid.me/nasagoddard/?vm=grid\" rel=\"nofollow\">Instagram</a></b>",
+      "keywords": [
+       "Hubble Views a Young Elliptical Galaxy",
+       "nasa",
+       "galaxy",
+       "hubble",
+       "nasagoddard",
+       "ngc3610"
+      ],
+      "location": "Greenbelt, MD",
+      "media_type": "image",
+      "nasa_id": "GSFC_20171208_Archive_e000504",
+      "title": "Hubble Views a Young Elliptical Galaxy"
+     }
+    ],
+    "links": [
+     {
+      "href": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e000504/GSFC_20171208_Archive_e000504~medium.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 1280,
+      "size": 158000,
+      "height": 1280
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e000504/GSFC_20171208_Archive_e000504~small.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 640,
+      "size": 25000,
+      "height": 640
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e000504/GSFC_20171208_Archive_e000504~thumb.jpg",
+      "rel": "preview",
+      "render": "image",
+      "width": 640,
+      "size": 25000,
+      "height": 640
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e000504/GSFC_20171208_Archive_e000504~orig.jpg",
+      "rel": "canonical",
+      "render": "image"
+     }
+    ]
+   },
+   {
+    "href": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e001027/collection.json",
+    "data": [
+     {
+      "album": [
+       "Test"
+      ],
+      "center": "GSFC",
+      "date_created": "2017-12-08T00:00:00Z",
+      "description": "Landsat satellites collect data along a wide ground track that spans 185 kilometers (115 miles) but with a spatial resolution that allows them to see the human signature on the landscape.  Each Landsat pixel covers a 30 by 30 meter area (98 by 98 feet), about the size of a baseball diamond.  This visualization shows the Landsat path over Minneapolis, the site of the 2014 Major League Baseball All-Star game, and then zooms in to reveal the individual pixels.  The green of the field and the white of the stadium are visible, before fading to an aerial photograph taken March 2010.  See close up of stadium here: <a href=\"https://www.flickr.com/photos/gsfc/14662019381/in/photostream/\">www.flickr.com/photos/gsfc/14662019381/in/photostream/</a>  Credit: NASA/Goddard/Landsat  <b><a href=\"http://www.nasa.gov/audience/formedia/features/MP_Photo_Guidelines.html\" rel=\"nofollow\">NASA image use policy.</a></b>    <b><a href=\"http://www.nasa.gov/centers/goddard/home/index.html\" rel=\"nofollow\">NASA Goddard Space Flight Center</a></b> enables NASA’s mission through four scientific endeavors: Earth Science, Heliophysics, Solar System Exploration, and Astrophysics. Goddard plays a leading role in NASA’s accomplishments by contributing compelling scientific knowledge to advance the Agency’s mission.  <b>Follow us on <a href=\"http://twitter.com/NASAGoddardPix\" rel=\"nofollow\">Twitter</a></b>  <b>Like us on <a href=\"http://www.facebook.com/pages/Greenbelt-MD/NASA-Goddard/395013845897?ref=tsd\" rel=\"nofollow\">Facebook</a></b>  <b>Find us on <a href=\"http://instagram.com/nasagoddard?vm=grid\" rel=\"nofollow\">Instagram</a></b>",
+      "keywords": [
+       "NASA Sees Target Field, Minneapolis, Minnesota -- Home of 2014 MLB All-Star Game"
+      ],
+      "location": "Greenbelt, MD",
+      "media_type": "image",
+      "nasa_id": "GSFC_20171208_Archive_e001027",
+      "title": "NASA Sees Target Field, Minneapolis, Minnesota -- Home of 2014 MLB All-Star Game"
+     }
+    ],
+    "links": [
+     {
+      "href": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e001027/GSFC_20171208_Archive_e001027~thumb.jpg",
+      "rel": "preview",
+      "render": "image",
+      "width": 600,
+      "size": 59000,
+      "height": 336
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e001027/GSFC_20171208_Archive_e001027~orig.jpg",
+      "rel": "canonical",
+      "render": "image"
+     }
+    ]
+   },
+   {
+    "href": "https://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/collection.json",
+    "data": [
+     {
+      "center": "KSC",
+      "date_created": "2025-11-11T00:00:00Z",
+      "description": "The faint glow of an aurora is seen over Launch Complex 39B at NASA’s Kennedy Space Center in Florida on Tuesday, Nov. 11, 2025. Auroras are created by energetic electrons, which rain down from Earth’s magnetic bubble and interact with particles in the upper atmosphere to create glowing lights that stretch across the sky.",
+      "keywords": [
+       "Artemis",
+       "Aurora Borealis"
+      ],
+      "location": "Launch Complex 39A, KSC",
+      "media_type": "image",
+      "nasa_id": "KSC-20251111-PH-JBS01_0011",
+      "photographer": "NASA/Ben Smegelsky",
+      "title": "Aurora Borealis at Kennedy Space Center",
+      "album": [
+       "Artemis_II"
+      ]
+     }
+    ],
+    "links": [
+     {
+      "href": "https://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/KSC-20251111-PH-JBS01_0011~large.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 1920,
+      "size": 288768,
+      "height": 1280
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/KSC-20251111-PH-JBS01_0011~medium.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 1280,
+      "size": 111616,
+      "height": 853
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/KSC-20251111-PH-JBS01_0011~small.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 640,
+      "size": 23552,
+      "height": 426
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/KSC-20251111-PH-JBS01_0011~thumb.jpg",
+      "rel": "preview",
+      "render": "image",
+      "width": 640,
+      "size": 23552,
+      "height": 426
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/KSC-20251111-PH-JBS01_0011~orig.jpg",
+      "rel": "canonical",
+      "render": "image",
+      "height": 4160,
+      "width": 6240,
+      "size": 30408704
+     }
+    ]
+   },
+   {
+    "href": "https://images-assets.nasa.gov/image/PIA07395/collection.json",
+    "data": [
+     {
+      "center": "JPL",
+      "date_created": "2005-03-01T17:48:59Z",
+      "description": "This spectrum shows the light from a dusty, distant galaxy located 11 billion light-years away. The galaxy is invisible to optical telescopes, but NASA Spitzer Space Telescope captured the light from it and dozens of other similar galaxies.",
+      "description_508": "This spectrum shows the light from a dusty, distant galaxy located 11 billion light-years away. The galaxy is invisible to optical telescopes, but NASA Spitzer Space Telescope captured the light from it and dozens of other similar galaxies.",
+      "keywords": [
+       "Spitzer Space Telescope"
+      ],
+      "media_type": "image",
+      "nasa_id": "PIA07395",
+      "secondary_creator": "NASA/JPL-Caltech/Cornell",
+      "title": "Fingerprints in the Light"
+     }
+    ],
+    "links": [
+     {
+      "href": "https://images-assets.nasa.gov/image/PIA07395/PIA07395~medium.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 1280,
+      "size": 98000,
+      "height": 946
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/PIA07395/PIA07395~small.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 640,
+      "size": 34000,
+      "height": 473
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/PIA07395/PIA07395~thumb.jpg",
+      "rel": "preview",
+      "render": "image",
+      "width": 640,
+      "size": 34000,
+      "height": 473
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/PIA07395/PIA07395~large.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 1920,
+      "size": 175000,
+      "height": 1420
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/PIA07395/PIA07395~orig.jpg",
+      "rel": "canonical",
+      "render": "image",
+      "height": 1958,
+      "width": 2647,
+      "size": 282000
+     }
+    ]
+   },
+   {
+    "href": "https://images-assets.nasa.gov/image/iss074e0472536/collection.json",
+    "data": [
+     {
+      "center": "JSC",
+      "date_created": "2026-04-12T00:00:00Z",
+      "description": "iss074e0472536 (April 12, 2026) --- This serene image, taken from the International Space Station as it orbited 265 miles above the Indian Ocean, highlights a yellow‑green airglow blanketing Earth’s atmosphere beneath a starry sky at approximately 2:37 a.m. local time. Credit: NASA/Chris Williams",
+      "description_508": "008I8242.NEF",
+      "media_type": "image",
+      "nasa_id": "iss074e0472536",
+      "title": "A yellow‑green airglow blanketing Earth’s atmosphere beneath a starry sky"
+     }
+    ],
+    "links": [
+     {
+      "href": "https://images-assets.nasa.gov/image/iss074e0472536/iss074e0472536~large.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 1920,
+      "size": 251904,
+      "height": 1280
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/iss074e0472536/iss074e0472536~medium.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 1280,
+      "size": 88064,
+      "height": 853
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/iss074e0472536/iss074e0472536~small.jpg",
+      "rel": "alternate",
+      "render": "image",
+      "width": 640,
+      "size": 15360,
+      "height": 426
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/iss074e0472536/iss074e0472536~thumb.jpg",
+      "rel": "preview",
+      "render": "image",
+      "width": 640,
+      "size": 15360,
+      "height": 426
+     },
+     {
+      "href": "https://images-assets.nasa.gov/image/iss074e0472536/iss074e0472536~orig.jpg",
+      "rel": "canonical",
+      "render": "image",
+      "height": 5504,
+      "width": 8256,
+      "size": 9856614
+     }
+    ]
+   }
+  ],
+  "metadata": {
+   "total_hits": 7
+  }
+ }
+}

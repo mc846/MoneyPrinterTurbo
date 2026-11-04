@@ -1,0 +1,26 @@
+{
+ "collection": {
+  "version": "1.1",
+  "href": "http://images-api.nasa.gov/asset/sl4-143-4707",
+  "items": [
+   {
+    "href": "http://images-assets.nasa.gov/image/sl4-143-4707/sl4-143-4707~orig.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/sl4-143-4707/sl4-143-4707~large.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/sl4-143-4707/sl4-143-4707~medium.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/sl4-143-4707/sl4-143-4707~small.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/sl4-143-4707/sl4-143-4707~thumb.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/sl4-143-4707/metadata.json"
+   }
+  ]
+ }
+}

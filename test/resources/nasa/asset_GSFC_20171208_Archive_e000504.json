@@ -1,0 +1,23 @@
+{
+ "collection": {
+  "version": "1.1",
+  "href": "http://images-api.nasa.gov/asset/GSFC_20171208_Archive_e000504",
+  "items": [
+   {
+    "href": "http://images-assets.nasa.gov/image/GSFC_20171208_Archive_e000504/GSFC_20171208_Archive_e000504~orig.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/GSFC_20171208_Archive_e000504/GSFC_20171208_Archive_e000504~medium.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/GSFC_20171208_Archive_e000504/GSFC_20171208_Archive_e000504~small.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/GSFC_20171208_Archive_e000504/GSFC_20171208_Archive_e000504~thumb.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/GSFC_20171208_Archive_e000504/metadata.json"
+   }
+  ]
+ }
+}

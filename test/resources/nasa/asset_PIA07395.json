@@ -1,0 +1,26 @@
+{
+ "collection": {
+  "version": "1.1",
+  "href": "http://images-api.nasa.gov/asset/PIA07395",
+  "items": [
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA07395/PIA07395~orig.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA07395/PIA07395~large.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA07395/PIA07395~medium.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA07395/PIA07395~small.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA07395/PIA07395~thumb.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA07395/metadata.json"
+   }
+  ]
+ }
+}

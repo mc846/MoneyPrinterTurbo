@@ -1,0 +1,29 @@
+{
+ "collection": {
+  "version": "1.1",
+  "href": "http://images-api.nasa.gov/asset/KSC-20251111-PH-JBS01_0011",
+  "items": [
+   {
+    "href": "http://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/KSC-20251111-PH-JBS01_0011~orig.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/KSC-20251111-PH-JBS01_0011~orig.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/KSC-20251111-PH-JBS01_0011~large.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/KSC-20251111-PH-JBS01_0011~medium.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/KSC-20251111-PH-JBS01_0011~small.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/KSC-20251111-PH-JBS01_0011~thumb.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/KSC-20251111-PH-JBS01_0011/metadata.json"
+   }
+  ]
+ }
+}
