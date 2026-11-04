@@ -146,6 +146,9 @@ class VideoParams(BaseModel):
     # crop to video_aspect still meets the output resolution, when there are not
     # enough native-orientation candidates.
     crop_materials_to_aspect: bool = False
+    # With NASA images, show a short "Images: NASA, …" line during the last
+    # seconds of the video (opposite side of the subtitles).
+    nasa_credit_overlay: bool = False
     # Rank (or, with strict, also filter) Pixabay candidates by how many of the
     # search term's words appear in their tags.
     material_tag_relevance: MaterialTagRelevance = MaterialTagRelevance.off
@@ -250,7 +253,8 @@ class VideoScriptParams:
       "paragraph_number": 1,
       "video_script_prompt": "",
       "custom_system_prompt": "",
-      "script_accuracy_rules": false
+      "script_accuracy_rules": false,
+      "video_source": ""
     }
     """
 
@@ -260,6 +264,8 @@ class VideoScriptParams:
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
     script_accuracy_rules: bool = False
+    # Material source of the video; "nasa" adds the attribution rule.
+    video_source: Optional[str] = ""
 
 
 class VideoTermsParams:

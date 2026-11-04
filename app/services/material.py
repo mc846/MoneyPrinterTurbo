@@ -2355,6 +2355,9 @@ def _search_videos_with_cache(
         per_page = _search_per_page(provider)
         if per_page != _SEARCH_PER_PAGE_LIMITS[provider][0]:
             cache_args["per_page"] = per_page
+    if provider == "nasa":
+        # 过滤规则或相关设置改变后，旧的候选列表不能继续使用 24 小时。
+        cache_args["variant"] = nasa.search_cache_variant()
 
     def load_cache_safely() -> List[MaterialInfo] | None:
         try:

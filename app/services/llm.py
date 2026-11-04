@@ -90,6 +90,16 @@ SCRIPT_ACCURACY_RULES = (
     'technology as absolute ("unbreakable", "infinite", "a single point") unless it is.',
 )
 
+# 素材来源要求的署名限制。NASA 的使用条款禁止暗示 NASA 认可，也不允许把内容说成
+# “据 NASA”；video_source 为 nasa 时按与科学准确性规则相同的方式追加。
+SOURCE_ATTRIBUTION_RULES = {
+    "nasa": (
+        "do not attribute any statement to NASA or to any other organization, and do not "
+        'imply that an organization endorses or presents the video (no "according to NASA", '
+        '"NASA says", "NASA presents" or similar phrases in any language).',
+    ),
+}
+
 # Claude Code CLI 默认使用编码 agent 的系统提示词，其中大量约束与文案写作
 # 无关，会让脚本和关键词生成偏离要求，因此调用时整体替换掉。
 CLAUDE_CODE_SYSTEM_PROMPT = (
@@ -892,29 +902,41 @@ def _normalize_script_paragraph_number(paragraph_number: int | None) -> int:
     return value
 
 
-def _script_system_prompt(custom_system_prompt: str, script_accuracy_rules: bool) -> str:
+def _script_system_prompt(
+    custom_system_prompt: str, script_accuracy_rules: bool, video_source: str = ""
+) -> str:
     """
     返回脚本生成规则部分。
 
     科学准确性规则和语言、段落数一样是每次任务单独选择的设置，自定义 system
     prompt 时也不能被静默丢弃：默认 prompt 中按编号接在约束列表末尾；自定义
-    prompt 中作为单独一节追加，已经原样包含的规则不重复添加。
+    prompt 中作为单独一节追加，已经原样包含的规则不重复添加。素材来源对应的
+    署名规则（SOURCE_ATTRIBUTION_RULES）按同样方式接在准确性规则之后。
     """
-    if not script_accuracy_rules:
+    sections = []
+    if script_accuracy_rules:
+        sections.append(("Scientific Accuracy", SCRIPT_ACCURACY_RULES))
+    source_rules = SOURCE_ATTRIBUTION_RULES.get(str(video_source or "").strip().lower())
+    if source_rules:
+        sections.append(("Attribution", source_rules))
+    if not sections:
         return custom_system_prompt or DEFAULT_SCRIPT_SYSTEM_PROMPT
     if not custom_system_prompt:
         last_number = int(re.findall(r"^(\d+)\. ", DEFAULT_SCRIPT_SYSTEM_PROMPT, re.M)[-1])
+        all_rules = [rule for _, rules in sections for rule in rules]
         rules = "\n".join(
             f"{last_number + index}. {rule}"
-            for index, rule in enumerate(SCRIPT_ACCURACY_RULES, start=1)
+            for index, rule in enumerate(all_rules, start=1)
         )
         return f"{DEFAULT_SCRIPT_SYSTEM_PROMPT}\n{rules}"
     lowered = custom_system_prompt.lower()
-    missing = [rule for rule in SCRIPT_ACCURACY_RULES if rule.lower() not in lowered]
-    if not missing:
-        return custom_system_prompt
-    rules = "\n".join(f"{index}. {rule}" for index, rule in enumerate(missing, start=1))
-    return f"{custom_system_prompt.rstrip()}\n\n## Scientific Accuracy:\n{rules}"
+    prompt = custom_system_prompt.rstrip()
+    for title, section_rules in sections:
+        missing = [rule for rule in section_rules if rule.lower() not in lowered]
+        if missing:
+            rules = "\n".join(f"{index}. {rule}" for index, rule in enumerate(missing, start=1))
+            prompt += f"\n\n## {title}:\n{rules}"
+    return prompt if prompt != custom_system_prompt.rstrip() else custom_system_prompt
 
 
 def build_script_prompt(
@@ -924,6 +946,7 @@ def build_script_prompt(
     video_script_prompt: str = "",
     custom_system_prompt: str = "",
     script_accuracy_rules: bool = False,
+    video_source: str = "",
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
     video_script_prompt = _limit_script_text(
@@ -935,7 +958,7 @@ def build_script_prompt(
 
     # 将“脚本生成规则”和“运行时上下文”分开拼接。这样高级用户即使覆盖默认
     # system prompt，也不会漏掉视频主题、语言、段落数这些每次生成都必须带上的参数。
-    prompt = _script_system_prompt(custom_system_prompt, script_accuracy_rules)
+    prompt = _script_system_prompt(custom_system_prompt, script_accuracy_rules, video_source)
     prompt += f"""
 
 # Initialization:
@@ -962,6 +985,7 @@ def generate_script(
     custom_system_prompt: str = "",
     app_config=None,
     script_accuracy_rules: bool = False,
+    video_source: str = "",
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
     video_script_prompt = _limit_script_text(
@@ -977,6 +1001,7 @@ def generate_script(
         video_script_prompt=video_script_prompt,
         custom_system_prompt=custom_system_prompt,
         script_accuracy_rules=script_accuracy_rules,
+        video_source=video_source,
     )
     final_script = ""
     logger.info(
@@ -984,7 +1009,8 @@ def generate_script(
         f"subject={video_subject}, paragraph_number={paragraph_number}, "
         f"has_custom_prompt={bool(video_script_prompt.strip())}, "
         f"has_custom_system_prompt={bool(custom_system_prompt.strip())}, "
-        f"script_accuracy_rules={bool(script_accuracy_rules)}"
+        f"script_accuracy_rules={bool(script_accuracy_rules)}, "
+        f"attribution_rules={str(video_source or '').strip().lower() in SOURCE_ATTRIBUTION_RULES}"
     )
 
     def format_response(response):

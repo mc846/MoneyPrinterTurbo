@@ -1632,6 +1632,64 @@ def subtitle_font_supports_text(font_path: str, text: str) -> bool:
     return _subtitle_font_supports_sample(font_path, sample)
 
 
+# 素材署名（目前用于 NASA 图片，nasa_credit_overlay）：结尾这几秒显示一行小字。
+CREDIT_OVERLAY_SECONDS = 2.0
+
+
+def _subtitles_in_upper_half(params: VideoParams) -> bool:
+    if not params.subtitle_enabled:
+        return False
+    if params.subtitle_position in ("top", "two_thirds_bottom", "two_thirds", "2/3_bottom"):
+        return True
+    return params.subtitle_position == "custom" and float(params.custom_position or 0) < 50
+
+
+def credit_overlay_clip(
+    text: str,
+    font_path: str,
+    video_width: int,
+    video_height: int,
+    end_time: float,
+    params: VideoParams,
+) -> ImageClip | None:
+    """
+    署名小字：半透明深色底、白字黑描边，放在字幕的另一侧（字幕在上半部时放底部，
+    否则放顶部），只在最后 CREDIT_OVERLAY_SECONDS 秒显示。文字过长时缩小字号。
+    """
+    if not text or end_time <= 0:
+        return None
+    font_size = max(20, round(video_width * 0.03))
+    try:
+        while True:
+            font = ImageFont.truetype(font_path, font_size)
+            stroke = max(1, font_size // 14)
+            left, top, right, bottom = font.getbbox(text, stroke_width=stroke)
+            pad_x, pad_y = font_size // 2, font_size // 3
+            width, height = right - left + 2 * pad_x, bottom - top + 2 * pad_y
+            if width <= video_width * 0.9 or font_size <= 14:
+                break
+            font_size -= 2
+        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((0, 0, width - 1, height - 1), radius=pad_y, fill=(0, 0, 0, 150))
+        draw.text((pad_x - left, pad_y - top), text, font=font, fill=(255, 255, 255, 255),
+                  stroke_width=stroke, stroke_fill=(0, 0, 0, 255))
+    except Exception as exc:
+        logger.warning(f"failed to draw credit overlay: error={type(exc).__name__}, detail={exc}")
+        return None
+    if _subtitles_in_upper_half(params):
+        y = round(video_height * 0.96) - height
+    else:
+        y = round(video_height * 0.04)
+    start = max(0.0, end_time - CREDIT_OVERLAY_SECONDS)
+    return (
+        ImageClip(np.array(image))
+        .with_start(start)
+        .with_duration(end_time - start)
+        .with_position(("center", y))
+    )
+
+
 def generate_video(
     video_path: str,
     audio_path: str,
@@ -1639,6 +1697,7 @@ def generate_video(
     output_file: str,
     params: VideoParams,
     bgm_file_override: str | None = None,
+    credit_text: str = "",
 ) -> bool:
     """
     合成最终视频，并返回本次背景音乐处理是否成功。
@@ -1932,6 +1991,18 @@ def generate_video(
                 text_clips.append(clip)
             video_clip = CompositeVideoClip([video_clip, *text_clips])
             clip_stack.callback(video_clip.close)
+
+        if credit_text:
+            credit_font = font_path or file_security.resolve_path_within_directory(
+                utils.font_dir(), params.font_name or "STHeitiMedium.ttc"
+            )
+            credit_clip = credit_overlay_clip(
+                credit_text, credit_font, video_width, video_height, video_clip.duration, params
+            )
+            if credit_clip is not None:
+                logger.info(f"  ⑥ credit overlay: {credit_text}")
+                video_clip = CompositeVideoClip([video_clip, credit_clip])
+                clip_stack.callback(video_clip.close)
 
         bgm_enabled = bgm_service.should_use_bgm(
             params.bgm_type, params.bgm_volume

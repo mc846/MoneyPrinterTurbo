@@ -549,6 +549,15 @@ Batch manifests:
         ),
     )
     video_group.add_argument(
+        "--nasa-credit-overlay",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help=(
+            'with --video-source nasa, show a short "Images: NASA, ..." line during the '
+            "last 2 seconds of the video (default: disabled)"
+        ),
+    )
+    video_group.add_argument(
         "--material-tag-relevance",
         default=None,
         choices=_MATERIAL_TAG_RELEVANCE_MODES,
@@ -1092,6 +1101,7 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         "video_clip_speed",
         "match_materials_to_script",
         "crop_materials_to_aspect",
+        "nasa_credit_overlay",
         "material_tag_relevance",
         "exclude_ai_generated_materials",
         "video_terms_style",

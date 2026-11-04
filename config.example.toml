@@ -142,6 +142,12 @@ nasa_media_types = ["image"]
 # `uv sync --extra face`; without it a warning is logged once and only the text
 # filters run. 检测到人脸的图片跳过，换下一个候选；需要可选依赖 face。
 nasa_face_filter = true
+# Show a small image credit line ("Images: NASA, ESA and others", in Turkish for
+# tr-* videos) during the last 2 seconds, on the side away from the subtitles.
+# A credits.txt with every image's credit and NASA page is always written to the
+# task folder when NASA images are used. CLI: --nasa-credit-overlay.
+# 结尾 2 秒显示图片来源；任务目录中的 credits.txt 不受此开关影响。
+nasa_credit_overlay = false
 
 # WaveSpeed AI generates clips from your script keywords with text-to-video
 # models. Create an API key at https://wavespeed.ai
