@@ -2,6 +2,7 @@
 
 import json
 import os
+import random
 import sys
 import tomllib
 from pathlib import Path
@@ -9,7 +10,7 @@ from unittest.mock import patch
 from urllib.parse import unquote
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR))
@@ -81,7 +82,8 @@ def test_search_parses_results_and_skips_filtered_candidates():
     items, get_json = _search()
 
     assert [i.source_info["asset_id"] for i in items] == [
-        "PIA14103", "sl4-143-4707", "GSFC_20171208_Archive_e001027", "iss074e0472536",
+        "PIA14103", "sl4-143-4707", "GSFC_20171208_Archive_e001027", "KSC-20251111-PH-JBS01_0011",
+        "iss074e0472536",
     ]
     nebula = items[0]
     assert nebula.provider == "nasa"
@@ -92,9 +94,10 @@ def test_search_parses_results_and_skips_filtered_candidates():
     assert nebula.source_info["credit"] == "NASA/JPL-Caltech/UCLA"
     assert nebula.source_info["ai_generated"] is False
     assert isinstance(nebula.source_info["tags"], list)
-    # KSC -PH- 照片和光谱图被文字过滤，没有再请求资产清单；1280 px 的图片因分辨率被淘汰。
+    # 光谱图被文字过滤，没有再请求资产清单；1280 px 的图片因分辨率被淘汰。KSC 的极光照片
+    # 描述里没有人物角色词，单凭编号不再排除。
     requested_assets = {unquote(c.args[0].rsplit("/", 1)[1]) for c in get_json.call_args_list if "/asset/" in c.args[0]}
-    assert "KSC-20251111-PH-JBS01_0011" not in requested_assets
+    assert "KSC-20251111-PH-JBS01_0011" in requested_assets
     assert "PIA07395" not in requested_assets
     assert "GSFC_20171208_Archive_e000504" in requested_assets
 
@@ -212,18 +215,104 @@ def test_third_party_copyright(description, metadata, expected):
 @pytest.mark.parametrize(
     ("data", "expected"),
     [
-        ({"nasa_id": "KSC-20251111-PH-JBS01_0011", "title": "Aurora Borealis"}, "KSC-20251111-PH-JBS01_0011"),
-        ({"nasa_id": "KSC-20211014-VP-CDC01-0001", "title": "Lucy"}, "KSC-20211014-VP-CDC01-0001"),
         ({"nasa_id": "x", "title": "Astronaut portrait of Jane Doe"}, "astronaut"),
         ({"nasa_id": "x", "title": "Spacewalk", "keywords": ["Expedition 74 Crew"]}, "crew"),
         ({"nasa_id": "x", "title": "Media Briefing Preview"}, "briefing"),
         ({"nasa_id": "x", "title": "We Asked a NASA Expert"}, "expert"),
         ({"nasa_id": "x", "title": "Mars Express views Olympus Mons"}, None),
         ({"nasa_id": "x", "title": "Pressure suit test chamber", "keywords": ["vacuum"]}, None),
-        ({"nasa_id": "KSC-03pd1100", "title": "Debris reconstruction hangar"}, None),
+        # 国际空间站照片标题里的拍摄者说明不算人物
+        ({"nasa_id": "iss006e28028", "title": "Southern Cross photographed by the Expedition 6 crew"}, None),
+        ({"nasa_id": "iss034e039331", "title": "London at night", "keywords": ["Crew Earth Observations"]}, None),
+        # NASA 总部摄影直接排除
+        ({"nasa_id": "NHQ202606040047", "title": "Beyond the Deep Field"}, "NHQ202606040047"),
+        # 中心摄影编号只在描述里有人物角色词时排除
+        ({"nasa_id": "KSC-20251111-PH-JBS01_0011", "title": "Aurora Borealis at Kennedy Space Center"}, None),
+        ({"nasa_id": "KSC-07pd3362", "title": "STA training",
+          "description": "STS-122 Commander Steve Frick prepares to practice shuttle landings."},
+         "KSC-07pd3362: commander"),
+        ({"nasa_id": "05pd0883", "title": "STA", "description": "STS-114 Pilot James Kelly suits up for flights."},
+         "05pd0883: pilot"),
+        ({"nasa_id": "KSC-2010-4693", "title": "NuSTAR",
+          "description": "Technicians move the second stage of the Pegasus XL rocket."}, None),
+        ({"nasa_id": "PIA00001", "title": "Clouds", "description": "An astronaut photograph of clouds."}, None),
+        ({"nasa_id": "KSC-20181212-PH_CSH02_0002", "title": "Applied Physics Lab",
+          "description": "Dr. Mark Nurge, a physicist in the Applied Physics Laboratory, adjusted cables."},
+         "KSC-20181212-PH_CSH02_0002: physicist"),
+        ({"nasa_id": "KSC-20181212-PH_CSH02_0003", "title": "Magnet demo",
+          "description": "Principal investigator, Dr. Janine Captain, demonstrates a magnet."},
+         "KSC-20181212-PH_CSH02_0003: principal investigator"),
+        ({"nasa_id": "GRC-1965-C-00811", "title": "Laser", "description": "Dr. Theodore Maiman examines the laser."},
+         "GRC-1965-C-00811: dr. theodore"),
+        # 姓名写法只对中心摄影编号生效，且区分大小写
+        ({"nasa_id": "PIA00001", "title": "Galaxy", "description": "Dr. Jane Smith said the galaxy is old."}, None),
+        ({"nasa_id": "KSC-2010-4693", "title": "Telescope", "description": "Scientists use the telescope daily."},
+         None),
+        # 活动用语（描述里也找）
+        ({"nasa_id": "x", "title": "Hubble legacy",
+          "description": "Julia Roman-Duval, second from right, speaks about the history of the Hubble Space "
+                         "Telescope during an event titled “Beyond the Deep Field”."}, "speaks"),
+        ({"nasa_id": "x", "title": "New Year", "description": "Guests celebrate New Years at the laboratory."},
+         "guests"),
+        ({"nasa_id": "x", "title": "Webb", "description": "Scientists join a panel discussion on exoplanets."},
+         "panel discussion"),
+        ({"nasa_id": "x", "title": "Center tour", "description": "Seen during an awards event at Goddard."},
+         "during an awards event"),
+        ({"nasa_id": "AFRC2019-0248-01", "title": "Confined Space Exercise Improves Response",
+          "description": "A mannequin is used to simulate a worker who has collapsed."}, "mannequin"),
     ],
 )
 def test_identifiable_person_risk(data, expected):
+    assert nasa.identifiable_person_risk(data) == expected
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Lava tubes originate during eruption event, when the margins of a flow harden.",
+        "Cliff faces at the center of the image were created during the collapse event that formed the caldera.",
+        "This two-panel illustration shows a black hole surrounded by a disk of gas.",
+        "The OWS solar panel on the left side was also lost on workshop launch day.",
+        "This NASA/ESA Hubble Space Telescope image presents the Arches Cluster.",
+        "The rover will search for signs of ancient microbial life.",
+        "The auroras rotate from left to right, curving around the planet.",
+        "As Cassini watches the rings pass in front of the red giant star Aldebaran.",
+        "For more information about the DSN, visit: the mission page.",
+        'Credit: NASA <a href="http://www.nasa.gov/audience/formedia/features/MP_Photo_Guidelines.html">'
+        "NASA image use policy.</a>",
+    ],
+)
+def test_event_language_ignores_scientific_wording(description):
+    # 实测这些说法在科学图片说明里常见，单独出现时不代表有人
+    assert nasa.identifiable_person_risk({"nasa_id": "PIA00001", "title": "Science", "description": description}) is None
+
+
+NHQ_PANEL_KEYWORDS = [
+    "Amber Straughn", "Dave Leckrone", "Hubble Space Telescope", "Jennifer Wiseman", "Julia Roman-Duval",
+    "Ken Carpenter", "Mary W. Jackson NASA Headquarters Building", "Ray Villard", "Washington",
+]
+POWER_BEAMING_KEYWORDS = [
+    "Power-Beaming", "power beaming", "experimental radio-controlled model aircraft", "spotlight", "solar panel",
+    "Dave Bushman", "Tony Frackowiak", "Dale Reed", "Alex Sim", "Ryan Warner", "Derrick Barrett",
+]
+
+
+@pytest.mark.parametrize(
+    ("data", "names", "expected"),
+    [
+        # 9 个关键词里 6 个是人名（67%）：排除
+        ({"nasa_id": "x", "title": "Hubble", "keywords": NHQ_PANEL_KEYWORDS}, (6, 9), "person names 6/9"),
+        # 模型飞机照片列出 6 位项目成员（55%）：不到 60%，不排除
+        ({"nasa_id": "x", "title": "Power beaming", "keywords": POWER_BEAMING_KEYWORDS}, (6, 11), None),
+        ({"nasa_id": "x", "title": "Galaxy", "keywords": ["Milky Way", "Spitzer Space Telescope", "New Horizons"]},
+         (0, 3), None),
+        # 摄影师本人不算；剩下 1 个人名不够
+        ({"nasa_id": "x", "title": "Launch", "keywords": ["Bill Ingalls", "Jane Doe", "Soyuz"],
+          "photographer": "Bill Ingalls"}, (1, 3), None),
+    ],
+)
+def test_person_name_keywords(data, names, expected):
+    assert nasa.person_name_keywords(data) == names
     assert nasa.identifiable_person_risk(data) == expected
 
 
@@ -240,6 +329,12 @@ def test_identifiable_person_risk(data, expected):
         ({"title": "Blowin in the Stellar Wind", "description": "This image of the Elephant Trunk nebula shows dust."},
          None),
         ({"title": "Earth photographed from orbit", "description": "An astronaut photograph of clouds."}, None),
+        ({"title": "Headquarters building", "description": "A close-up view of the NASA insignia at the entrance."},
+         "insignia"),
+        ({"title": "STS-70", "description": "Designed by the crew members, the STS-70 crew patch depicts Discovery."},
+         "crew patch"),
+        ({"title": "WISE", "description": "This image shows a patch of sky in the constellation Pisces."}, None),
+        ({"title": "Nebula", "description": 'See <a href="https://example.org/logo.png">the page</a>.'}, None),
     ],
 )
 def test_text_graphic_risk(data, expected):
@@ -254,6 +349,27 @@ def test_credit_from_description_line_without_html():
         "ESA/Hubble & NASA, Acknowledgement: Judy Schmidt"
     )
     assert nasa.extract_credit(_data("iss074e0472536")) == "NASA/Chris Williams"
+
+
+@pytest.mark.parametrize(
+    ("description", "expected"),
+    [
+        # 段落之间只剩两个空格：署名后的说明文字不再并入
+        ("Barred Spiral Galaxy NGC 1300  Credit: NASA, ESA, and The Hubble Heritage Team (STScI/AURA) "
+         "Acknowledgment: P. Knezek (WIYN)  The Hubble Space Telescope is a project of international "
+         "cooperation between NASA and the European Space Agency.",
+         "NASA, ESA, and The Hubble Heritage Team (STScI/AURA) Acknowledgment: P. Knezek (WIYN)"),
+        # 姓名缩写的句号不是句子结束
+        ("Credits: NASA, ESA, and D. Coe, J. Anderson, and R. van der Marel (STScI)  More info: Astronomers "
+         "have uncovered a near-record breaking supermassive black hole.",
+         "NASA, ESA, and D. Coe, J. Anderson, and R. van der Marel (STScI)"),
+        ("Credit: NASA/JPL-Caltech. The image was taken in 2010 by the spacecraft.", "NASA/JPL-Caltech"),
+        ("in Washington. Photo Credit: (NASA/Keegan Barber)", "NASA/Keegan Barber"),
+        ("Image credit: (NASA) and (ESA)", "(NASA) and (ESA)"),
+    ],
+)
+def test_credit_line_is_cut_at_sentence_end_and_unwrapped(description, expected):
+    assert nasa.extract_credit({"description": description}) == expected
 
 
 def test_credit_falls_back_to_metadata_secondary_creator_and_nasa():
@@ -359,6 +475,105 @@ def test_save_image_clip_fails_softly(tmp_path):
         assert nasa.save_image_clip(item, str(tmp_path), video_aspect=PORTRAIT, clip_duration=5) == ""
 
 
+def test_prepare_image_reuses_the_prepared_file(tmp_path):
+    source = _image(tmp_path / "a.jpg", (2160, 3840))
+    first = nasa.prepare_image(source, PORTRAIT, 5)
+    Path(first).write_bytes(b"cached")
+
+    assert nasa.prepare_image(source, PORTRAIT, 5) == first
+    assert Path(first).read_bytes() == b"cached"
+    assert not list(tmp_path.glob("*.part"))
+
+
+# ------------------------------------------------------------------ 人脸检查
+
+
+def _drawn_face(path, size=(1242, 2208)):
+    """画一张简化的人脸（不是真人照片），YuNet 能认出来。"""
+    face = Image.new("L", (440, 440), 40)
+    draw = ImageDraw.Draw(face)
+    draw.ellipse([80, 40, 360, 400], fill=200)
+    draw.ellipse([124, 150, 196, 190], fill=60)
+    draw.ellipse([244, 150, 316, 190], fill=60)
+    draw.rectangle([116, 120, 204, 132], fill=90)
+    draw.rectangle([236, 120, 324, 132], fill=90)
+    draw.polygon([(220, 190), (196, 270), (244, 270)], fill=170)
+    draw.ellipse([170, 300, 270, 330], fill=90)
+    image = Image.new("L", size, 40)
+    image.paste(face.filter(ImageFilter.GaussianBlur(6)), ((size[0] - 440) // 2, (size[1] - 440) // 2))
+    image.convert("RGB").save(path, "JPEG", quality=90)
+    return str(path)
+
+
+def _star_field(path, size=(1242, 2208)):
+    """随机星点和几团模糊的星云，代表天文图片。"""
+    rng = random.Random(7)
+    nebula = Image.new("L", size, 5)
+    draw = ImageDraw.Draw(nebula)
+    for _ in range(6):
+        x, y, r = rng.randrange(size[0]), rng.randrange(size[1]), rng.randrange(100, 400)
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=rng.randrange(40, 120))
+    image = nebula.filter(ImageFilter.GaussianBlur(60))
+    draw = ImageDraw.Draw(image)
+    for _ in range(4000):
+        x, y, r = rng.randrange(size[0]), rng.randrange(size[1]), rng.choice((1, 1, 1, 2, 4))
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=rng.randrange(120, 256))
+    image.convert("RGB").save(path, "JPEG", quality=90)
+    return str(path)
+
+
+def test_count_faces_finds_a_drawn_face_and_not_a_star_field(tmp_path):
+    pytest.importorskip("cv2")
+
+    assert nasa.count_faces(_drawn_face(tmp_path / "face.jpg")) >= 1
+    assert nasa.count_faces(_star_field(tmp_path / "stars.jpg")) == 0
+    assert nasa.face_filter_active()
+
+
+def test_face_filter_without_opencv_falls_back_to_text_filters(tmp_path, monkeypatch):
+    monkeypatch.setattr(nasa, "_face_detector_state", {})
+    monkeypatch.setitem(sys.modules, "cv2", None)  # import cv2 失败
+    face = _drawn_face(tmp_path / "face.jpg")
+
+    with patch.object(nasa.logger, "warning") as warning:
+        assert nasa.count_faces(face) is None
+        assert nasa.face_filter_active() is False
+        assert nasa.count_faces(face) is None
+    # 只警告一次，并说明怎样安装
+    assert warning.call_count == 1 and "uv sync --extra face" in warning.call_args.args[0]
+
+    item = MaterialInfo(provider="nasa", url="https://images-assets.nasa.gov/image/x/x~orig.jpg", duration=5)
+    with (
+        patch.object(nasa, "_download_image", return_value=_image(tmp_path / "nasa-x.jpg", (2160, 3840))),
+        patch.object(nasa.video, "render_image_zoom_video", return_value="clip.mp4"),
+    ):
+        assert nasa.save_image_clip(item, str(tmp_path), video_aspect=PORTRAIT, clip_duration=5) == "clip.mp4"
+
+
+def test_image_with_a_face_is_skipped_after_cropping(tmp_path):
+    item = MaterialInfo(provider="nasa", url="https://x/x~orig.jpg", duration=5, source_info={"asset_id": "NHQ1"})
+    source = _image(tmp_path / "nasa-x.jpg", (2160, 3840))
+    with (
+        patch.object(nasa, "_download_image", return_value=source),
+        patch.object(nasa, "count_faces", return_value=2) as count_faces,
+        patch.object(nasa.video, "render_image_zoom_video") as render,
+    ):
+        assert nasa.save_image_clip(item, str(tmp_path), video_aspect=PORTRAIT, clip_duration=5) == ""
+        assert nasa.screen_image(item, str(tmp_path), video_aspect=PORTRAIT, clip_duration=5) is False
+        with patch.dict(config.app, {"nasa_face_filter": False}):
+            assert nasa.screen_image(item, str(tmp_path), video_aspect=PORTRAIT, clip_duration=5) is True
+
+    render.assert_not_called()
+    # 检查的是裁剪、缩小后的图片
+    assert count_faces.call_args.args[0].endswith("-portrait-1242x2208.jpg")
+
+
+def test_screen_image_rejects_images_that_cannot_be_prepared(tmp_path):
+    item = MaterialInfo(provider="nasa", url="https://x/x~orig.jpg", duration=5)
+    with patch.object(nasa, "_download_image", return_value=""):
+        assert nasa.screen_image(item, str(tmp_path), video_aspect=PORTRAIT, clip_duration=5) is False
+
+
 class _FakeResponse:
     def __init__(self, payload):
         self.payload, self.status_code = payload, 200
@@ -432,8 +647,10 @@ def _nasa_item(term, name, tags, *, landscape=False):
     )
 
 
-def _run_nasa(results, audio_duration, **kwargs):
+def _run_nasa(results, audio_duration, *, faces=(), screened=None, **kwargs):
+    """``faces``：画面里有人脸的图片；给出时人脸检查视为可用。``screened`` 收集被检查的图片。"""
     rendered, sources = [], []
+    screened = [] if screened is None else screened
 
     def fake_search(search_term, minimum_duration, video_aspect, **options):
         return results[search_term]
@@ -442,10 +659,16 @@ def _run_nasa(results, audio_duration, **kwargs):
         rendered.append((item.source_info["asset_id"], options))
         return f"/tmp/{item.source_info['asset_id']}.mp4"
 
+    def fake_screen(item, save_dir="", **options):
+        screened.append(item.source_info["asset_id"])
+        return item.source_info["asset_id"] not in faces
+
     with (
         patch.dict(config.app, {"material_directory": ""}),
         patch.object(nasa, "search_images", side_effect=fake_search),
         patch.object(nasa, "save_image_clip", side_effect=fake_clip),
+        patch.object(nasa, "face_filter_active", return_value=bool(faces)),
+        patch.object(nasa, "screen_image", side_effect=fake_screen),
         patch.object(material, "save_video") as save_video,
         patch.object(material.material_cache, "load_material_search_cache", return_value=None),
         patch.object(material.material_cache, "save_material_search_cache"),
@@ -480,6 +703,40 @@ def test_script_order_renders_nasa_images_with_spread_relevance_and_native_first
     assert [(s["credit"], s["source_page"]) for s in sources] == [
         ("NASA/bh", "https://images.nasa.gov/details/bh"), ("NASA/star", "https://images.nasa.gov/details/star"),
     ]
+
+
+def test_script_order_replaces_an_image_with_a_face_by_the_same_terms_next_candidate():
+    results = {
+        "black hole": [_nasa_item("black hole", "bh", ["black hole"])],
+        "nebula": [_nasa_item("nebula", "nebula-face", ["nebula"]), _nasa_item("nebula", "nebula", ["nebula"])],
+        "star": [_nasa_item("star", "star", ["star"])],
+    }
+
+    paths, rendered, _ = _run_nasa(results, 14, faces={"nebula-face"}, match_script_order=True)
+
+    # 被拒绝的图片换成同一关键词的下一个候选，片段仍在第二个位置
+    assert paths == ["bh", "nebula", "star"]
+    assert "nebula-face" not in [asset for asset, _ in rendered]
+
+
+def test_script_order_skips_a_term_whose_candidates_all_show_faces():
+    results = {
+        "galaxy": [_nasa_item("galaxy", "g1", ["galaxy"]), _nasa_item("galaxy", "g2", ["galaxy"])],
+        "telescope": [_nasa_item("telescope", "panel", ["telescope"])],
+    }
+
+    paths, _, _ = _run_nasa(results, 9, faces={"panel"}, match_script_order=True)
+
+    assert paths == ["g1", "g2"]
+
+
+def test_script_order_without_face_filter_does_not_screen():
+    results = {"black hole": [_nasa_item("black hole", "bh", ["black hole"])]}
+    screened = []
+
+    paths, _, _ = _run_nasa(results, 4, screened=screened, match_script_order=True)
+
+    assert paths == ["bh"] and screened == []
 
 
 def test_pooled_mode_also_renders_nasa_images():
@@ -557,3 +814,13 @@ def test_example_config_documents_nasa():
     app = tomllib.loads((ROOT_DIR / "config.example.toml").read_text(encoding="utf-8"))["app"]
 
     assert app["nasa_media_types"] == ["image"]
+    assert app["nasa_face_filter"] is True
+
+
+def test_face_detection_is_an_optional_extra():
+    project = tomllib.loads((ROOT_DIR / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+
+    # 默认依赖里没有 OpenCV；YuNet 模型随源码提供
+    assert project["optional-dependencies"]["face"] == ["opencv-python-headless>=4.8"]
+    assert not [dependency for dependency in project["dependencies"] if dependency.startswith("opencv")]
+    assert os.path.getsize(nasa.FACE_MODEL_FILE) == 232589

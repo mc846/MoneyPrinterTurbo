@@ -60,6 +60,13 @@ Issues = "https://github.com/harry0703/MoneyPrinterTurbo/issues"
 twelvelabs = [
     "twelvelabs>=1.2.8",
 ]
+# Optional face check for the NASA image source (`nasa_face_filter`): prepared
+# images that contain a face are skipped, using the bundled YuNet model with
+# cv2.FaceDetectorYN (needs OpenCV 4.8+). Without it only the text filters run.
+# Install with `uv sync --extra face`.
+face = [
+    "opencv-python-headless>=4.8",
+]
 
 [dependency-groups]
 dev = [

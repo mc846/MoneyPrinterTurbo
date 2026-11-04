@@ -2672,6 +2672,40 @@ def _select_materials_until_duration(
     return selected
 
 
+def _screen_ordered_materials(
+    chosen_materials: List[tuple[int, int, str, MaterialInfo]],
+    candidate_groups: List[tuple[str, List[MaterialInfo]]],
+    selected_video_urls: set,
+    screen_material: Callable[[MaterialInfo], bool],
+) -> List[tuple[int, int, str, MaterialInfo]]:
+    """
+    逐个检查按文案顺序选中的候选，返回通过的 (分组, 下标, 关键词, 素材)。
+
+    被拒绝的候选记入 ``selected_video_urls``，不再分配给任何关键词，并换成同一
+    关键词的下一个未用候选，位置不变；该关键词没有候选可换时本轮跳过它。
+    """
+    screened = []
+    round_urls = {item.url for _, _, _, item in chosen_materials}
+    for group_position, candidate_index, search_term, item in chosen_materials:
+        term_items = candidate_groups[group_position][1]
+        while not screen_material(item):
+            selected_video_urls.add(item.url)
+            candidate_index += 1
+            while candidate_index < len(term_items) and (
+                term_items[candidate_index].url in selected_video_urls
+                or term_items[candidate_index].url in round_urls
+            ):
+                candidate_index += 1
+            if candidate_index >= len(term_items):
+                item = None
+                break
+            item = term_items[candidate_index]
+            round_urls.add(item.url)
+        if item is not None:
+            screened.append((group_position, candidate_index, search_term, item))
+    return screened
+
+
 def download_videos(
     task_id: str,
     search_terms: List[str],
@@ -2730,7 +2764,9 @@ def download_videos(
     provider = "pexels"
     remote_search_videos = search_videos_pexels
     # NASA 候选是图片：下载后裁剪缩小并渲染成片段。其它库存素材源直接下载视频。
+    # 人脸检查可用时，按文案顺序匹配会先筛选候选，被拒绝的图片换成同一关键词的下一个。
     save_material = None
+    screen_material = None
     if source == "pixabay":
         provider = "pixabay"
         remote_search_videos = search_videos_pixabay
@@ -2746,6 +2782,13 @@ def download_videos(
                 item, save_dir, video_aspect=video_aspect,
                 clip_duration=max_clip_duration, image_motion=image_motion,
             )
+
+        if nasa.face_filter_active():
+            def screen_material(item: MaterialInfo) -> bool:
+                return nasa.screen_image(
+                    item, material_directory, video_aspect=video_aspect,
+                    clip_duration=max_clip_duration, image_motion=image_motion,
+                )
 
     def search_videos(
         search_term: str,
@@ -2871,6 +2914,7 @@ def download_videos(
             material_directory=material_directory,
             progress_callback=progress_callback,
             **({"save_material": save_material} if save_material is not None else {}),
+            **({"screen_material": screen_material} if screen_material is not None else {}),
         )
 
     valid_video_items = []
@@ -3586,9 +3630,13 @@ def _download_videos_by_script_order(
     material_directory: str,
     progress_callback: Callable[[float], None] | None = None,
     save_material: Callable[[MaterialInfo, str], str] | None = None,
+    screen_material: Callable[[MaterialInfo], bool] | None = None,
 ) -> List[str]:
     """
     按脚本文案顺序下载素材。
+
+    ``screen_material`` 在下载前逐个检查本轮选中的候选；被拒绝的候选换成同一
+    关键词的下一个候选，片段仍留在该关键词的位置上。
 
     默认下载逻辑会把所有关键词的候选素材合并成一个大列表；如果第一个
     关键词返回很多结果，最终下载时可能一直消耗这个关键词的素材，后续
@@ -3694,9 +3742,15 @@ def _download_videos_by_script_order(
         # _select_materials_until_duration 返回候选列表的前缀子集，
         # 因此前 len(selected_materials) 个即本轮实际尝试下载的候选，
         # 只推进这些候选所在分组的下标。
-        for group_position, candidate_index, _, item in round_materials[
-            : len(selected_materials)
-        ]:
+        chosen_materials = round_materials[: len(selected_materials)]
+        if screen_material is not None:
+            chosen_materials = _screen_ordered_materials(
+                chosen_materials, candidate_groups, selected_video_urls, screen_material
+            )
+            selected_materials = [
+                (search_term, item) for _, _, search_term, item in chosen_materials
+            ]
+        for group_position, candidate_index, _, item in chosen_materials:
             next_candidate_indices[group_position] = candidate_index + 1
             selected_video_urls.add(item.url)
             attempted_positions.add(group_position)
