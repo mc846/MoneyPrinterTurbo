@@ -49,7 +49,8 @@ _UNOPENED_THINK_BLOCK_RE = re.compile(r"^.*</think\s*>", re.IGNORECASE | re.DOTA
 # 部分模型（实测 gpt-oss）会输出不换行连字符、数字连字符和不换行空格。默认字幕字体
 # STHeitiMedium 和 MicrosoftYaHeiBold 都没有 U+2011、U+2012、U+202F 的字形，
 # STHeiti 也没有 U+00A0，字幕里会显示成方框；U+2010 统一成普通连字符。两种字体都有
-# 的 en/em dash（U+2013、U+2014）和 U+2015 保持不变，引号和各语言字母也不处理。
+# 的 en/em dash（U+2013、U+2014）和 U+2015 保持不变，各语言字母也不处理；引号只处理
+# 下面的字母间撇号。
 _UNSUPPORTED_PUNCTUATION = str.maketrans({
     "‐": "-",
     "‑": "-",
@@ -57,6 +58,11 @@ _UNSUPPORTED_PUNCTUATION = str.maketrans({
     " ": " ",
     " ": " ",
 })
+# 这两种字体还把弯引号画成全角宽度（60 号字 60 px，ASCII ' 只有 12–18 px）。土耳其语等
+# 语言在字母之间用 U+2019 或 U+02BC 当撇号（Way’in、Einstein’ın），字幕里会空出一大块，
+# 所以夹在两个字母（Unicode 字母，含土耳其字母）之间的统一成 ASCII '；后面不是字母的
+# U+2019（单引号的闭合）和其他引号不变。
+_LETTER_APOSTROPHE_RE = re.compile(r"(?<=[^\W\d_])[’ʼ](?=[^\W\d_])")
 _URL_USERINFO_RE = re.compile(
     r"((?:https?|wss?)://)([^/\s?#@]+@)", re.IGNORECASE
 )
@@ -241,7 +247,8 @@ def _normalize_text_response(content, llm_provider: str) -> str:
     # vLLM/Ollama 等网关返回的正文只剩 `推理...</think>答案`。成对清理之后
     # 仍残留的闭合标签之前都是推理内容，也不能进入脚本。
     content = _UNOPENED_THINK_BLOCK_RE.sub("", content)
-    content = _UNCLOSED_THINK_BLOCK_RE.sub("", content).translate(_UNSUPPORTED_PUNCTUATION).strip()
+    content = _UNCLOSED_THINK_BLOCK_RE.sub("", content).translate(_UNSUPPORTED_PUNCTUATION)
+    content = _LETTER_APOSTROPHE_RE.sub("'", content).strip()
     if not content:
         raise ValueError(f"[{llm_provider}] returned empty text content")
 

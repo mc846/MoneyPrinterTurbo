@@ -1,4 +1,5 @@
-"""LLM 回复中字幕字体缺字的标点：不换行连字符、数字连字符和不换行空格统一成普通字符。"""
+"""LLM 回复中字幕字体缺字的标点：不换行连字符、数字连字符和不换行空格统一成普通字符；
+字母之间的弯撇号统一成 ASCII '。"""
 
 import json
 import types
@@ -27,9 +28,39 @@ def test_unsupported_punctuation_becomes_plain(raw, expected):
 def test_turkish_letters_quotes_dashes_and_paragraphs_are_kept():
     text = (
         "Çığ, ğüşıöç İĞÜŞÖÇ – “tırnak” ‘tek’ «guillemet» — uzun tire ― yatay çizgi.\n\n"
-        "İkinci paragraf: Samanyolu’nun merkezi."
+        "İkinci paragraf: Samanyolu'nun merkezi."
     )
 
+    assert llm._normalize_text_response(text, "ollama") == text
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Milky Way’in yakınında", "Milky Way'in yakınında"),
+        ("Einstein’ın kuramı", "Einstein'ın kuramı"),
+        ("Güneş’in ve Dünya’nın", "Güneş'in ve Dünya'nın"),
+        ("İSTANBUL’DA, Çağ’ı, Öykü’ye, ışık’ı", "İSTANBUL'DA, Çağ'ı, Öykü'ye, ışık'ı"),
+        ("Hawaiʼi ve Einsteinʼın", "Hawai'i ve Einstein'ın"),
+        ("SN 2012Z’nin ışığı", "SN 2012Z'nin ışığı"),
+    ],
+)
+def test_apostrophe_between_letters_becomes_ascii(raw, expected):
+    assert llm._normalize_text_response(raw, "ollama") == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Ona ‘zombi yıldız’ deniyor.",
+        "Bilim insanları ‘yarım kalmış’, ‘kısmi’ patlama diyor.",
+        "‘Zombi’ yalnız bir takma ad’",
+        "Sonuç: “tam” değil.",
+        "1990’larda ve 2025’te",
+        "rock ’n’ roll",
+    ],
+)
+def test_quotes_not_between_two_letters_are_kept(text):
     assert llm._normalize_text_response(text, "ollama") == text
 
 
@@ -60,9 +91,18 @@ def test_term_json_with_these_characters_still_parses():
     assert terms == ["space-time grid", "neutron star", "1054-supernova"]
 
 
+def test_term_json_with_letter_apostrophes_still_parses():
+    reply = json.dumps(["Einstein’s ring", "Kepler’s supernova", "‘zombie’ star"], ensure_ascii=False)
+    settings, openai, completion = _ollama_reply(f"Terimler:\n{reply}")
+    with settings, openai, completion:
+        terms = llm.generate_terms("Zombi yıldızlar", "Metin.", amount=3)
+
+    assert terms == ["Einstein's ring", "Kepler's supernova", "‘zombie’ star"]
+
+
 def test_script_from_ollama_is_normalized():
-    settings, openai, completion = _ollama_reply("Uzay‑zaman bükülür; saatler yavaşlar.")
+    settings, openai, completion = _ollama_reply("Uzay‑zaman bükülür; Einstein’ın saatleri yavaşlar.")
     with settings, openai, completion:
         script = llm.generate_script("Görelilik", language="tr-TR")
 
-    assert script == "Uzay-zaman bükülür; saatler yavaşlar."
+    assert script == "Uzay-zaman bükülür; Einstein'ın saatleri yavaşlar."
