@@ -598,6 +598,248 @@ def _order_material_candidates(
     return ordered
 
 
+# 主素材源的某个关键词结果不够用时，改到另一个库存素材源搜索同一关键词
+# （video_source_fallback）。只有按关键词搜索、带缓存的库存素材源能互为后备；
+# 按需生成的付费素材源和本地素材不参与。
+FALLBACK_VIDEO_SOURCES = ("pexels", "pixabay", "coverr", "nasa")
+_FALLBACK_API_KEYS = {
+    "pexels": "pexels_api_keys",
+    "pixabay": "pixabay_api_keys",
+    "coverr": "coverr_api_keys",
+}
+# 后备判定：主素材源过滤后，相关度不低于 MIN_RELEVANCE 的候选少于 MIN_CANDIDATES
+# 个时，该关键词改到后备素材源搜索。相关度关闭或素材源没有标签时只数候选个数。
+# 默认值来自 54 个太空关键词的测量（NASA 为主、Pixabay 后备，按预览判断首选候选）：
+# 最少 1 个时 17 个关键词改用 Pixabay，9 个变好、3 个变差；最少 2 个时 24 个改用，
+# 9 个变差——NASA 只有一个合格候选的关键词往往正是对题的图片，换来的 Pixabay 素材
+# 只命中半个关键词（"white dwarf" 只命中 white）。
+DEFAULT_FALLBACK_MIN_RELEVANCE = 0.5
+DEFAULT_FALLBACK_MIN_CANDIDATES = 1
+FALLBACK_MAX_CANDIDATES = 50
+
+
+def _fallback_setting(key: str, default, minimum, maximum, cast):
+    """读取后备阈值；非法值回退默认值，越界值收敛到允许范围。"""
+    value = config.app.get(key)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return default
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        number = cast(value)
+        if not math.isfinite(number):
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        logger.warning(f"invalid {key}={value!r}, using {default}")
+        return default
+    limited = min(max(number, minimum), maximum)
+    if limited != number:
+        logger.warning(f"{key}={number} is outside {minimum}-{maximum}, using {limited}")
+    return limited
+
+
+def fallback_thresholds() -> tuple[float, int]:
+    """返回（video_source_fallback_min_relevance, video_source_fallback_min_candidates）。"""
+    return (
+        _fallback_setting(
+            "video_source_fallback_min_relevance", DEFAULT_FALLBACK_MIN_RELEVANCE, 0.0, 1.0, float
+        ),
+        _fallback_setting(
+            "video_source_fallback_min_candidates", DEFAULT_FALLBACK_MIN_CANDIDATES,
+            1, FALLBACK_MAX_CANDIDATES, int,
+        ),
+    )
+
+
+def _has_api_key(config_key: str) -> bool:
+    keys = config.app.get(config_key)
+    if isinstance(keys, str):
+        return bool(keys.strip())
+    if isinstance(keys, (list, tuple)):
+        return any(str(key or "").strip() for key in keys)
+    return False
+
+
+def resolve_fallback_source(source: str, fallback_source: str | None) -> str:
+    """
+    返回本次任务实际使用的后备素材源；不使用后备时返回空字符串。
+
+    与主素材源相同或为空时不使用后备。任一方不是库存素材源时忽略并警告。后备
+    素材源缺少 API Key 时禁用后备并警告一次（每个任务一次，而不是每个关键词）。
+    """
+    fallback = str(fallback_source or "").strip().lower()
+    if fallback in {"", "none", "off"} or fallback == str(source or "").strip().lower():
+        return ""
+    if source not in FALLBACK_VIDEO_SOURCES or fallback not in FALLBACK_VIDEO_SOURCES:
+        logger.warning(
+            f"video_source_fallback={fallback!r} ignored for video_source={source!r}: "
+            f"primary and fallback must both be one of {', '.join(FALLBACK_VIDEO_SOURCES)}"
+        )
+        return ""
+    key = _FALLBACK_API_KEYS.get(fallback)
+    if key and not _has_api_key(key):
+        logger.warning(
+            f"video_source_fallback={fallback!r} disabled: {key} is not set in config.toml"
+        )
+        return ""
+    return fallback
+
+
+def _qualified_candidate_count(
+    search_term: str,
+    items: List[MaterialInfo],
+    tag_relevance: MaterialTagRelevance,
+    min_relevance: float,
+) -> int:
+    """
+    过滤后够格的候选数，用于后备判定。
+
+    相关度开启且全部候选都有标签时，数相关度（命中比例）不低于 ``min_relevance``
+    的候选；相关度关闭或素材源没有标签时数全部候选。
+    """
+    if tag_relevance == MaterialTagRelevance.off or any(
+        _material_tag_words(item) is None for item in items
+    ):
+        return len(items)
+    return sum(1 for item in items if _tag_relevance(search_term, item)[0] >= min_relevance)
+
+
+def _stock_source_search(
+    source: str,
+    *,
+    crop_to_aspect: bool,
+    tag_relevance: MaterialTagRelevance,
+    exclude_ai_generated: bool,
+    anchors: Sequence[str],
+) -> tuple[Callable[..., List[MaterialInfo]], dict[str, Any]]:
+    """
+    返回库存素材源的（关键词搜索函数, 实际生效的排序选项）。
+
+    搜索经过该素材源自己的 24 小时缓存，然后按该素材源支持的选项排序：裁剪只对
+    ``CROP_TO_ASPECT_SOURCES`` 生效，相关度和 AI 素材排除只对带标签的素材源生效。
+    主素材源和后备素材源各调用一次，因此两者各用各的设置和缓存。
+    """
+    crop_enabled = bool(crop_to_aspect) and source in CROP_TO_ASPECT_SOURCES
+    tag_relevance = MaterialTagRelevance(tag_relevance or MaterialTagRelevance.off)
+    tag_enabled = source in MATERIAL_TAG_SOURCES and (
+        tag_relevance != MaterialTagRelevance.off or bool(exclude_ai_generated)
+    )
+    if not tag_enabled:
+        tag_relevance, exclude_ai_generated = MaterialTagRelevance.off, False
+    search_cache_options = {}
+    if crop_enabled:
+        search_cache_options["crop_to_aspect"] = True
+    if tag_enabled:
+        search_cache_options["require_tag_data"] = True
+    order_options: dict[str, Any] = {
+        "crop_to_aspect": crop_enabled,
+        "tag_relevance": tag_relevance,
+        "exclude_ai_generated": bool(exclude_ai_generated),
+    }
+    if tag_relevance != MaterialTagRelevance.off and anchors:
+        order_options["anchors"] = tuple(anchors)
+    provider = "pexels"
+    remote_search_videos = search_videos_pexels
+    if source == "pixabay":
+        provider = "pixabay"
+        remote_search_videos = search_videos_pixabay
+    elif source == "coverr":
+        provider = "coverr"
+        remote_search_videos = search_videos_coverr
+    elif source == "nasa":
+        provider = "nasa"
+        remote_search_videos = nasa.search_images
+
+    def search_videos(
+        search_term: str,
+        minimum_duration: int,
+        video_aspect: VideoAspect,
+    ) -> List[MaterialInfo]:
+        items = _search_videos_with_cache(
+            provider=provider,
+            search_videos=remote_search_videos,
+            search_term=search_term,
+            minimum_duration=minimum_duration,
+            video_aspect=video_aspect,
+            **search_cache_options,
+        )
+        if crop_enabled or tag_enabled:
+            # 每个关键词的候选按 相关度 > 同方向优先 > 素材源顺序 排列。放在缓存
+            # 之后排序，旧缓存里按素材源顺序保存的结果同样生效。
+            return _order_material_candidates(items, video_aspect, **order_options)
+        return items
+
+    return search_videos, order_options
+
+
+def _search_with_fallback(
+    source: str,
+    primary_search: Callable[..., List[MaterialInfo]],
+    primary_relevance: MaterialTagRelevance,
+    fallback_source: str,
+    fallback_search: Callable[..., List[MaterialInfo]],
+    fallback_relevance: MaterialTagRelevance,
+) -> Callable[..., List[MaterialInfo]]:
+    """
+    按关键词决定候选来自主素材源还是后备素材源，两者的候选不混在一起。
+
+    主素材源够格的候选（见 ``_qualified_candidate_count``）少于最小数量时，才到
+    后备素材源搜索同一关键词；后备素材源够格的候选更多（或主素材源一个候选都
+    没有而后备有）时整组改用后备，否则保留主素材源的候选。判定只依赖两边过滤
+    排序后的候选列表，不写入缓存，因此缓存命中与重新搜索得到相同的结果。
+    """
+    min_relevance, min_candidates = fallback_thresholds()
+
+    def search_videos(
+        search_term: str,
+        minimum_duration: int,
+        video_aspect: VideoAspect,
+    ) -> List[MaterialInfo]:
+        try:
+            items = primary_search(
+                search_term=search_term,
+                minimum_duration=minimum_duration,
+                video_aspect=video_aspect,
+            )
+        except Exception as exc:
+            logger.error(
+                f"failed to search {source} materials, trying {fallback_source}: "
+                f"search_term={search_term!r}, error={type(exc).__name__}, detail={exc}"
+            )
+            items = []
+        qualified = _qualified_candidate_count(
+            search_term, items, primary_relevance, min_relevance
+        )
+        if qualified >= min_candidates:
+            return items
+        try:
+            fallback_items = fallback_search(
+                search_term=search_term,
+                minimum_duration=minimum_duration,
+                video_aspect=video_aspect,
+            )
+        except Exception as exc:
+            logger.error(
+                f"failed to search {fallback_source} fallback materials: "
+                f"search_term={search_term!r}, error={type(exc).__name__}, detail={exc}"
+            )
+            fallback_items = []
+        fallback_qualified = _qualified_candidate_count(
+            search_term, fallback_items, fallback_relevance, min_relevance
+        )
+        use_fallback = fallback_qualified > qualified or (not items and bool(fallback_items))
+        logger.info(
+            f"material fallback: term={search_term!r}, "
+            f"{source}={qualified}/{len(items)} qualified, "
+            f"{fallback_source}={fallback_qualified}/{len(fallback_items)} qualified, "
+            f"min_relevance={min_relevance}, min_candidates={min_candidates}, "
+            f"using={fallback_source if use_fallback else source}"
+        )
+        return fallback_items if use_fallback else items
+
+    return search_videos
+
+
 def _filter_materials_by_aspect(
     items: List[MaterialInfo],
     video_aspect: VideoAspect,
@@ -2726,6 +2968,7 @@ def download_videos(
     tag_relevance: MaterialTagRelevance = MaterialTagRelevance.off,
     exclude_ai_generated: bool = False,
     anchors: Sequence[str] | None = None,
+    fallback_source: str = "",
 ) -> List[str]:
     """
     搜索并下载覆盖配音时长所需的素材，返回本地文件路径。
@@ -2743,44 +2986,61 @@ def download_videos(
     （strict），``exclude_ai_generated`` 剔除素材源标记为 AI 生成的素材。两者只对
     Pixabay 生效。``anchors`` 是任务级的地点/主体词，只在相关度开启时作为次级
     排序键，不参与 strict 过滤。排序优先级：相关度 > 锚点 > 方向 > 素材源顺序。
+
+    ``fallback_source`` 是可选的后备库存素材源（见 ``resolve_fallback_source``）：
+    主素材源某个关键词够格的候选太少时，该关键词整组改用后备素材源的候选
+    （``_search_with_fallback``），后备素材源按自己支持的裁剪、相关度和 AI 排除
+    设置搜索。按文案顺序匹配时每个关键词仍只占一个位置，等间距规则不变；默认的
+    合并候选池把各关键词（来自不同素材源）的候选合并后统一排序。
     """
-    crop_enabled = bool(crop_to_aspect) and source in CROP_TO_ASPECT_SOURCES
-    tag_relevance = MaterialTagRelevance(tag_relevance or MaterialTagRelevance.off)
-    tag_enabled = source in MATERIAL_TAG_SOURCES and (
-        tag_relevance != MaterialTagRelevance.off or bool(exclude_ai_generated)
-    )
-    if not tag_enabled:
-        tag_relevance, exclude_ai_generated = MaterialTagRelevance.off, False
-    search_cache_options = {}
-    if crop_enabled:
-        search_cache_options["crop_to_aspect"] = True
-    if tag_enabled:
-        search_cache_options["require_tag_data"] = True
-    order_options = {
-        "crop_to_aspect": crop_enabled,
-        "tag_relevance": tag_relevance,
-        "exclude_ai_generated": bool(exclude_ai_generated),
-    }
     anchors = [str(anchor) for anchor in (anchors or ()) if str(anchor).strip()]
-    if tag_relevance != MaterialTagRelevance.off and anchors:
-        order_options["anchors"] = tuple(anchors)
-    provider = "pexels"
-    remote_search_videos = search_videos_pexels
+    source_options = {
+        "crop_to_aspect": crop_to_aspect,
+        "tag_relevance": tag_relevance,
+        "exclude_ai_generated": exclude_ai_generated,
+        "anchors": anchors,
+    }
+    search_videos, order_options = _stock_source_search(source, **source_options)
+    fallback_source = resolve_fallback_source(source, fallback_source)
+    if fallback_source:
+        fallback_search, fallback_order_options = _stock_source_search(
+            fallback_source, **source_options
+        )
+        search_videos = _search_with_fallback(
+            source, search_videos, order_options["tag_relevance"],
+            fallback_source, fallback_search, fallback_order_options["tag_relevance"],
+        )
+        # 合并候选池里两个素材源的候选一起排序：任一素材源支持的选项都要生效，
+        # 没有标签的候选会让相关度排序自动关闭（见 _order_material_candidates）。
+        both_options = (order_options, fallback_order_options)
+        order_options = {
+            "crop_to_aspect": any(options["crop_to_aspect"] for options in both_options),
+            "tag_relevance": next(
+                (options["tag_relevance"] for options in both_options
+                 if options["tag_relevance"] != MaterialTagRelevance.off),
+                MaterialTagRelevance.off,
+            ),
+            "exclude_ai_generated": any(
+                options["exclude_ai_generated"] for options in both_options
+            ),
+        }
+        if any("anchors" in options for options in both_options):
+            order_options["anchors"] = tuple(anchors)
+    crop_enabled = order_options["crop_to_aspect"]
+    tag_enabled = (
+        order_options["tag_relevance"] != MaterialTagRelevance.off
+        or order_options["exclude_ai_generated"]
+    )
     # NASA 候选是图片：下载后裁剪缩小并渲染成片段。其它库存素材源直接下载视频。
     # 人脸检查可用时，按文案顺序匹配会先筛选候选，被拒绝的图片换成同一关键词的下一个。
+    # 有后备素材源时两种候选同时存在，按候选的素材源分别处理。
     save_material = None
     screen_material = None
-    if source == "pixabay":
-        provider = "pixabay"
-        remote_search_videos = search_videos_pixabay
-    elif source == "coverr":
-        provider = "coverr"
-        remote_search_videos = search_videos_coverr
-    elif source == "nasa":
-        provider = "nasa"
-        remote_search_videos = nasa.search_images
+    if "nasa" in (source, fallback_source):
 
         def save_material(item: MaterialInfo, save_dir: str) -> str:
+            if fallback_source and item.provider != "nasa":
+                return save_video(video_url=item.url, save_dir=save_dir)
             return nasa.save_image_clip(
                 item, save_dir, video_aspect=video_aspect,
                 clip_duration=max_clip_duration, image_motion=image_motion,
@@ -2788,29 +3048,12 @@ def download_videos(
 
         if nasa.face_filter_active():
             def screen_material(item: MaterialInfo) -> bool:
+                if fallback_source and item.provider != "nasa":
+                    return True
                 return nasa.screen_image(
                     item, material_directory, video_aspect=video_aspect,
                     clip_duration=max_clip_duration, image_motion=image_motion,
                 )
-
-    def search_videos(
-        search_term: str,
-        minimum_duration: int,
-        video_aspect: VideoAspect,
-    ) -> List[MaterialInfo]:
-        items = _search_videos_with_cache(
-            provider=provider,
-            search_videos=remote_search_videos,
-            search_term=search_term,
-            minimum_duration=minimum_duration,
-            video_aspect=video_aspect,
-            **search_cache_options,
-        )
-        if crop_enabled or tag_enabled:
-            # 每个关键词的候选按 相关度 > 同方向优先 > 素材源顺序 排列。放在缓存
-            # 之后排序，旧缓存里按素材源顺序保存的结果同样生效。
-            return _order_material_candidates(items, video_aspect, **order_options)
-        return items
 
     material_directory = config.app.get("material_directory", "").strip()
     if material_directory == "task":

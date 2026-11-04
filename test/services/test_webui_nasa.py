@@ -18,6 +18,9 @@ NASA_KEYS = (
     "NASA Images (no key)", "NASA Source Info", "NASA Face Filter", "NASA Face Filter Help",
     "NASA Face Filter Missing Extra", "NASA Face Filter Unavailable", "NASA Credit Overlay",
     "NASA Credit Overlay Help", "NASA Usage Terms Note", "NASA Usage Guidelines",
+    "NASA Fallback Pixabay", "NASA Fallback Pixabay Help", "NASA Fallback Missing Key",
+    "Fallback Min Relevance", "Fallback Min Relevance Help", "Fallback Min Candidates",
+    "Fallback Min Candidates Help",
 )
 
 
@@ -68,6 +71,13 @@ def test_nasa_source_submits_without_any_api_key(overlay):
     assert params.nasa_credit_overlay is overlay
 
 
+@pytest.mark.parametrize(("saved", "expected"), [("pixabay", "pixabay"), ("", "")])
+def test_nasa_submits_the_saved_pixabay_fallback(saved, expected):
+    _, submit_generation = _submit_with_nasa(_app_config(video_source_fallback=saved))
+
+    assert submit_generation.call_args.kwargs["params"].video_source_fallback == expected
+
+
 def test_missing_face_extra_is_reported_but_does_not_block():
     app, submit_generation = _submit_with_nasa(_app_config(), face_extra=False)
 
@@ -110,6 +120,44 @@ def test_nasa_settings_dialog_has_switches_and_terms_link(face_extra):
         app.checkbox(key="nasa_face_filter_input").uncheck().run()
         assert config.snapshot_config_with_pending(config.app)["nasa_credit_overlay"] is True
         assert config.snapshot_config_with_pending(config.app)["nasa_face_filter"] is False
+
+
+@pytest.mark.parametrize("pixabay_keys", [[], ["key"]])
+def test_nasa_settings_switch_on_the_pixabay_fallback_and_its_thresholds(pixabay_keys):
+    settings = {**_app_config(video_source_fallback=""), "pixabay_api_keys": pixabay_keys}
+    with (
+        patch.object(config, "app", settings),
+        patch.object(config, "ui", dict(config.ui, voice_mode="none", language="en")),
+        patch.object(config, "try_save_config", return_value=True),
+        patch.object(config, "save_config"),
+        patch.object(nasa, "face_extra_installed", return_value=True),
+    ):
+        app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=60)
+        app.session_state["ui_language"] = "en"
+        app.session_state["settings_dialog_open"] = True
+        app.session_state["settings_dialog_target_tab"] = "video"
+        app.session_state["settings_material_providers"] = {"stock_video": "nasa"}
+        app.run()
+
+        assert app.checkbox(key="video_source_fallback_input").value is False
+        assert not any("fallback_min" in str(item.key) for item in app.number_input)
+
+        app.checkbox(key="video_source_fallback_input").check().run()
+        assert [str(item.value) for item in app.exception] == []
+        assert config.snapshot_config_with_pending(config.app)["video_source_fallback"] == "pixabay"
+        assert app.number_input(key="video_source_fallback_min_relevance_input").value == 0.5
+        assert app.number_input(key="video_source_fallback_min_candidates_input").value == 1
+        missing_key = any("No Pixabay API key" in str(item.value) for item in app.warning)
+        assert missing_key is (not pixabay_keys)
+
+        app.number_input(key="video_source_fallback_min_candidates_input").set_value(2).run()
+        app.number_input(key="video_source_fallback_min_relevance_input").set_value(0.75).run()
+        pending = config.snapshot_config_with_pending(config.app)
+        assert pending["video_source_fallback_min_candidates"] == 2
+        assert pending["video_source_fallback_min_relevance"] == 0.75
+
+        app.checkbox(key="video_source_fallback_input").uncheck().run()
+        assert config.snapshot_config_with_pending(config.app)["video_source_fallback"] == ""
 
 
 def test_nasa_counts_as_configured_without_keys():

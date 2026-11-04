@@ -46,6 +46,9 @@ SUPPORTED_SOURCES = {
     "codex_image",
     "local",
 }
+# Keep aligned with ``_FALLBACK_VIDEO_SOURCES`` in cli.py: only stock sources can
+# back each other up through --video-source-fallback.
+FALLBACK_SOURCES = {"pexels", "pixabay", "coverr", "nasa"}
 VOLCENGINE_ARK_API_KEY_URL = (
     "https://console.volcengine.com/ark/region:ark+cn-beijing/apikey"
 )
@@ -536,6 +539,18 @@ def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[st
         value = _plain_config_value(text, f"{source}_api_keys")
         if not _has_configured_value(value):
             missing.append(f"{source}_api_keys")
+    fallback = _last_cli_value(cli_args, "--video-source-fallback").lower()
+    if fallback and fallback != "none":
+        if fallback not in FALLBACK_SOURCES or source not in FALLBACK_SOURCES or fallback == source:
+            raise SkillError(
+                "--video-source-fallback must be another stock source ("
+                + ", ".join(sorted(FALLBACK_SOURCES)) + f") than --video-source {source}"
+            )
+        # 后备素材源缺少 Key 时运行时会禁用后备并继续，这里只提示，不索取 Key。
+        if fallback != "nasa" and not _has_configured_value(
+            _plain_config_value(text, f"{fallback}_api_keys")
+        ):
+            log(f"{fallback}_api_keys is not set; the {fallback} fallback will be skipped")
     return provider, missing
 
 

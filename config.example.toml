@@ -149,6 +149,27 @@ nasa_face_filter = true
 # 结尾 2 秒显示图片来源；任务目录中的 credits.txt 不受此开关影响。
 nasa_credit_overlay = false
 
+# Fallback stock source per search term: "pexels", "pixabay", "coverr" or "nasa"
+# (another one than video_source, which must be a stock source too); empty means
+# no fallback. A term whose video_source candidates, after filtering, include
+# fewer than video_source_fallback_min_candidates with a tag relevance of at
+# least video_source_fallback_min_relevance (the share of the term's words found
+# in a candidate's tags, 0-1) is searched on the fallback source, and all of its
+# clips then come from the fallback when it has more qualifying candidates; the
+# two sources are never mixed within one term. With material_tag_relevance =
+# "off", or for sources without tags (Pexels, Coverr), only the number of
+# candidates counts. The fallback uses its own search cache and the same crop,
+# tag relevance and AI settings, and is skipped with a warning when its API key
+# is missing. The WebUI sets it in the NASA settings ("pixabay"); the CLI and the
+# API take --video-source-fallback / video_source_fallback per task instead.
+# The defaults were measured on 54 space terms (NASA, Pixabay fallback): with 1
+# candidate 17 terms switched (9 better, 3 worse first clips), with 2 it was 24
+# (9 worse), because a single matching NASA image is usually the right one.
+# 某个关键词在主素材源里合格候选太少时，改到后备素材源搜索；同一关键词不混用两个来源。
+video_source_fallback = ""
+video_source_fallback_min_relevance = 0.5
+video_source_fallback_min_candidates = 1
+
 # WaveSpeed AI generates clips from your script keywords with text-to-video
 # models. Create an API key at https://wavespeed.ai
 wavespeed_api_keys = []

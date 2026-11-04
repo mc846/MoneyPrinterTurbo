@@ -110,14 +110,14 @@ def test_only_nasa_passes_a_cache_variant():
 # ------------------------------------------------------------------ credits.txt
 
 
-def test_credits_text_lists_each_image_with_its_page():
-    text = nasa.credits_text(SOURCES + [{"provider": "pixabay", "asset_id": "1"}])
+def test_credits_text_lists_each_image_with_its_source_and_page():
+    text = nasa.credits_text(SOURCES)
 
     assert text.splitlines()[:3] == ["Görsel kaynakları / Image credits", "=" * 33, ""]
-    assert "1. X-ray: NASA/CXC/PSU/L.Townsley et al.; Optical: NASA/STScI" in text
+    assert "1. [NASA] X-ray: NASA/CXC/PSU/L.Townsley et al.; Optical: NASA/STScI" in text
     assert "   https://images.nasa.gov/details/GSFC_20171208_Archive_e002154" in text
-    assert text.count("PIA15427") == 1 and "3. NASA/JPL-Caltech" in text and "4." not in text
-    assert "Görüntüler: NASA ve ortakları" in text
+    assert text.count("PIA15427") == 1 and "3. [NASA] NASA/JPL-Caltech" in text and "4." not in text
+    assert "Görüntüler: NASA ve ortakları / Images: NASA and partners" in text
     assert "not endorsed by NASA" in text
     assert not any(phrase in text.lower() for phrase in ENDORSEMENT_WORDING)
 
