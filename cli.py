@@ -351,6 +351,24 @@ Batch manifests:
         help="replace the default LLM system prompt for script generation",
     )
 
+    llm_group = parser.add_argument_group("language model")
+    llm_group.add_argument(
+        "--llm-provider",
+        default="",
+        help=(
+            "LLM provider for this run only, e.g. claude_code or ollama; overrides "
+            "[app].llm_provider in memory and never writes config.toml"
+        ),
+    )
+    llm_group.add_argument(
+        "--llm-model",
+        default="",
+        help=(
+            "model name for this run only, applied to the selected provider's "
+            "<provider>_model_name setting (e.g. ollama_model_name)"
+        ),
+    )
+
     material_group = parser.add_argument_group("materials and pipeline")
     material_group.add_argument(
         "--video-source",
@@ -1761,6 +1779,35 @@ def _run_batch_tasks(args: argparse.Namespace, tasks: list[VideoParams]) -> int:
     return 1 if failed_count else 0
 
 
+def apply_llm_overrides(args: argparse.Namespace) -> None:
+    """
+    把 --llm-provider / --llm-model 应用到本进程内存中的 config.app。
+
+    只影响这一次运行，不写回 config.toml：CLI 不保存配置，WebUI 里选择的
+    Provider 保持不变。模型名写入所选 Provider 自己的 ``<provider>_model_name``。
+    """
+    from app.config import config
+    from app.models.llm_provider import LLM_PROVIDERS, get_llm_provider
+
+    provider_id = (args.llm_provider or "").strip().lower()
+    if provider_id:
+        if get_llm_provider(provider_id) is None:
+            raise ValueError(
+                f"unknown --llm-provider {args.llm_provider!r}; "
+                f"choose one of: {', '.join(sorted(LLM_PROVIDERS))}"
+            )
+        config.app["llm_provider"] = provider_id
+    model_name = (args.llm_model or "").strip()
+    if model_name:
+        active = str(config.app.get("llm_provider") or "")
+        provider = get_llm_provider(active)
+        if provider is None:
+            raise ValueError(
+                f"--llm-model needs a known LLM provider; [app].llm_provider is {active!r}"
+            )
+        config.app[provider.config_key("model_name")] = model_name
+
+
 def run_cli(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     import app.config  # noqa: F401 -- 初始化配置及进程日志设置。
@@ -1769,6 +1816,11 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
     # 配置模块默认把终端日志发往 stdout。CLI 的 stdout 是机器可读 JSON，
     # 必须在素材预处理等步骤开始前切到 stderr，帮助和参数错误仍保持延迟导入。
     configure_terminal_logger(sys.stderr, level=get_logging_options()[0], colorize=False)
+    try:
+        apply_llm_overrides(args)
+    except ValueError as exc:
+        logger.error(f"invalid CLI input: {exc}")
+        return 2
     if args.batch_file:
         try:
             tasks = _build_batch_tasks(args)
