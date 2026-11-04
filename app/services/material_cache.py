@@ -112,6 +112,10 @@ def _cached_source_info(item: MaterialInfo) -> dict | None:
         ]
     if isinstance(source.get("ai_generated"), bool):
         cached["ai_generated"] = source["ai_generated"]
+    # NASA 素材的来源标注（公开文字，写入任务的 material_sources）。
+    credit = source.get("credit")
+    if isinstance(credit, str) and credit.strip():
+        cached["credit"] = credit.strip()[:200]
     return cached
 
 

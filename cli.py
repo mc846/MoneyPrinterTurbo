@@ -46,6 +46,7 @@ _CLI_VIDEO_SOURCES = (
     "pexels",
     "pixabay",
     "coverr",
+    "nasa",
     "wavespeed",
     "volcengine_seedance",
     "ofox",

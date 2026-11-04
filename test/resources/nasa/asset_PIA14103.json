@@ -1,0 +1,26 @@
+{
+ "collection": {
+  "version": "1.1",
+  "href": "http://images-api.nasa.gov/asset/PIA14103",
+  "items": [
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA14103/PIA14103~orig.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA14103/PIA14103~large.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA14103/PIA14103~medium.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA14103/PIA14103~small.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA14103/PIA14103~thumb.jpg"
+   },
+   {
+    "href": "http://images-assets.nasa.gov/image/PIA14103/metadata.json"
+   }
+  ]
+ }
+}

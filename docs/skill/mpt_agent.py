@@ -31,6 +31,8 @@ SUPPORTED_SOURCES = {
     "pexels",
     "pixabay",
     "coverr",
+    # NASA Image and Video Library needs no API key.
+    "nasa",
     "wavespeed",
     "volcengine_seedance",
     "ofox",
@@ -529,7 +531,8 @@ def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[st
         for field in ("openai_image_base_url", "openai_image_model"):
             if not _has_configured_value(_plain_config_value(text, field)):
                 missing.append(field)
-    elif source != "local":
+    elif source not in {"local", "nasa"}:
+        # NASA Image and Video Library 不需要 API Key。
         value = _plain_config_value(text, f"{source}_api_keys")
         if not _has_configured_value(value):
             missing.append(f"{source}_api_keys")

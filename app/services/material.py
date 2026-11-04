@@ -40,6 +40,7 @@ from app.services import (
     material_upload,
     metaso_minimax,
     muapi,
+    nasa,
     ofox,
     task_artifacts,
     video,
@@ -167,6 +168,10 @@ def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, An
     creator = _creator_info(source.get("creator"))
     if creator:
         record["creator"] = creator
+    # NASA 素材需要标注来源；其它素材源没有这个字段。
+    credit = source.get("credit")
+    if isinstance(credit, str) and credit.strip():
+        record["credit"] = credit.strip()[:200]
 
     raw_rendition = source.get("rendition")
     if isinstance(raw_rendition, dict):
@@ -379,7 +384,7 @@ def _matches_video_aspect(
 
 
 # 只有按分辨率筛选库存素材的来源支持跨方向裁剪（crop_materials_to_aspect）。
-CROP_TO_ASPECT_SOURCES = frozenset({"pexels", "pixabay"})
+CROP_TO_ASPECT_SOURCES = frozenset({"pexels", "pixabay", "nasa"})
 
 
 def _center_crop_size(
@@ -423,9 +428,10 @@ def _split_by_native_orientation(
 
 
 # Pixabay 的搜索结果带有标签（tags）和 isAiGenerated 标记。Pexels 的视频资源没有
-# 标签字段，页面地址也不一定带描述性的 slug；Coverr 未接入。标签相关度和 AI 素材
-# 排除因此只对 Pixabay 生效，其它素材源保持原有顺序。
-MATERIAL_TAG_SOURCES = frozenset({"pixabay"})
+# 标签字段，页面地址也不一定带描述性的 slug；Coverr 未接入。NASA 的标签由关键词和
+# 标题生成（见 nasa.relevance_tags），没有 AI 标记。标签相关度和 AI 素材排除因此只对
+# Pixabay 和 NASA 生效，其它素材源保持原有顺序。
+MATERIAL_TAG_SOURCES = frozenset({"pixabay", "nasa"})
 _RELEVANCE_STOP_WORDS = frozenset({
     "a", "an", "and", "are", "as", "at", "by", "for", "from", "in", "into", "is",
     "it", "its", "of", "off", "on", "onto", "or", "over", "the", "this", "that",
@@ -2559,12 +2565,15 @@ def _download_materials_in_parallel(
     materials: List[tuple[str, MaterialInfo]],
     material_directory: str,
     on_downloaded: Callable[[MaterialInfo], None] | None = None,
+    save_material: Callable[[MaterialInfo, str], str] | None = None,
 ) -> list[tuple[str, MaterialInfo, str]]:
     """
     并行下载一轮素材，保留调用方传入的候选顺序。
 
     每个素材下载成功后记录一条日志并调用 ``on_downloaded``，调用方据此更新
-    任务进度。回调和日志都发生在调用本函数的线程里。
+    任务进度。回调和日志都发生在调用本函数的线程里。``save_material`` 用于
+    不能直接下载成视频的素材源（NASA 图片需要下载后渲染成片段）；不传时与
+    原来一样调用 ``save_video``。
     """
     if not materials:
         return []
@@ -2575,10 +2584,13 @@ def _download_materials_in_parallel(
         downloaded = []
         for position, (search_term, item) in enumerate(materials, start=1):
             try:
-                saved_video_path = save_video(
-                    video_url=item.url,
-                    save_dir=material_directory,
-                )
+                if save_material is not None:
+                    saved_video_path = save_material(item, material_directory)
+                else:
+                    saved_video_path = save_video(
+                        video_url=item.url,
+                        save_dir=material_directory,
+                    )
             except Exception as exc:
                 logger.error(
                     "failed to download material video: "
@@ -2600,12 +2612,21 @@ def _download_materials_in_parallel(
         thread_name_prefix="material-download",
     ) as executor:
         for search_term, item in materials:
-            futures[executor.submit(
-                copy_context().run,
-                logging_utils.bind_log_scope(save_video),
-                item.url,
-                material_directory,
-            )] = (search_term, item)
+            if save_material is not None:
+                future = executor.submit(
+                    copy_context().run,
+                    logging_utils.bind_log_scope(save_material),
+                    item,
+                    material_directory,
+                )
+            else:
+                future = executor.submit(
+                    copy_context().run,
+                    logging_utils.bind_log_scope(save_video),
+                    item.url,
+                    material_directory,
+                )
+            futures[future] = (search_term, item)
 
         downloaded = []
         for position, future in enumerate(futures, start=1):
@@ -2708,12 +2729,23 @@ def download_videos(
         order_options["anchors"] = tuple(anchors)
     provider = "pexels"
     remote_search_videos = search_videos_pexels
+    # NASA 候选是图片：下载后裁剪缩小并渲染成片段。其它库存素材源直接下载视频。
+    save_material = None
     if source == "pixabay":
         provider = "pixabay"
         remote_search_videos = search_videos_pixabay
     elif source == "coverr":
         provider = "coverr"
         remote_search_videos = search_videos_coverr
+    elif source == "nasa":
+        provider = "nasa"
+        remote_search_videos = nasa.search_images
+
+        def save_material(item: MaterialInfo, save_dir: str) -> str:
+            return nasa.save_image_clip(
+                item, save_dir, video_aspect=video_aspect,
+                clip_duration=max_clip_duration, image_motion=image_motion,
+            )
 
     def search_videos(
         search_term: str,
@@ -2838,6 +2870,7 @@ def download_videos(
             max_clip_duration=max_clip_duration,
             material_directory=material_directory,
             progress_callback=progress_callback,
+            **({"save_material": save_material} if save_material is not None else {}),
         )
 
     valid_video_items = []
@@ -2902,6 +2935,7 @@ def download_videos(
             materials=[("", item) for item in batch],
             material_directory=material_directory,
             on_downloaded=on_downloaded,
+            **({"save_material": save_material} if save_material is not None else {}),
         )
         pending_items = pending_items[len(batch):]
         for _, item, saved_video_path in downloaded_materials:
@@ -3551,6 +3585,7 @@ def _download_videos_by_script_order(
     max_clip_duration: int,
     material_directory: str,
     progress_callback: Callable[[float], None] | None = None,
+    save_material: Callable[[MaterialInfo, str], str] | None = None,
 ) -> List[str]:
     """
     按脚本文案顺序下载素材。
@@ -3670,6 +3705,7 @@ def _download_videos_by_script_order(
             materials=selected_materials,
             material_directory=material_directory,
             on_downloaded=on_downloaded,
+            **({"save_material": save_material} if save_material is not None else {}),
         )
         for search_term, item, saved_video_path in downloaded_materials:
             try:
