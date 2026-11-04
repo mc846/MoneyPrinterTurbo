@@ -54,6 +54,8 @@
     "Advanced Script Settings": "고급 스크립트 설정",
     "Script Paragraph Number": "스크립트 문단 수",
     "Custom Script Requirements": "스크립트 커스텀 요구사항",
+    "Script Accuracy Rules": "과학적 정확성 규칙",
+    "Script Accuracy Rules Help": "스크립트 프롬프트에 규칙을 추가합니다: 확립된 사실만 말하고 추정치나 논쟁 중인 내용은 그렇다고 밝히며, 흔한 오해를 피하고, 비유는 비유로 알아볼 수 있게 둡니다. 사용자 지정 시스템 프롬프트를 쓰면 규칙이 별도 섹션으로 추가됩니다.",
     "Custom Script Requirements Placeholder": "예: 가벼운 톤으로, 틱톡 스타일에 맞게, 젊은 시청자 대상, 도입부를 더 긴장감 있게",
     "Custom System Prompt": "시스템 프롬프트",
     "Restore Default System Prompt": "기본 프롬프트 복원",

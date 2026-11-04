@@ -71,6 +71,25 @@ Generate a script for a video, depending on the subject of the video.
 8. respond in the same language as the video subject.
 """.strip()
 
+# script_accuracy_rules 开启时追加的科学准确性规则。默认 system prompt 中按原有
+# 编号接在约束列表末尾；自定义 system prompt 时作为单独一节追加（见
+# _script_system_prompt）。
+SCRIPT_ACCURACY_RULES = (
+    "be scientifically accurate without losing the story: state only well-established "
+    "facts, and keep an engaging opening and concrete real-world examples. Say that "
+    "something is an estimate, a hypothesis or still debated only where this changes the "
+    'meaning, briefly and inside the sentence (for example "about", "scientists think"); '
+    "never give figures more precisely or confidently than current research supports, and "
+    "do not end the script with a general caveat or a sentence about uncertainty.",
+    "avoid popular misconceptions and include every effect that matters when comparing "
+    "cases (for example, a clock in orbit is affected by both its speed and gravity; far "
+    "from a black hole its gravity equals that of any object with the same mass; "
+    "entanglement cannot carry information faster than light).",
+    'mark a comparison as a comparison through its wording ("like a city", "as if") '
+    "instead of commenting on the comparison itself, and do not describe a result or "
+    'technology as absolute ("unbreakable", "infinite", "a single point") unless it is.',
+)
+
 # Claude Code CLI 默认使用编码 agent 的系统提示词，其中大量约束与文案写作
 # 无关，会让脚本和关键词生成偏离要求，因此调用时整体替换掉。
 CLAUDE_CODE_SYSTEM_PROMPT = (
@@ -873,12 +892,38 @@ def _normalize_script_paragraph_number(paragraph_number: int | None) -> int:
     return value
 
 
+def _script_system_prompt(custom_system_prompt: str, script_accuracy_rules: bool) -> str:
+    """
+    返回脚本生成规则部分。
+
+    科学准确性规则和语言、段落数一样是每次任务单独选择的设置，自定义 system
+    prompt 时也不能被静默丢弃：默认 prompt 中按编号接在约束列表末尾；自定义
+    prompt 中作为单独一节追加，已经原样包含的规则不重复添加。
+    """
+    if not script_accuracy_rules:
+        return custom_system_prompt or DEFAULT_SCRIPT_SYSTEM_PROMPT
+    if not custom_system_prompt:
+        last_number = int(re.findall(r"^(\d+)\. ", DEFAULT_SCRIPT_SYSTEM_PROMPT, re.M)[-1])
+        rules = "\n".join(
+            f"{last_number + index}. {rule}"
+            for index, rule in enumerate(SCRIPT_ACCURACY_RULES, start=1)
+        )
+        return f"{DEFAULT_SCRIPT_SYSTEM_PROMPT}\n{rules}"
+    lowered = custom_system_prompt.lower()
+    missing = [rule for rule in SCRIPT_ACCURACY_RULES if rule.lower() not in lowered]
+    if not missing:
+        return custom_system_prompt
+    rules = "\n".join(f"{index}. {rule}" for index, rule in enumerate(missing, start=1))
+    return f"{custom_system_prompt.rstrip()}\n\n## Scientific Accuracy:\n{rules}"
+
+
 def build_script_prompt(
     video_subject: str,
     language: str = "",
     paragraph_number: int = 1,
     video_script_prompt: str = "",
     custom_system_prompt: str = "",
+    script_accuracy_rules: bool = False,
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
     video_script_prompt = _limit_script_text(
@@ -890,7 +935,7 @@ def build_script_prompt(
 
     # 将“脚本生成规则”和“运行时上下文”分开拼接。这样高级用户即使覆盖默认
     # system prompt，也不会漏掉视频主题、语言、段落数这些每次生成都必须带上的参数。
-    prompt = custom_system_prompt or DEFAULT_SCRIPT_SYSTEM_PROMPT
+    prompt = _script_system_prompt(custom_system_prompt, script_accuracy_rules)
     prompt += f"""
 
 # Initialization:
@@ -916,6 +961,7 @@ def generate_script(
     video_script_prompt: str = "",
     custom_system_prompt: str = "",
     app_config=None,
+    script_accuracy_rules: bool = False,
 ) -> str:
     paragraph_number = _normalize_script_paragraph_number(paragraph_number)
     video_script_prompt = _limit_script_text(
@@ -930,13 +976,15 @@ def generate_script(
         paragraph_number=paragraph_number,
         video_script_prompt=video_script_prompt,
         custom_system_prompt=custom_system_prompt,
+        script_accuracy_rules=script_accuracy_rules,
     )
     final_script = ""
     logger.info(
         "generating video script: "
         f"subject={video_subject}, paragraph_number={paragraph_number}, "
         f"has_custom_prompt={bool(video_script_prompt.strip())}, "
-        f"has_custom_system_prompt={bool(custom_system_prompt.strip())}"
+        f"has_custom_system_prompt={bool(custom_system_prompt.strip())}, "
+        f"script_accuracy_rules={bool(script_accuracy_rules)}"
     )
 
     def format_response(response):

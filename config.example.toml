@@ -272,6 +272,16 @@ twelvelabs_rerank_terms = false
 # twelvelabs_marengo_model = "marengo3.0"
 # twelvelabs_pegasus_model = "pegasus1.5"
 
+# Add scientific-accuracy rules to the script system prompt: state only
+# well-established facts while keeping an engaging opening and concrete
+# examples, mention uncertainty briefly and only where it changes the meaning,
+# avoid popular misconceptions (e.g. black holes "sucking in" everything), and
+# mark comparisons through wording ("like a city") without commenting on them.
+# The rules are appended to the default constraint list; with a custom system
+# prompt they are appended as a separate section.
+# 默认关闭；开启后在文案 system prompt 中追加科学准确性规则。
+script_accuracy_rules = false
+
 # Match search terms and downloaded materials to the script narrative order.
 # 默认关闭，开启后会减少随机性，使素材顺序更贴近文案结构。
 match_materials_to_script = false

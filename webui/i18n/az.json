@@ -48,6 +48,8 @@
     "Advanced Script Settings": "Ssenarinin genişləndirilmiş parametrləri",
     "Script Paragraph Number": "Ssenaridəki abzasların sayı",
     "Custom Script Requirements": "Ssenariyə dair fərdi tələblər",
+    "Script Accuracy Rules": "Elmi dəqiqlik qaydaları",
+    "Script Accuracy Rules Help": "Ssenari prompt-una qaydalar əlavə edir: yalnız təsdiqlənmiş faktları söyləmək, təxmini və ya mübahisəli məqamları qeyd etmək, geniş yayılmış yanlış təsəvvürlərdən qaçmaq və metaforaları metafora kimi tanınan saxlamaq. Xüsusi sistem prompt-u istifadə olunursa, qaydalar ayrıca bölmə kimi əlavə olunur.",
     "Custom Script Requirements Placeholder": "Nümunə: daha səmimi üslubdan istifadə etmək, TikTok üslubuna uyğunlaşdırmaq, gənc izləyicilərə yönəlmək, girişi daha maraqoyadıcı etmək",
     "Custom System Prompt": "Sistem təlimatı",
     "Restore Default System Prompt": "Standart təlimatı bərpa et",

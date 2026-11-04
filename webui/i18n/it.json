@@ -54,6 +54,8 @@
     "Advanced Script Settings": "Impostazioni avanzate del testo",
     "Script Paragraph Number": "Numero di paragrafi del testo",
     "Custom Script Requirements": "Requisiti personalizzati del testo",
+    "Script Accuracy Rules": "Regole di accuratezza scientifica",
+    "Script Accuracy Rules Help": "Aggiunge regole al prompt del testo: affermare solo fatti consolidati e segnalare stime o punti dibattuti, evitare i luoghi comuni errati e mantenere le metafore riconoscibili come tali. Con un prompt di sistema personalizzato, le regole vengono aggiunte in una sezione separata.",
     "Custom Script Requirements Placeholder": "Esempio: usa un tono più leggero, in stile TikTok, rivolto a giovani, rendi l'inizio più avvincente",
     "Custom System Prompt": "Prompt di sistema",
     "Restore Default System Prompt": "Ripristina prompt predefinito",

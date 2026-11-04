@@ -376,6 +376,8 @@ def generate_script(task_id, params):
             paragraph_number=params.paragraph_number,
             video_script_prompt=params.video_script_prompt,
             custom_system_prompt=params.custom_system_prompt,
+            # 关闭时不传参，保持与上游完全相同的调用。
+            **({"script_accuracy_rules": True} if params.script_accuracy_rules else {}),
         )
     else:
         logger.debug(f"video script: \n{video_script}")
