@@ -45,6 +45,17 @@ _CONNECTION_FAILURE_MARKERS = (
 _THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think>", re.IGNORECASE | re.DOTALL)
 _UNCLOSED_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*$", re.IGNORECASE | re.DOTALL)
 _UNOPENED_THINK_BLOCK_RE = re.compile(r"^.*</think\s*>", re.IGNORECASE | re.DOTALL)
+# 部分模型（实测 gpt-oss）会输出不换行连字符、数字连字符和不换行空格。默认字幕字体
+# STHeitiMedium 和 MicrosoftYaHeiBold 都没有 U+2011、U+2012、U+202F 的字形，
+# STHeiti 也没有 U+00A0，字幕里会显示成方框；U+2010 统一成普通连字符。两种字体都有
+# 的 en/em dash（U+2013、U+2014）和 U+2015 保持不变，引号和各语言字母也不处理。
+_UNSUPPORTED_PUNCTUATION = str.maketrans({
+    "‐": "-",
+    "‑": "-",
+    "‒": "-",
+    " ": " ",
+    " ": " ",
+})
 _URL_USERINFO_RE = re.compile(
     r"((?:https?|wss?)://)([^/\s?#@]+@)", re.IGNORECASE
 )
@@ -200,7 +211,7 @@ def _normalize_text_response(content, llm_provider: str) -> str:
     # vLLM/Ollama 等网关返回的正文只剩 `推理...</think>答案`。成对清理之后
     # 仍残留的闭合标签之前都是推理内容，也不能进入脚本。
     content = _UNOPENED_THINK_BLOCK_RE.sub("", content)
-    content = _UNCLOSED_THINK_BLOCK_RE.sub("", content).strip()
+    content = _UNCLOSED_THINK_BLOCK_RE.sub("", content).translate(_UNSUPPORTED_PUNCTUATION).strip()
     if not content:
         raise ValueError(f"[{llm_provider}] returned empty text content")
 
