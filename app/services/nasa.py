@@ -35,8 +35,8 @@ API_ROOT = "https://images-api.nasa.gov"
 USAGE_GUIDELINES_URL = "https://www.nasa.gov/nasa-brand-center/images-and-media/"
 # 过滤规则（人物、标志、版权、规格选择）的版本，写入 24 小时搜索缓存的键：规则改变后
 # 必须加 1，否则旧规则选出的候选还会被使用一整天。1 = 首个版本，2 = 活动用语、NHQ 编号、
-# 人名关键词和人脸检查。
-FILTER_VERSION = 2
+# 人名关键词和人脸检查，3 = 署名去掉话题标签，署名里没有 NASA 或核实过的合作方时淘汰。
+FILTER_VERSION = 3
 DETAILS_PAGE = "https://images.nasa.gov/details/{nasa_id}"
 DEFAULT_CREDIT = "NASA"
 # 将来可加入 "video"；目前只实现图片。
@@ -73,6 +73,28 @@ NASA_RIGHTS_PATTERNS = (
     r"^\W*nasa(?:\s*/\s*[\w .'’-]+)?\W*$",
 )
 COPYRIGHT_BOILERPLATE_STARTS = ("and restrictions", "restrictions", "information", "notice", "status")
+#    署名里既没有 NASA 也没有下面这些合作方时（例如只写 "SpaceX" 或某公司、某机构的
+#    摄影师），图片可能属于第三方，淘汰。名单只收官方条款里核实过可免费使用、包括商用的
+#    合作方（2026-11 查阅）：
+#    - ESA/Hubble、ESA/Webb：CC BY 4.0，可商用，署名须原样、醒目（YouTube 视频要叠加在
+#      画面上）。https://esahubble.org/copyright/ https://esawebb.org/copyright/
+#    - JPL（JPL-Caltech）："may be used for any purpose without prior permission"，署名
+#      "Courtesy NASA/JPL-Caltech"。https://www.jpl.nasa.gov/jpl-image-use-policy
+#    - STScI：按 NASA 合同可如公有领域使用，请求注明 NASA 和 STScI。https://www.stsci.edu/copyright
+#    - Chandra（CXC、SAO）：不主张版权，按 NASA 指南使用。https://chandra.harvard.edu/photo/image_use.html
+#    不在名单内：ESA 官网的一般图片（"ESA"、"European Space Agency (ESA) - D. Ducros"
+#    这类署名），商用需要 ESA 的书面授权。https://www.esa.int/ESA_Multimedia/Copyright_Notice_Images
+#    与 NASA 合署的署名（"ESA/Herschel/...; NASA, ESA and ..."）因为包含 NASA 而保留。
+FREE_USE_PARTNERS = ("ESA/Hubble", "ESA/Webb", "JPL", "STScI", "CXC", "SAO", "Chandra")
+#    NASA 自己的中心名称同样算作 NASA（实测 "ASA/GSFC/Solar Dynamics Observatory" 这类
+#    署名漏写了 NASA）。
+NASA_CENTERS = (
+    "GSFC", "Goddard", "JSC", "Johnson Space Center", "KSC", "Kennedy Space Center", "MSFC",
+    "Marshall Space Flight Center", "ARC", "Ames", "AFRC", "Armstrong Flight Research Center", "Dryden",
+    "GRC", "Glenn Research Center", "LaRC", "Langley",
+)
+#    摄影师字段只写人名时（宇航员、NASA 摄影师：实测 "Alex Gerst"、"EMMETT GIVEN"），
+#    视为 NASA 的照片并写成 "NASA/姓名"；写的是机构名（"SpaceX"）时按上面的名单检查。
 
 # b) 可识别人物。词表和阈值按 32 个搜索词首页结果（1055 条，其中 481 条人工看过预览图）
 #    的实测选定。
@@ -199,6 +221,16 @@ _COPYRIGHT_MARK = re.compile(
 _CREDIT_LINE = re.compile(r"\b(?:image\s+|photo\s+)?credits?\s*:\s*([^\n<]+)", re.I)
 # 描述的段落之间常只剩两个空格；句号后接大写单词视为句子结束，但 "D. Coe" 这类缩写不算。
 _CREDIT_END = re.compile(r"\s{2,}|(?<!\b[A-Z])\.\s+(?=[A-Z][a-z]+\s)")
+# 署名后面接着的话题标签、@账号和 "Follow us" 一类社交媒体文字。
+_CREDIT_SOCIAL_TAIL = re.compile(
+    r"\s*(?:#\w|@\w|\b(?:follow us|read more|learn more|more info|for more)\b|https?://|www\.)", re.I
+)
+_FREE_USE_CREDIT = re.compile(
+    r"(?<![A-Za-z])(?:"
+    + "|".join(re.escape(name) for name in ("NASA", *NASA_CENTERS, *FREE_USE_PARTNERS))
+    + r")(?![A-Za-z])"
+)
+_PERSON_NAME_TOKEN = re.compile(r"^(?:[A-Z][a-z]+(?:[-'’][A-Za-z]+)*|[A-Z]{2,}|[A-Z]\.)$")
 _DESCRIPTION_GRAPHIC = re.compile(
     r"^\W*(?:this|the|a|an)\s+(?:[\w'’-]+\s+){0,2}(?:" + "|".join(TEXT_GRAPHIC_DESCRIPTION_OPENINGS) + r")\b",
     re.I,
@@ -390,6 +422,7 @@ def _clean_credit(text: Any) -> str:
     if isinstance(text, (list, tuple)):
         text = " ".join(str(part) for part in text)
     credit = _CREDIT_END.split(html.unescape(str(text or "")).strip(), maxsplit=1)[0]
+    credit = _CREDIT_SOCIAL_TAIL.split(credit, maxsplit=1)[0]
     credit = " ".join(credit.split()).strip(" .;,")
     if credit.startswith("(") and credit.endswith(")"):
         depth = 0
@@ -400,6 +433,20 @@ def _clean_credit(text: Any) -> str:
         else:
             credit = credit[1:-1].strip(" .;,")
     return credit[:200]
+
+
+def free_use_credit(credit: str) -> bool:
+    """署名包含 NASA、NASA 中心或 FREE_USE_PARTNERS 中核实过可自由使用（含商用）的合作方时为 True。"""
+    return bool(_FREE_USE_CREDIT.search(str(credit or "")))
+
+
+def _photographer_credit(name: str) -> str:
+    """摄影师字段：2～4 个词的人名写成 "NASA/姓名"；机构名（"SpaceX"）原样返回。"""
+    tokens = name.split()
+    if 2 <= len(tokens) <= 4 and all(_PERSON_NAME_TOKEN.match(token) for token in tokens) \
+            and not free_use_credit(name):
+        return f"NASA/{name}"
+    return name
 
 
 def extract_credit(data: dict, metadata: dict | None = None) -> str:
@@ -416,7 +463,7 @@ def extract_credit(data: dict, metadata: dict | None = None) -> str:
     for field in ("secondary_creator", "photographer"):
         credit = _clean_credit(data.get(field))
         if credit:
-            return credit
+            return _photographer_credit(credit) if field == "photographer" else credit
     return DEFAULT_CREDIT
 
 
@@ -609,6 +656,10 @@ def _detailed_candidate(
     metadata = metadata if isinstance(metadata, dict) else {}
     if third_party_copyright(data, metadata):
         return None, "copyright"
+    credit = extract_credit(data, metadata)
+    if not free_use_credit(credit):
+        logger.info(f"nasa credit filter: skipped {nasa_id}, credit={credit!r}")
+        return None, "third_party_credit"
     size = image_size(metadata)
     if size is None and "orig" in variants:
         size = _probe_image_size(variants["orig"])
@@ -627,7 +678,7 @@ def _detailed_candidate(
         "search_term": search_term,
         "asset_id": nasa_id,
         "source_page": DETAILS_PAGE.format(nasa_id=quote(nasa_id)),
-        "credit": extract_credit(data, metadata),
+        "credit": credit,
         "rendition": {"id": variant, "width": width, "height": height},
         "tags": relevance_tags(data),
         # NASA 不提供 AI 生成标记；保留字段以便 exclude_ai_generated_materials 一致处理。
