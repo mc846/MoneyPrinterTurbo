@@ -129,13 +129,19 @@ coverr_api_keys = []
 # downscaled (never upscaled) and rendered as a short clip with image_motion.
 # Images whose crop cannot reach the output resolution are skipped, and so are
 # results that name a non-NASA copyright holder, that may show identifiable
-# people (astronauts, briefings, interviews, KSC -PH-/-VP- photos) or that look
-# like logos, title cards, charts or diagrams. The credit and the NASA page of
-# every used image are written to material_sources in the task's script.json.
+# people (astronauts, briefings, talks and other events, NASA Headquarters
+# photos, keywords that are mostly person names) or that look like logos, title
+# cards, charts or diagrams. The credit and the NASA page of every used image
+# are written to material_sources in the task's script.json.
 # Usage guidelines (NASA insignia and identifiable people are restricted):
 # https://www.nasa.gov/nasa-brand-center/images-and-media/
 # 不需要 API Key；目前只使用图片。
 nasa_media_types = ["image"]
+# Also skip NASA images whose cropped, downscaled frame contains a face (the
+# bundled YuNet model via OpenCV, on top of the text filters). Needs the extra:
+# `uv sync --extra face`; without it a warning is logged once and only the text
+# filters run. 检测到人脸的图片跳过，换下一个候选；需要可选依赖 face。
+nasa_face_filter = true
 
 # WaveSpeed AI generates clips from your script keywords with text-to-video
 # models. Create an API key at https://wavespeed.ai

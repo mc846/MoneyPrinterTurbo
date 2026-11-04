@@ -3,8 +3,9 @@ NASA Image and Video Library（images.nasa.gov）素材源。
 
 目前只使用图片：搜索后按文字信息过滤第三方版权、可识别人物以及标志、文字卡和
 图表，再按居中裁剪后的目标分辨率选择最小的图片规格。下载后先裁剪到目标画面
-比例并缩小，再复用 ``video.render_image_zoom_video`` 渲染成短片段。接口不需要
-API Key。使用条款见 https://www.nasa.gov/nasa-brand-center/images-and-media/ 。
+比例并缩小；安装了可选依赖 opencv-python-headless 时再检查画面里有没有人脸，
+最后复用 ``video.render_image_zoom_video`` 渲染成短片段。接口不需要 API Key。
+使用条款见 https://www.nasa.gov/nasa-brand-center/images-and-media/ 。
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import math
 import os
 import re
 import tempfile
+import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, List
@@ -67,24 +69,103 @@ NASA_RIGHTS_PATTERNS = (
 )
 COPYRIGHT_BOILERPLATE_STARTS = ("and restrictions", "restrictions", "information", "notice", "status")
 
-# b) 可识别人物：标题或关键词里的这些词，以及 KSC 的照片（-PH-）和视频（-VP-）编号。
+# b) 可识别人物。词表和阈值按 32 个搜索词首页结果（1055 条，其中 481 条人工看过预览图）
+#    的实测选定。
+#    - 标题或关键词里的人物词。国际空间站照片标题常写 "photographed by the Expedition 6
+#      crew"，只说明拍摄者：实测这类照片 10 张全是地球或星空，因此先去掉这些说法再匹配。
 PERSON_RISK_TERMS = (
     "astronaut", "astronauts", "cosmonaut", "cosmonauts", "crew", "crews", "crew member",
     "crewmember", "briefing", "interview", "interviews", "expert", "experts", "press",
     "news conference", "media day", "portrait", "portraits", "headshot", "selfie",
     "employee", "employees", "ceremony", "spokesperson",
 )
-PERSON_RISK_ID_PATTERNS = (r"^KSC-\d{8}-(?:PH|VP)-",)
+CREW_PHOTO_PATTERNS = (
+    r"\bcrew earth observations?\b",
+    r"\b(?:taken|photographed|captured|downlinked|shot) by (?:an? |the )?(?:[\w'’-]+\s+){0,4}?"
+    r"crew(?:\s*members?)?\b",
+)
+#    - 标题、关键词或描述中的活动用语：实测 59 条命中全部有人。单独的 event、panel、
+#      presents、visits、signs、audience 在科学图片说明里误报（"eruption event"、"solar
+#      panel"、"this image presents"、"signs of"），只用下面带上下文的说法；"from left
+#      to right" 多指画面里的运动方向，也不用。人体模型（mannequin）在画面里像人，一并排除。
+EVENT_TERMS = (
+    "speaks", "speaking", "spoke", "panelist", "panelists", "on a panel", "panel discussion",
+    "attendees", "audience members", "ceremony", "ceremonies", "remarks", "guests", "reporters",
+    "journalists", "news conference", "press conference", "poses for", "poses with",
+    "posing for", "posing with", "posed for", "signing", "award ceremony", "awards ceremony",
+    "honoree", "honorees", "mannequin", "mannequins",
+)
+EVENT_PATTERNS = (
+    r"\bduring an? (?:[\w'’-]+\s+){0,3}event\b",
+    r"\bevent (?:titled|called|named|hosted|held|honoring|celebrating)\b",
+)
+#    - 编号。NASA 总部摄影（NHQ）直接排除：实测 70 张中 69 张是活动照片，唯一例外是一张
+#      发射照片，而且其他信号也分不开它。各中心的摄影编号（KSC、JSC、AFRC…）单看编号时
+#      只有约一半有人（181 张中 87 张），多为飞机、火箭和设施，因此只在描述里同时出现
+#      人物角色词时排除（实测 35 张中 25 张有人）；"Dr. 某某"、principal investigator、
+#      physicist 一类指向具体人物的写法也算（又多 6 张，其中 5 张有人）；technician、engineer 一类泛称不算
+#      （61 张中只有 11 张能看清人脸）。
+PERSON_RISK_ID_PATTERNS = (r"^NHQ\d",)
+PHOTO_OFFICE_ID_PATTERNS = (
+    r"^KSC-", r"^\d{2}p[dp]\d{4}", r"^JSC", r"^jsc\d{4}e", r"^AFRC\d{4}-", r"^E[CD]\d{2}-",
+    r"^GRC-", r"^LRC-", r"^MSFC",
+)
+PHOTO_OFFICE_ROLE_TERMS = (
+    "astronaut", "astronauts", "cosmonaut", "cosmonauts", "crew member", "crew members",
+    "crewmember", "crewmembers", "commander", "pilot", "mission specialist", "flight engineer",
+    "payload specialist", "suits up", "suit up", "principal investigator", "physicist",
+    "physicists", "researcher", "researchers", "chemist", "chemists",
+)
+# 区分大小写：只认 "Dr. Mark Nurge"、"scientist Jane Doe" 这类后面跟着姓名的写法。
+PHOTO_OFFICE_NAMED_PERSON_PATTERNS = (
+    r"\bDr\.\s+[A-Z][a-z]+",
+    r"\b[Ss]cientists?\s+[A-Z][a-z]+\s+[A-Z][a-z]+",
+)
+#    - 关键词大多是人名：2～3 个首字母大写的词（或姓名缩写），不含下面的常见非人名词，也
+#      不是摄影师或作者本人。至少 2 个且占全部关键词 60% 以上时排除；实测这样 2 条命中都
+#      是活动照片。阈值降到 50% 会把列出项目成员姓名的模型飞机照片也排除。
+PERSON_NAME_MIN_COUNT = 2
+PERSON_NAME_MIN_SHARE = 0.6
+NON_NAME_WORDS = (
+    # 天体和天文概念
+    "Galaxy", "Galaxies", "Nebula", "Cluster", "Way", "Milky", "Hole", "Holes", "Black", "Spiral",
+    "Remnant", "Nova", "Universe", "Field", "Deep", "Cosmic", "Stellar", "Bubble", "Shock", "Jets",
+    "Loop", "Borealis", "Australis", "Earth", "Moon", "Sun", "Mars", "Magnetic", "Lensing",
+    "Formation", "Activity",
+    # 任务、设施和机构
+    "Space", "Telescope", "Observatory", "Station", "Center", "Centre", "Program", "Mission",
+    "Horizons", "Shuttle", "Launch", "Building", "Campus", "Laboratory", "Lab", "Research",
+    "Flight", "Facility", "International", "Rocket", "Aircraft", "Module", "Stage", "Probe",
+    "Clipper", "Services", "Technology", "Transportation", "Observation", "Imaging",
+    # 公司和地名
+    "Lockheed", "Martin", "Northrop", "Grumman", "Marietta", "Works", "Zealand", "Guiana",
+)
 
 # c) 标志、文字卡和图表：标题或关键词中的词，以及描述开头的 "This spectrum shows…" 一类句子。
+#    描述里只认明确的徽标说法（实测 2 条命中都是徽标或任务徽章）；单独的 patch 在描述里
+#    多是 "a patch of sky"。
 TEXT_GRAPHIC_TERMS = (
     "insignia", "logo", "logos", "emblem", "patch", "infographic", "infographics",
     "diagram", "diagrams", "chart", "charts", "graph", "graphs", "spectrum", "spectra",
     "poster", "fact sheet", "timeline", "title card", "nasa direct", "coming up",
 )
+TEXT_GRAPHIC_DESCRIPTION_TERMS = (
+    "insignia", "meatball", "mission patch", "crew patch", "emblem", "emblems", "logo", "logos",
+)
 TEXT_GRAPHIC_DESCRIPTION_OPENINGS = (
     "spectrum", "spectra", "chart", "graph", "plot", "diagram", "infographic", "timeline",
 )
+
+# d) 人脸（可选，需要 opencv-python-headless，`uv sync --extra face`）：在裁剪、缩小后的
+#    图片上用随附的 YuNet 模型（cv2.FaceDetectorYN，MIT 许可）检测，先缩到 FACE_DETECT_WIDTH
+#    宽。实测（129 张有人照片的 9:16 裁剪、319 张天文图片）：置信度 0.75、人脸至少 24 px 时
+#    有人照片 93 张检出，天文图片 0 张误报；0.7 时星云开始误报。OpenCV 自带的 Haar 分类器
+#    在同一批天文图片上误报 6%～17%，不用。
+FACE_MODEL_FILE = os.path.join(os.path.dirname(__file__), "face_detection", "face_detection_yunet_2023mar.onnx")
+FACE_DETECT_WIDTH = 720
+FACE_SCORE_THRESHOLD = 0.75
+FACE_NMS_THRESHOLD = 0.3
+FACE_MIN_SIZE = 24
 
 # ---------------------------------------------------------------- 相关度
 # NASA 的关键词很不统一：有时整条标题就是一个关键词，还常带机构和地点名称。
@@ -111,18 +192,30 @@ _COPYRIGHT_MARK = re.compile(
     re.I,
 )
 _CREDIT_LINE = re.compile(r"\b(?:image\s+|photo\s+)?credits?\s*:\s*([^\n<]+)", re.I)
+# 描述的段落之间常只剩两个空格；句号后接大写单词视为句子结束，但 "D. Coe" 这类缩写不算。
+_CREDIT_END = re.compile(r"\s{2,}|(?<!\b[A-Z])\.\s+(?=[A-Z][a-z]+\s)")
 _DESCRIPTION_GRAPHIC = re.compile(
     r"^\W*(?:this|the|a|an)\s+(?:[\w'’-]+\s+){0,2}(?:" + "|".join(TEXT_GRAPHIC_DESCRIPTION_OPENINGS) + r")\b",
     re.I,
 )
+_HTML_TAG = re.compile(r"<[^>]*>")
+_URL = re.compile(r"https?://\S+|www\.\S+")
+_NAME_TOKEN = re.compile(r"^(?:[A-Z][a-z]+(?:[-'’][A-Z]?[a-z]+)*|[A-Z]\.)$")
+_NON_NAME = frozenset(word.lower() for word in NON_NAME_WORDS)
 
 
-def _term_pattern(terms) -> re.Pattern:
-    return re.compile(r"\b(?:" + "|".join(re.escape(term) for term in terms) + r")\b", re.I)
+def _term_pattern(terms, extra_patterns=()) -> re.Pattern:
+    alternatives = [r"\b(?:" + "|".join(re.escape(term) for term in terms) + r")\b", *extra_patterns]
+    return re.compile("|".join(alternatives), re.I)
 
 
 _PERSON_RISK = _term_pattern(PERSON_RISK_TERMS)
+_CREW_PHOTO = re.compile("|".join(CREW_PHOTO_PATTERNS), re.I)
+_EVENT = _term_pattern(EVENT_TERMS, EVENT_PATTERNS)
+_PHOTO_OFFICE_ROLE = _term_pattern(PHOTO_OFFICE_ROLE_TERMS)
+_PHOTO_OFFICE_NAMED_PERSON = re.compile("|".join(PHOTO_OFFICE_NAMED_PERSON_PATTERNS))
 _TEXT_GRAPHIC = _term_pattern(TEXT_GRAPHIC_TERMS)
+_TEXT_GRAPHIC_DESCRIPTION = _term_pattern(TEXT_GRAPHIC_DESCRIPTION_TERMS)
 
 
 def _tls_verify() -> bool:
@@ -185,6 +278,11 @@ def _text(value: Any) -> str:
     return " ".join(html.unescape(str(value or "")).split())
 
 
+def _plain_text(value: Any) -> str:
+    """去掉 HTML 标签和链接：描述里的链接地址（如 nasa.gov/audience/…）会造成误报。"""
+    return " ".join(_URL.sub(" ", _HTML_TAG.sub(" ", _text(value))).split())
+
+
 def _names_only_nasa(text: str) -> bool:
     lowered = text.strip().lower()
     return any(re.search(pattern, lowered) for pattern in NASA_RIGHTS_PATTERNS)
@@ -210,40 +308,96 @@ def third_party_copyright(data: dict, metadata: dict | None = None) -> str | Non
     return None
 
 
+def person_name_keywords(data: dict) -> tuple[int, int]:
+    """返回 (像人名的关键词数, 关键词总数)，规则见 NON_NAME_WORDS 上方的说明。"""
+    keywords = [_text(keyword) for keyword in data.get("keywords") or [] if _text(keyword)]
+    credits = {_text(data.get(field)).lower() for field in ("photographer", "secondary_creator")}
+    names = 0
+    for keyword in keywords:
+        tokens = keyword.split()
+        if (
+            2 <= len(tokens) <= 3
+            and all(_NAME_TOKEN.match(token) for token in tokens)
+            and not any(token.lower() in _NON_NAME for token in tokens)
+            and keyword.lower() not in credits
+        ):
+            names += 1
+    return names, len(keywords)
+
+
 def identifiable_person_risk(data: dict) -> str | None:
-    """标题、关键词或 KSC 编号显示可能有可识别人物时，返回命中的词。"""
+    """
+    可能有可识别人物时返回命中的依据；没有时返回 None。
+
+    依次检查：NHQ 编号；标题或关键词里的人物词；标题、关键词或描述里的活动用语；
+    中心摄影编号加描述里的人物角色词；以人名为主的关键词。
+    """
     nasa_id = str(data.get("nasa_id") or "")
     for pattern in PERSON_RISK_ID_PATTERNS:
-        if re.search(pattern, nasa_id, re.I):
+        if re.search(pattern, nasa_id):
             return nasa_id
-    match = _PERSON_RISK.search(f"{_text(data.get('title'))} {_text(data.get('keywords'))}")
-    return match.group(0).lower() if match else None
+    title_keywords = f"{_text(data.get('title'))} {_text(data.get('keywords'))}"
+    match = _PERSON_RISK.search(_CREW_PHOTO.sub(" ", title_keywords))
+    if match:
+        return match.group(0).lower()
+    description = _plain_text(data.get("description"))
+    match = _EVENT.search(f"{title_keywords} {description}")
+    if match:
+        return " ".join(match.group(0).lower().split())
+    if any(re.search(pattern, nasa_id) for pattern in PHOTO_OFFICE_ID_PATTERNS):
+        match = _PHOTO_OFFICE_ROLE.search(description) or _PHOTO_OFFICE_NAMED_PERSON.search(description)
+        if match:
+            return f"{nasa_id}: {match.group(0).lower()}"
+    names, keywords = person_name_keywords(data)
+    if names >= PERSON_NAME_MIN_COUNT and names >= PERSON_NAME_MIN_SHARE * keywords:
+        return f"person names {names}/{keywords}"
+    return None
 
 
 def text_graphic_risk(data: dict) -> str | None:
-    """标题、关键词或描述开头显示是标志、文字卡或图表时，返回命中的词。"""
+    """标题、关键词、描述开头或描述中的徽标说法显示是标志、文字卡或图表时，返回命中的词。"""
     match = _TEXT_GRAPHIC.search(f"{_text(data.get('title'))} {_text(data.get('keywords'))}")
     if match:
         return match.group(0).lower()
     match = _DESCRIPTION_GRAPHIC.search(_text(data.get("description")))
-    return match.group(0).strip().lower() if match else None
+    if match:
+        return match.group(0).strip().lower()
+    match = _TEXT_GRAPHIC_DESCRIPTION.search(_plain_text(data.get("description")))
+    return match.group(0).lower() if match else None
+
+
+def _clean_credit(text: Any) -> str:
+    """截到段落或句子结尾，去掉整个包住署名的括号（"(NASA/Keegan Barber)"）。"""
+    if isinstance(text, (list, tuple)):
+        text = " ".join(str(part) for part in text)
+    credit = _CREDIT_END.split(html.unescape(str(text or "")).strip(), maxsplit=1)[0]
+    credit = " ".join(credit.split()).strip(" .;,")
+    if credit.startswith("(") and credit.endswith(")"):
+        depth = 0
+        for index, char in enumerate(credit):
+            depth += (char == "(") - (char == ")")
+            if depth == 0 and index < len(credit) - 1:
+                break  # "(NASA) and (ESA)" 不是整体包住
+        else:
+            credit = credit[1:-1].strip(" .;,")
+    return credit[:200]
 
 
 def extract_credit(data: dict, metadata: dict | None = None) -> str:
     """描述中的 "Credit: …" 行，其次元数据 Credit 字段、次要作者和摄影师，最后是 NASA。"""
     match = _CREDIT_LINE.search(str(data.get("description") or ""))
     if match:
-        credit = _text(match.group(1)).strip(" .;,")
+        credit = _clean_credit(match.group(1))
         if credit:
-            return credit[:200]
+            return credit
     for field in ("XMP:Credit", "IPTC:Credit", "Photoshop:Credit"):
-        credit = _text((metadata or {}).get(field))
+        credit = _clean_credit((metadata or {}).get(field))
         if credit:
-            return credit[:200]
+            return credit
     for field in ("secondary_creator", "photographer"):
-        credit = _text(data.get(field))
+        credit = _clean_credit(data.get(field))
         if credit:
-            return credit[:200]
+            return credit
     return DEFAULT_CREDIT
 
 
@@ -596,6 +750,11 @@ def prepare_image(
                 return ""
             out_width = min(crop_width, desired_width)
             out_height = out_width * target_height // target_width
+            root, _ = os.path.splitext(image_path)
+            prepared_path = f"{root}-{aspect.name}-{out_width}x{out_height}.jpg"
+            # 人脸检查和渲染会先后用到同一张处理后的图片。
+            if os.path.isfile(prepared_path) and os.path.getsize(prepared_path) > 0:
+                return prepared_path
             scale = out_width / crop_width
             if scale < 1 and image.format == "JPEG":
                 image.draft("RGB", (math.ceil(width * scale), math.ceil(height * scale)))
@@ -606,13 +765,132 @@ def prepare_image(
             image = image.crop((left, top, left + crop_width, top + crop_height))
             if image.size != (out_width, out_height):
                 image = image.resize((out_width, out_height), Image.LANCZOS)
-            root, _ = os.path.splitext(image_path)
-            prepared_path = f"{root}-{aspect.name}-{out_width}x{out_height}.jpg"
-            image.save(prepared_path, "JPEG", quality=92)
+            temp_path = f"{prepared_path}.part"
+            image.save(temp_path, "JPEG", quality=92)
+            os.replace(temp_path, prepared_path)
             return prepared_path
     except Exception as exc:
         logger.error(f"failed to prepare nasa image: error={type(exc).__name__}, detail={exc}")
         return ""
+
+
+# ---------------------------------------------------------------- 人脸检查
+
+_face_lock = threading.Lock()
+_face_detector_state: dict[str, Any] = {}
+_face_counts: dict[tuple[str, float, int], int] = {}
+
+
+def face_filter_enabled() -> bool:
+    """读取 nasa_face_filter，默认开启。"""
+    value = config.app.get("nasa_face_filter", True)
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off", ""}
+    return bool(value)
+
+
+def _face_detector():
+    """按需加载 OpenCV 和 YuNet 人脸检测器；不可用时只警告一次并返回 None。"""
+    with _face_lock:
+        if "loaded" not in _face_detector_state:
+            try:
+                import cv2
+                import numpy
+
+                detector = cv2.FaceDetectorYN.create(
+                    FACE_MODEL_FILE, "", (FACE_DETECT_WIDTH, FACE_DETECT_WIDTH),
+                    FACE_SCORE_THRESHOLD, FACE_NMS_THRESHOLD, 5000,
+                )
+                _face_detector_state["loaded"] = (numpy, detector)
+            except Exception as exc:
+                _face_detector_state["loaded"] = None
+                logger.warning(
+                    "nasa face filter is unavailable, only the text filters are used "
+                    f"(install it with `uv sync --extra face`): error={type(exc).__name__}, detail={exc}"
+                )
+        return _face_detector_state["loaded"]
+
+
+def face_filter_active() -> bool:
+    """nasa_face_filter 开启并且 OpenCV 可用。"""
+    return face_filter_enabled() and _face_detector() is not None
+
+
+def count_faces(image_path: str) -> int | None:
+    """
+    返回处理后图片中的人脸数；检测器不可用或读取失败时返回 None。
+
+    先缩到 FACE_DETECT_WIDTH 宽再检测，只计置信度和尺寸都达到阈值的人脸；同一文件的
+    结果会缓存。检测器对象不能并发使用，检测时加锁。
+    """
+    loaded = _face_detector()
+    if loaded is None:
+        return None
+    numpy, detector = loaded
+    try:
+        stat = os.stat(image_path)
+        key = (os.path.abspath(image_path), stat.st_mtime, stat.st_size)
+        if key in _face_counts:
+            return _face_counts[key]
+        with Image.open(image_path) as image:
+            image = image.convert("RGB")
+            if image.width > FACE_DETECT_WIDTH:
+                height = round(image.height * FACE_DETECT_WIDTH / image.width)
+                image = image.resize((FACE_DETECT_WIDTH, height), Image.LANCZOS)
+            bgr = numpy.ascontiguousarray(numpy.asarray(image)[:, :, ::-1])
+        with _face_lock:
+            detector.setInputSize((bgr.shape[1], bgr.shape[0]))
+            _, faces = detector.detect(bgr)
+        count = sum(
+            1 for face in (faces if faces is not None else [])
+            if face[14] >= FACE_SCORE_THRESHOLD and min(face[2], face[3]) >= FACE_MIN_SIZE
+        )
+        _face_counts[key] = count
+        return count
+    except Exception as exc:
+        logger.warning(f"nasa face check failed: error={type(exc).__name__}, detail={exc}")
+        return None
+
+
+def _prepared_image(
+    item: MaterialInfo, save_dir: str, video_aspect: VideoAspect, clip_duration: float, image_motion: ImageMotion,
+) -> str:
+    if not save_dir:
+        save_dir = utils.storage_dir("cache_videos")
+    os.makedirs(save_dir, exist_ok=True)
+    image_path = _download_image(item.url, save_dir)
+    if not image_path:
+        return ""
+    return prepare_image(image_path, video_aspect, clip_duration, image_motion)
+
+
+def _shows_face(item: MaterialInfo, prepared_path: str) -> bool:
+    if not face_filter_enabled():
+        return False
+    faces = count_faces(prepared_path)
+    if faces:
+        source_info = item.source_info if isinstance(item.source_info, dict) else {}
+        logger.info(f"nasa face filter: skipped {source_info.get('asset_id') or item.url}, faces={faces}")
+        return True
+    return False
+
+
+def screen_image(
+    item: MaterialInfo,
+    save_dir: str = "",
+    *,
+    video_aspect: VideoAspect,
+    clip_duration: float,
+    image_motion: ImageMotion = ImageMotion.zoom,
+) -> bool:
+    """
+    下载并处理图片，检查人脸；可以使用时返回 True。
+
+    按文案顺序匹配时先用它筛选，被拒绝的图片换成同一关键词的下一个候选；
+    下载和处理结果会被随后的 save_image_clip 复用。
+    """
+    prepared_path = _prepared_image(item, save_dir, video_aspect, clip_duration, image_motion)
+    return bool(prepared_path) and not _shows_face(item, prepared_path)
 
 
 def save_image_clip(
@@ -623,16 +901,10 @@ def save_image_clip(
     clip_duration: float,
     image_motion: ImageMotion = ImageMotion.zoom,
 ) -> str:
-    """下载 NASA 图片，裁剪缩小后渲染成片段，返回片段路径；失败返回空字符串。"""
+    """下载 NASA 图片，裁剪缩小并检查人脸后渲染成片段，返回片段路径；失败或有人脸时返回空字符串。"""
     generation_progress.downloading()
-    if not save_dir:
-        save_dir = utils.storage_dir("cache_videos")
-    os.makedirs(save_dir, exist_ok=True)
-    image_path = _download_image(item.url, save_dir)
-    if not image_path:
-        return ""
-    prepared_path = prepare_image(image_path, video_aspect, clip_duration, image_motion)
-    if not prepared_path:
+    prepared_path = _prepared_image(item, save_dir, video_aspect, clip_duration, image_motion)
+    if not prepared_path or _shows_face(item, prepared_path):
         return ""
     try:
         return video.render_image_zoom_video(prepared_path, int(math.ceil(clip_duration)), image_motion=image_motion)
