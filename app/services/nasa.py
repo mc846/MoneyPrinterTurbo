@@ -32,6 +32,11 @@ from app.utils import utils
 from app.utils.request_logging import trace_http_call
 
 API_ROOT = "https://images-api.nasa.gov"
+USAGE_GUIDELINES_URL = "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+# 过滤规则（人物、标志、版权、规格选择）的版本，写入 24 小时搜索缓存的键：规则改变后
+# 必须加 1，否则旧规则选出的候选还会被使用一整天。1 = 首个版本，2 = 活动用语、NHQ 编号、
+# 人名关键词和人脸检查。
+FILTER_VERSION = 2
 DETAILS_PAGE = "https://images.nasa.gov/details/{nasa_id}"
 DEFAULT_CREDIT = "NASA"
 # 将来可加入 "video"；目前只实现图片。
@@ -270,6 +275,20 @@ def configured_media_types() -> tuple[str, ...]:
     if unsupported:
         logger.warning(f"nasa_media_types {unsupported} are not supported yet; only images are used")
     return tuple(media_type for media_type in requested if media_type in SUPPORTED_MEDIA_TYPES)
+
+
+def search_cache_variant() -> dict[str, Any]:
+    """
+    写入搜索缓存键的过滤版本和相关设置。
+
+    即使所有设置都是默认值也始终写入：在加入版本之前保存的缓存是旧规则的结果，
+    键与默认设置相同就会被继续使用。
+    """
+    return {
+        "filters": FILTER_VERSION,
+        "face_filter": face_filter_enabled(),
+        "media_types": list(configured_media_types()),
+    }
 
 
 def _text(value: Any) -> str:
@@ -811,6 +830,13 @@ def _face_detector():
         return _face_detector_state["loaded"]
 
 
+def face_extra_installed() -> bool:
+    """可选依赖 face（opencv-python-headless）是否已安装；只检查，不加载也不记录警告。"""
+    import importlib.util
+
+    return importlib.util.find_spec("cv2") is not None
+
+
 def face_filter_active() -> bool:
     """nasa_face_filter 开启并且 OpenCV 可用。"""
     return face_filter_enabled() and _face_detector() is not None
@@ -911,3 +937,106 @@ def save_image_clip(
     except Exception as exc:
         logger.error(f"failed to render nasa image clip: error={type(exc).__name__}, detail={exc}")
         return ""
+
+
+# ---------------------------------------------------------------- 署名
+# 使用条款要求注明 NASA 为来源，同时不得暗示 NASA 认可或参与制作。下面的文字只说明
+# 图片来源（"Görüntüler: NASA" / "Images: NASA"），不使用 "NASA 呈现"、"与 NASA 合作"
+# 一类说法。
+
+CREDITS_FILE = "credits.txt"
+CREDITS_HEADING = "Görsel kaynakları / Image credits"
+CREDITS_FOOTER = "Görüntüler: NASA ve ortakları / Images: NASA and partners"
+CREDITS_DISCLAIMER = (
+    "Bu video NASA tarafından onaylanmamıştır. / This video is not endorsed by NASA."
+)
+# 屏幕署名最多列出的机构数，其余写成 "ve diğerleri" / "and others"。
+CREDIT_OVERLAY_MAX_AGENCIES = 2
+# 署名里两个以上大写字母的词视为机构缩写（NASA、ESA、JPL、STScI…）；人名不会命中。
+_AGENCY = re.compile(r"\b[A-Z][A-Za-z]*[A-Z][A-Za-z]*\b")
+
+
+def _is_turkish(language: str) -> bool:
+    return str(language or "").strip().lower().startswith("tr")
+
+
+def used_sources(material_sources: Any) -> list[dict]:
+    """返回实际使用的 NASA 图片记录，按出现顺序去重。"""
+    sources, seen = [], set()
+    for record in material_sources or []:
+        if not isinstance(record, dict) or str(record.get("provider") or "").lower() != "nasa":
+            continue
+        key = record.get("asset_id") or record.get("source_page") or record.get("local_file")
+        if key in seen:
+            continue
+        seen.add(key)
+        sources.append(record)
+    return sources
+
+
+def credits_text(material_sources: Any) -> str:
+    """credits.txt 的内容：每张图片的署名和 images.nasa.gov 页面；没有 NASA 图片时为空。"""
+    sources = used_sources(material_sources)
+    if not sources:
+        return ""
+    lines = [CREDITS_HEADING, "=" * len(CREDITS_HEADING), ""]
+    for index, record in enumerate(sources, start=1):
+        asset_id = str(record.get("asset_id") or "")
+        page = record.get("source_page") or (DETAILS_PAGE.format(nasa_id=quote(asset_id)) if asset_id else "")
+        lines.append(f"{index}. {record.get('credit') or DEFAULT_CREDIT}")
+        if page:
+            lines.append(f"   {page}")
+    lines += ["", CREDITS_FOOTER, CREDITS_DISCLAIMER, ""]
+    return "\n".join(lines)
+
+
+def write_credits_file(task_dir: str, material_sources: Any) -> str:
+    """有 NASA 图片时写入 credits.txt 并返回路径；没有时删除旧文件并返回空字符串。"""
+    credits_path = os.path.join(task_dir, CREDITS_FILE)
+    text = credits_text(material_sources)
+    try:
+        if not text:
+            if os.path.isfile(credits_path):
+                os.remove(credits_path)
+            return ""
+        temp_path = f"{credits_path}.part"
+        with open(temp_path, "w", encoding="utf-8", newline="\n") as file:
+            file.write(text)
+        os.replace(temp_path, credits_path)
+        return credits_path
+    except OSError as exc:
+        logger.warning(f"failed to write nasa credits: error={type(exc).__name__}, detail={exc}")
+        return ""
+
+
+def credit_agencies(material_sources: Any) -> list[str]:
+    """署名中出现的机构缩写，NASA 在前，其余按出现的图片数和先后排序。"""
+    counts: Counter = Counter()
+    first_seen: dict[str, int] = {}
+    for record in used_sources(material_sources):
+        for agency in dict.fromkeys(_AGENCY.findall(str(record.get("credit") or DEFAULT_CREDIT))):
+            counts[agency] += 1
+            first_seen.setdefault(agency, len(first_seen))
+    counts["NASA"] += 0
+    first_seen.setdefault("NASA", -1)
+    return sorted(counts, key=lambda agency: (agency != "NASA", -counts[agency], first_seen[agency]))
+
+
+def overlay_credit_text(material_sources: Any, language: str = "") -> str:
+    """屏幕署名的一行字，例如 "Görüntüler: NASA, ESA ve diğerleri"；没有 NASA 图片时为空。"""
+    if not used_sources(material_sources):
+        return ""
+    agencies = credit_agencies(material_sources)
+    shown = ", ".join(agencies[:CREDIT_OVERLAY_MAX_AGENCIES])
+    if _is_turkish(language):
+        return f"Görüntüler: {shown}" + (" ve diğerleri" if len(agencies) > CREDIT_OVERLAY_MAX_AGENCIES else "")
+    return f"Images: {shown}" + (" and others" if len(agencies) > CREDIT_OVERLAY_MAX_AGENCIES else "")
+
+
+def social_attribution(material_sources: Any, language: str = "") -> str:
+    """发布文案末尾的一行来源说明；没有 NASA 图片时为空。"""
+    if not used_sources(material_sources):
+        return ""
+    if _is_turkish(language):
+        return "Görüntüler: NASA ve ortakları (images.nasa.gov)"
+    return "Images: NASA and partners (images.nasa.gov)"

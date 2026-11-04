@@ -118,6 +118,7 @@ def test_grouped_video_source_keeps_groups_and_accessible_label_binding():
             "pexels",
             "pixabay",
             "coverr",
+            "nasa",
             "metaso_minimax",
             "ofox",
             "loomloom",
@@ -165,6 +166,7 @@ def test_stock_concurrency_only_appears_for_stock_sources():
         for source, show_stock in (
             ("pixabay", True),
             ("coverr", True),
+            ("nasa", True),
             ("wavespeed", False),
             ("local", False),
             ("pexels", True),

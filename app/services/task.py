@@ -34,6 +34,7 @@ from app.services import (
     material,
     metaso_minimax,
     muapi,
+    nasa,
     ofox,
     sonilo,
     subtitle,
@@ -378,6 +379,8 @@ def generate_script(task_id, params):
             custom_system_prompt=params.custom_system_prompt,
             # 关闭时不传参，保持与上游完全相同的调用。
             **({"script_accuracy_rules": True} if params.script_accuracy_rules else {}),
+            # NASA 素材要求文案不把内容归于 NASA；其它来源调用不变。
+            **({"video_source": "nasa"} if params.video_source == "nasa" else {}),
         )
     else:
         logger.debug(f"video script: \n{video_script}")
@@ -1021,6 +1024,24 @@ def _record_loomloom_run_reference(
     return None
 
 
+def _load_material_sources(task_id: str) -> list:
+    """读取任务清单中的素材来源记录；读取失败时返回空列表。"""
+    try:
+        with open(path.join(utils.task_dir(task_id), "script.json"), encoding="utf-8") as file:
+            sources = json.load(file).get("material_sources", [])
+        return sources if isinstance(sources, list) else []
+    except (OSError, ValueError, AttributeError) as exc:
+        logger.warning(f"Cannot read material sources: task_id={task_id}, error={exc}")
+        return []
+
+
+def _write_material_credits(task_id: str) -> None:
+    """用到 NASA 图片时在任务目录写入 credits.txt（署名和图片页面）。"""
+    credits_path = nasa.write_credits_file(utils.task_dir(task_id), _load_material_sources(task_id))
+    if credits_path:
+        logger.info(f"wrote material credits: {credits_path}")
+
+
 def _get_material_source_groups(task_id: str, video_paths: list[str]) -> dict[str, str]:
     """Recover keyword groups from the downloaded material manifest."""
     try:
@@ -1075,6 +1096,11 @@ def generate_final_videos(
         video_music_provider is not None
         and bgm_service.should_use_bgm(params.bgm_type, params.bgm_volume)
     )
+    credit_text = ""
+    if params.video_source == "nasa" and params.nasa_credit_overlay:
+        credit_text = nasa.overlay_credit_text(
+            _load_material_sources(task_id), params.video_language
+        )
     # Matching preserves keyword order; batch allocation varies each keyword's candidates.
     if params.match_materials_to_script:
         video_concat_mode = VideoConcatMode.sequential
@@ -1192,6 +1218,7 @@ def generate_final_videos(
             output_file=final_video_path,
             params=params,
             bgm_file_override=bgm_file_override,
+            **({"credit_text": credit_text} if credit_text else {}),
         )
         if (
             video_music_provider is not None
@@ -1395,6 +1422,15 @@ def _run_cross_post(
                 or video_subject
                 or "Check out this video! #shorts #viral"
             )
+        # NASA 图片要求注明来源：发布文案和 YouTube 描述末尾各加一行。
+        attribution = nasa.social_attribution(_load_material_sources(task_id), video_language)
+        if attribution:
+            post_title = f"{post_title}\n\n{attribution}"
+            if youtube_extra is not None:
+                description = youtube_extra.get("youtube_description") or ""
+                youtube_extra["youtube_description"] = (
+                    f"{description}\n\n{attribution}" if description else attribution
+                )
 
         for video_path in video_paths:
             pending_result_index = None
@@ -1912,6 +1948,8 @@ def _run_pipeline(
             "materials",
             "failed to prepare video materials",
         )
+    if params.video_source == "nasa":
+        _write_material_credits(task_id)
 
     if stop_at == "materials":
         sm.state.update_task(

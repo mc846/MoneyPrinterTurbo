@@ -30,6 +30,12 @@ FIELDS = {
     "openai_image": ("ai_image", "openai_image_base_url_input"),
     "codex_image": ("ai_image", "codex_image_timeout_input"),
 }
+# NASA 不需要 API Key：设置页里没有密钥输入框，但出现在库存素材的选择列表里，排在 Coverr 后面。
+PROVIDER_GROUPS = dict(
+    [(p, g) for p, (g, _) in FIELDS.items() if g == "stock_video"]
+    + [("nasa", "stock_video")]
+    + [(p, g) for p, (g, _) in FIELDS.items() if g != "stock_video"]
+)
 
 
 @contextmanager
@@ -134,6 +140,7 @@ PROVIDER_LABELS = {
     "pexels": "Pexels",
     "pixabay": "Pixabay",
     "coverr": "Coverr",
+    "nasa": "NASA Images (no key)",
     "metaso_minimax": "Metaso MiniMax H3",
     "ofox": "OFox AI Video",
     "loomloom": "Shengsuan Cloud AI Video",
@@ -173,7 +180,7 @@ def assert_material_sections(app, locale):
     for group, label, selector in zip(GROUP_ORDER, GROUP_LABELS, selectors):
         options = [
             provider
-            for provider, (provider_group, _) in FIELDS.items()
+            for provider, provider_group in PROVIDER_GROUPS.items()
             if provider_group == group
         ]
         assert selector.options == [
@@ -565,16 +572,20 @@ def test_general_empty_categories_offer_configuration_without_activation():
         run(app)
         selector_keys = {item.key for item in app.selectbox}
         button_keys = {item.key for item in app.button}
-        for section in ("llm", "ai_video", "ai_image", "stock_video"):
+        for section in ("llm", "ai_video", "ai_image"):
             assert f"settings_general_{section}_provider_select_en" not in selector_keys
             assert f"settings_general_use_{section}" not in button_keys
             assert not app.button(key=f"settings_general_configure_{section}").disabled
         translations = json.loads(
             (ROOT / "webui/i18n/en.json").read_text(encoding="utf-8")
         )["Translation"]
+        # NASA 不需要 API Key，库存素材类别因此不会为空
+        assert app.selectbox(key="settings_general_stock_video_provider_select_en").options == [
+            translations["NASA Images (no key)"]
+        ]
         assert [item.value for item in app.info].count(
             translations["No Configured Providers"]
-        ) == 4
+        ) == 3
         assert settings["llm_provider"] == "openai_codex"
         assert settings["video_source"] == "pexels"
         models.assert_not_called()

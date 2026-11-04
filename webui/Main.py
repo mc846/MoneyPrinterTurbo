@@ -58,6 +58,7 @@ from app.services import (
     muapi,
     infistar_video,
     jalapeno_video,
+    nasa,
     ofox,
     subtitle,
     video,
@@ -136,7 +137,7 @@ LOOMLOOM_MAX_POLL_FAILURES = 5
 # 火山引擎、无限星河排列；其余服务随后展示。这样两个入口的顺序一致，同时
 # 不改变 config.toml、历史任务和 API 请求中的字段语义，旧用户无需迁移配置。
 VIDEO_SOURCE_GROUPS = {
-    "stock_video": ("pexels", "pixabay", "coverr"),
+    "stock_video": ("pexels", "pixabay", "coverr", "nasa"),
     "ai_video": (
         "metaso_minimax",
         "ofox",
@@ -3453,6 +3454,7 @@ def _material_provider_labels():
         "pexels": tr("Pexels"),
         "pixabay": tr("Pixabay"),
         "coverr": tr("Coverr"),
+        "nasa": tr("NASA Images (no key)"),
         "metaso_minimax": tr("Metaso MiniMax H3"),
         "ofox": tr("OFox AI Video"),
         "loomloom": tr("Shengsuan Cloud AI Video"),
@@ -3648,9 +3650,37 @@ def _save_settings_api_keys(config_key, widget_key):
     _save_material_api_keys(config_key, st.session_state.get(widget_key, ""))
 
 
+def _render_nasa_settings(app_settings):
+    """NASA 不需要 API Key：只提供人脸检查、屏幕署名两个开关和使用条款说明。"""
+    st.caption(tr("NASA Source Info"))
+    st.checkbox(
+        tr("NASA Face Filter"),
+        value=bool(app_settings.get("nasa_face_filter", True)),
+        help=tr("NASA Face Filter Help"),
+        key="nasa_face_filter_input",
+        on_change=_save_settings_change,
+        args=("app", "nasa_face_filter", "nasa_face_filter_input", bool),
+    )
+    if not nasa.face_extra_installed():
+        st.warning(tr("NASA Face Filter Missing Extra"))
+    st.checkbox(
+        tr("NASA Credit Overlay"),
+        value=bool(app_settings.get("nasa_credit_overlay", False)),
+        help=tr("NASA Credit Overlay Help"),
+        key="nasa_credit_overlay_input",
+        on_change=_save_settings_change,
+        args=("app", "nasa_credit_overlay", "nasa_credit_overlay_input", bool),
+    )
+    st.markdown(
+        f"{tr('NASA Usage Terms Note')} [{tr('NASA Usage Guidelines')}]({nasa.USAGE_GUIDELINES_URL})"
+    )
+
+
 def _render_material_provider_settings(provider):
     app_settings = config.snapshot_config_with_pending(config.app)
-    if provider in VIDEO_SOURCE_GROUPS["stock_video"]:
+    if provider == "nasa":
+        _render_nasa_settings(app_settings)
+    elif provider in VIDEO_SOURCE_GROUPS["stock_video"]:
         labels = {
             "pexels": "Pexels API Key",
             "pixabay": "Pixabay API Key",
@@ -5513,6 +5543,11 @@ def _loomloom_script_signature(
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+def _selected_video_source() -> str:
+    """文案区在素材来源选择框之前渲染，因此从本轮已写入的运行时配置读取来源。"""
+    return str(config.snapshot_config_with_pending(config.app).get("video_source", "") or "")
+
+
 def _render_local_script_generation(params):
     """保留 MoneyPrinterTurbo 原有的本地 LLM 脚本生成路径。"""
     if not st.button(
@@ -5540,6 +5575,7 @@ def _render_local_script_generation(params):
                 custom_system_prompt=params.custom_system_prompt,
                 app_config=app_config_snapshot,
                 script_accuracy_rules=params.script_accuracy_rules,
+                video_source=_selected_video_source(),
             )
             if not script:
                 # No keyword request for a script that was not generated.
@@ -6059,6 +6095,7 @@ def _render_script_settings(panel, params):
                                 video_script_prompt=params.video_script_prompt,
                                 custom_system_prompt=params.custom_system_prompt,
                                 script_accuracy_rules=params.script_accuracy_rules,
+                                video_source=_selected_video_source(),
                             )
                         )
 
@@ -6144,6 +6181,7 @@ def _render_video_settings(panel, params):
                 "pexels": tr("Pexels"),
                 "pixabay": tr("Pixabay"),
                 "coverr": tr("Coverr"),
+                "nasa": tr("NASA Images (no key)"),
                 "wavespeed": tr("WaveSpeed AI Video"),
                 "volcengine_seedance": tr("Volcano Engine Seedance"),
                 "infistar": tr("Infistar AI Video"),
@@ -6175,6 +6213,10 @@ def _render_video_settings(panel, params):
                 on_settings=_open_material_settings_dialog,
             )
             _set_runtime_config("app", "video_source", params.video_source)
+            # 屏幕署名在素材设置窗口里开关，只对 NASA 图片生效。
+            params.nasa_credit_overlay = params.video_source == "nasa" and bool(
+                config.snapshot_config_with_pending(config.app).get("nasa_credit_overlay", False)
+            )
 
             loomloom_video_capability = None
             if params.video_source == "loomloom":
@@ -6347,7 +6389,8 @@ def _render_video_settings(panel, params):
             #   - 其他 source 沿用 Portrait(index=0)
             #   - 用户在某 source 下手动改过 aspect,session_state 会记住,
             #     下次回到同一 source 时尊重用户选择,不会再被强制覆盖。
-            default_aspect_index = 1 if params.video_source == "coverr" else 0
+            # NASA 图片库同样大多是横图；竖屏需要开启 crop_materials_to_aspect。
+            default_aspect_index = 1 if params.video_source in {"coverr", "nasa"} else 0
             video_aspect_values = [value for _, value in video_aspect_ratios]
             video_aspect_config_key = f"video_aspect_{params.video_source}"
             selected_aspect_ratio = stable_selectbox(
@@ -6515,7 +6558,7 @@ def _render_video_settings(panel, params):
                 _set_runtime_config("app", "video_codec", selected_video_codec)
 
             concurrency_options = [1, 2, 4, 6, 8]
-            if params.video_source in {"pexels", "pixabay", "coverr"}:
+            if params.video_source in {"pexels", "pixabay", "coverr", "nasa"}:
                 selected_material_concurrency = stable_selectbox(
                     tr("Material Concurrency"),
                     options=concurrency_options,
@@ -9209,6 +9252,7 @@ def _render_generation_controls(
             "pexels",
             "pixabay",
             "coverr",
+            "nasa",
             "wavespeed",
             "volcengine_seedance",
             "ofox",
@@ -9222,6 +9266,14 @@ def _render_generation_controls(
             _remove_active_generation_task(task_id)
             st.error(tr("Please Select a Valid Video Source"))
             st.stop()
+
+        # NASA 不需要 API Key；人脸检查缺少可选依赖时只提示，仍按文字过滤继续。
+        if (
+            params.video_source == "nasa"
+            and nasa.face_filter_enabled()
+            and not nasa.face_extra_installed()
+        ):
+            st.info(tr("NASA Face Filter Unavailable"))
 
         if params.video_source == "pexels" and not config.app.get(
             "pexels_api_keys", ""
