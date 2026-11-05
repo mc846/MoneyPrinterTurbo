@@ -390,6 +390,26 @@ def _saved_ui_choice(key, options, default, section=None):
     return default
 
 
+def _saved_concurrency(key, section):
+    """
+    读取并发数设置。选项之外的正整数（例如手工写入的 5）原样返回，页面不再把它
+    悄悄改回 1 并写回配置；超出上限的值由后端限幅。无法识别的值仍降级为 1。
+    """
+    saved = section.get(key, 1)
+    if isinstance(saved, bool):
+        return 1
+    if isinstance(saved, float) and saved.is_integer():
+        saved = int(saved)
+    elif isinstance(saved, str) and saved.strip().isdigit():
+        saved = int(saved.strip())
+    return saved if isinstance(saved, int) and saved >= 1 else 1
+
+
+def _concurrency_options(options, saved):
+    """并发数选项；配置里的选项外取值也列出来，才能原样显示。"""
+    return sorted({*options, saved})
+
+
 def _saved_ui_number(key, default, minimum, maximum, number_type=float):
     """读取并限幅持久化数值，避免非法配置破坏 Streamlit slider。"""
     try:
@@ -6615,14 +6635,15 @@ def _render_video_settings(panel, params):
             else:
                 _set_runtime_config("app", "video_codec", selected_video_codec)
 
-            concurrency_options = [1, 2, 4, 6, 8]
+            concurrency_options = [1, 2, 3, 4, 6, 8]
             if params.video_source in {"pexels", "pixabay", "coverr", "nasa"}:
                 selected_material_concurrency = stable_selectbox(
                     tr("Material Concurrency"),
-                    options=concurrency_options,
-                    default_value=_saved_ui_choice(
-                        "material_concurrency", concurrency_options, 1, config.app
+                    options=_concurrency_options(
+                        concurrency_options,
+                        _saved_concurrency("material_concurrency", config.app),
                     ),
+                    default_value=_saved_concurrency("material_concurrency", config.app),
                     key="material_concurrency_select",
                     help=tr("Material Concurrency Help"),
                 )
@@ -6632,10 +6653,11 @@ def _render_video_settings(panel, params):
 
             selected_clip_concurrency = stable_selectbox(
                 tr("Clip Rendering Concurrency"),
-                options=concurrency_options,
-                default_value=_saved_ui_choice(
-                    "video_clip_concurrency", concurrency_options, 1, config.app
+                options=_concurrency_options(
+                    concurrency_options,
+                    _saved_concurrency("video_clip_concurrency", config.app),
                 ),
+                default_value=_saved_concurrency("video_clip_concurrency", config.app),
                 key="clip_rendering_concurrency_select",
                 help=tr("Clip Rendering Concurrency Help"),
             )
