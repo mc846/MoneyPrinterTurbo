@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "Thiếu tệp đầu vào: {path}",
     "batch.resume.missing_preset": "Thiếu tệp cấu hình mẫu: {path}",
     "batch.resume.changed_input": "Tệp đầu vào đã thay đổi sau khi lô bắt đầu: {path}",
-    "batch.resume.changed_preset": "Cấu hình mẫu đã thay đổi sau khi lô bắt đầu: {path}"
+    "batch.resume.changed_preset": "Cấu hình mẫu đã thay đổi sau khi lô bắt đầu: {path}",
+    "batch.error.exited": "Tiến trình của lô đã kết thúc sớm: {line}"
   }
 }

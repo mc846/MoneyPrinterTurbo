@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "Girdi dosyası yok: {path}",
     "batch.resume.missing_preset": "Reçete dosyası yok: {path}",
     "batch.resume.changed_input": "Girdi dosyası toplu üretim başladıktan sonra değişmiş: {path}",
-    "batch.resume.changed_preset": "Reçete toplu üretim başladıktan sonra değişmiş: {path}"
+    "batch.resume.changed_preset": "Reçete toplu üretim başladıktan sonra değişmiş: {path}",
+    "batch.error.exited": "Toplu üretim süreci erken sonlandı: {line}"
   }
 }

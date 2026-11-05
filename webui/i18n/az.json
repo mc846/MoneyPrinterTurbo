@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "Giriş faylı yoxdur: {path}",
     "batch.resume.missing_preset": "Şablon faylı yoxdur: {path}",
     "batch.resume.changed_input": "Giriş faylı toplu iş başladıqdan sonra dəyişib: {path}",
-    "batch.resume.changed_preset": "Şablon toplu iş başladıqdan sonra dəyişib: {path}"
+    "batch.resume.changed_preset": "Şablon toplu iş başladıqdan sonra dəyişib: {path}",
+    "batch.error.exited": "Toplu iş prosesi vaxtından əvvəl bitdi: {line}"
   }
 }

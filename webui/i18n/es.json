@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "Falta el archivo de entrada: {path}",
     "batch.resume.missing_preset": "Falta el archivo de plantilla: {path}",
     "batch.resume.changed_input": "El archivo de entrada cambió después de iniciar el lote: {path}",
-    "batch.resume.changed_preset": "La plantilla cambió después de iniciar el lote: {path}"
+    "batch.resume.changed_preset": "La plantilla cambió después de iniciar el lote: {path}",
+    "batch.error.exited": "El proceso del lote terminó antes de tiempo: {line}"
   }
 }

@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "입력 파일이 없습니다: {path}",
     "batch.resume.missing_preset": "프리셋 파일이 없습니다: {path}",
     "batch.resume.changed_input": "일괄 작업 시작 후 입력 파일이 바뀌었습니다: {path}",
-    "batch.resume.changed_preset": "일괄 작업 시작 후 프리셋이 바뀌었습니다: {path}"
+    "batch.resume.changed_preset": "일괄 작업 시작 후 프리셋이 바뀌었습니다: {path}",
+    "batch.error.exited": "일괄 작업 프로세스가 일찍 종료되었습니다: {line}"
   }
 }

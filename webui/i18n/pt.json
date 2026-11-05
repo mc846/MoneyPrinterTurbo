@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "O arquivo de entrada não existe: {path}",
     "batch.resume.missing_preset": "O arquivo de predefinição não existe: {path}",
     "batch.resume.changed_input": "O arquivo de entrada mudou depois que o lote começou: {path}",
-    "batch.resume.changed_preset": "A predefinição mudou depois que o lote começou: {path}"
+    "batch.resume.changed_preset": "A predefinição mudou depois que o lote começou: {path}",
+    "batch.error.exited": "O processo do lote terminou antes do tempo: {line}"
   }
 }

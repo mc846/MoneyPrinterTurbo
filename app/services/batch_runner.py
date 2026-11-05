@@ -175,11 +175,21 @@ def _lock_record(pid: int, batch_dir: Path, command: list[str] | None = None) ->
     }
 
 
+def _own_pids(pid: int | None) -> set[int]:
+    """
+    Bu sürecin kilitte görünebilecek PID'leri. Windows'ta .venv\\Scripts\\python.exe bir başlatıcıdır
+    ve asıl yorumlayıcıyı alt süreç olarak açar: WebUI kilide başlatıcının PID'ini yazar (Ctrl+Break o
+    süreç grubuna gider), batch.py ise yorumlayıcıda, yani başlatıcının alt sürecinde çalışır.
+    """
+    return {pid} if pid else {os.getpid(), os.getppid()}
+
+
 def acquire_lock(batch_dir: Path, pid: int | None = None) -> dict:
     """
     Toplu üretim sürecinin kendi kilidi. Kilit bu süreç için yazılmışsa (WebUI başlattıysa) kabul
     edilir; başka bir canlı süreç tutuyorsa BatchBusy, bayatsa silinip yeniden alınır.
     """
+    owners = _own_pids(pid)
     pid = pid or os.getpid()
     bp.batches_dir().mkdir(parents=True, exist_ok=True)
     for _ in range(3):
@@ -187,7 +197,7 @@ def acquire_lock(batch_dir: Path, pid: int | None = None) -> dict:
         if _write_lock(record):
             return record
         existing = _read_lock_file()
-        if existing and existing.get("pid") == pid and _lock_alive(existing):
+        if existing and existing.get("pid") in owners and _lock_alive(existing):
             return existing
         if existing and _lock_alive(existing):
             raise BatchBusy(existing)
@@ -196,9 +206,9 @@ def acquire_lock(batch_dir: Path, pid: int | None = None) -> dict:
 
 
 def release_lock(pid: int | None = None) -> None:
-    """Kilit bu sürecinse siler."""
+    """Kilit bu sürecinse (ya da onu başlatan başlatıcınınsa) siler."""
     lock = _read_lock_file()
-    if lock and lock.get("pid") == (pid or os.getpid()):
+    if lock and lock.get("pid") in _own_pids(pid):
         _remove_lock()
 
 
@@ -375,7 +385,7 @@ class BatchStatus:
         return not self.finished and not self.running
 
 
-def _log_tail(batch_dir: Path) -> list[str]:
+def log_tail(batch_dir: Path) -> list[str]:
     try:
         with open(batch_dir / bp.LOG_FILE, "rb") as handle:
             handle.seek(0, os.SEEK_END)
@@ -422,7 +432,7 @@ def batch_status(batch_dir: Path, lock: dict | None = None, now: datetime | None
     state = bp.BatchState.load(batch_dir)
     lock = current_lock() if lock is None else lock
     running = bool(lock) and Path(lock.get("batch_dir") or "").resolve() == batch_dir.resolve()
-    log_lines = _log_tail(batch_dir) if running else []
+    log_lines = log_tail(batch_dir) if running else []
     items = []
     current_extra = 0.0
     for item in state.items:

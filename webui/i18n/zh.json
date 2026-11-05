@@ -880,6 +880,7 @@
     "batch.resume.missing_input": "输入文件不存在：{path}",
     "batch.resume.missing_preset": "预设文件不存在：{path}",
     "batch.resume.changed_input": "批量任务开始后输入文件已更改：{path}",
-    "batch.resume.changed_preset": "批量任务开始后预设已更改：{path}"
+    "batch.resume.changed_preset": "批量任务开始后预设已更改：{path}",
+    "batch.error.exited": "批量任务进程提前结束：{line}"
   }
 }
