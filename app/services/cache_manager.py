@@ -23,7 +23,31 @@ _VIDEO_CACHE_FILE_PATTERN = re.compile(r"^vid-[0-9a-f]{32}\.mp4$")
 _VIDEO_CACHE_TEMP_FILE_PATTERN = re.compile(
     r"^\.vid-[0-9a-f]{32}-[a-z0-9_]+\.mp4$"
 )
+# 缓存目录里由程序生成、随时可以重新生成的其它文件，同样按修改时间清理：
+# render_image_zoom_video 写在图片旁边的片段（源图像素摘要 + 渲染参数摘要），
+# 以及 EXIF 方向或特殊颜色模式图片的无元数据副本。
+_GENERATED_CACHE_FILE_PATTERNS = (
+    re.compile(r"^[0-9a-f]{64}\.(?:zoom|static)-[0-9a-f]{16}\.mp4$"),
+    re.compile(r"^[0-9a-f]{64}\.sanitized\.png$"),
+)
+# 上面这些文件发布前的临时文件（tempfile.mkstemp 的随机后缀）。
+_GENERATED_CACHE_TEMP_FILE_PATTERNS = (
+    re.compile(r"^\.image-zoom-[a-z0-9_]+\.mp4$"),
+    re.compile(r"^\.image-sanitize-[a-z0-9_]+\.png$"),
+)
 _SECONDS_PER_DAY = 24 * 60 * 60
+
+
+def _is_cache_file(name: str) -> bool:
+    return bool(_VIDEO_CACHE_FILE_PATTERN.fullmatch(name)) or any(
+        pattern.fullmatch(name) for pattern in _GENERATED_CACHE_FILE_PATTERNS
+    )
+
+
+def _is_cache_temp_file(name: str) -> bool:
+    return bool(_VIDEO_CACHE_TEMP_FILE_PATTERN.fullmatch(name)) or any(
+        pattern.fullmatch(name) for pattern in _GENERATED_CACHE_TEMP_FILE_PATTERNS
+    )
 
 
 @dataclass(frozen=True)
@@ -86,8 +110,8 @@ def _iter_video_cache_entries(include_temp: bool = False) -> Iterator[_VideoCach
 
     with entries:
         for entry in entries:
-            if not _VIDEO_CACHE_FILE_PATTERN.fullmatch(entry.name) and not (
-                include_temp and _VIDEO_CACHE_TEMP_FILE_PATTERN.fullmatch(entry.name)
+            if not _is_cache_file(entry.name) and not (
+                include_temp and _is_cache_temp_file(entry.name)
             ):
                 continue
 
@@ -120,10 +144,7 @@ def _is_cleanup_candidate(
     max_age_days: int | None,
     now: float,
 ) -> bool:
-    if (
-        _VIDEO_CACHE_TEMP_FILE_PATTERN.fullmatch(entry.name)
-        and entry.mtime >= now - _SECONDS_PER_DAY
-    ):
+    if _is_cache_temp_file(entry.name) and entry.mtime >= now - _SECONDS_PER_DAY:
         return False
     if max_age_days is None:
         return True
@@ -212,10 +233,7 @@ def clean_video_cache(max_age_days: int | None = None) -> VideoCacheCleanupResul
             # 文件名，防止未来修改扫描逻辑时意外扩大可删除范围。
             if (
                 os.path.realpath(os.path.dirname(entry.path)) != cache_dir
-                or not (
-                    _VIDEO_CACHE_FILE_PATTERN.fullmatch(entry.name)
-                    or _VIDEO_CACHE_TEMP_FILE_PATTERN.fullmatch(entry.name)
-                )
+                or not (_is_cache_file(entry.name) or _is_cache_temp_file(entry.name))
                 or os.path.islink(entry.path)
             ):
                 raise ValueError("cache file is outside the managed directory")
