@@ -53,6 +53,15 @@ class _FakeVideoDownloadResponse:
         yield self.content_bytes
 
 
+def _probe_from(fake_clip_class):
+    """Stand-in for the metadata probe that reports a fake clip's duration and fps."""
+    def probe(path):
+        clip = fake_clip_class(path)
+        return clip.duration, clip.fps
+
+    return probe
+
+
 class TestMaterialTlsVerification(unittest.TestCase):
     def setUp(self):
         self.original_app_config = dict(config.app)
@@ -751,7 +760,7 @@ class TestMaterialTlsVerification(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch(
                 "app.services.material.requests.get", return_value=fake_response
-            ) as get, patch("app.services.material.VideoFileClip", FakeVideoFileClip), patch("app.services.material.material_upload._validate_video"):
+            ) as get, patch("app.services.material.material_upload._probe_video_metadata", _probe_from(FakeVideoFileClip)), patch("app.services.material.material_upload._validate_video"):
                 video_path = material.save_video(
                     "https://example.com/video.mp4?token=abc", save_dir=temp_dir
                 )
@@ -797,7 +806,7 @@ class TestMaterialTlsVerification(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch(
                 "app.services.material.requests.get", return_value=response
-            ) as get, patch("app.services.material.VideoFileClip", FakeVideoFileClip), patch("app.services.material.material_upload._validate_video"):
+            ) as get, patch("app.services.material.material_upload._probe_video_metadata", _probe_from(FakeVideoFileClip)), patch("app.services.material.material_upload._validate_video"):
                 video_path = material.save_video(
                     "https://example.com/large.mp4", save_dir=temp_dir
                 )
@@ -834,7 +843,7 @@ class TestMaterialTlsVerification(unittest.TestCase):
                     "app.services.material.requests.get",
                     return_value=ChunkedResponse(),
                 ),
-                patch("app.services.material.VideoFileClip", FakeVideoFileClip), patch("app.services.material.material_upload._validate_video"),
+                patch("app.services.material.material_upload._probe_video_metadata", _probe_from(FakeVideoFileClip)), patch("app.services.material.material_upload._validate_video"),
                 patch.object(material.logger, "info") as info,
             ):
                 video_path = material.save_video(
@@ -904,7 +913,7 @@ class TestMaterialTlsVerification(unittest.TestCase):
                     _FakeVideoDownloadResponse(b"first generated scene"),
                     _FakeVideoDownloadResponse(b"second generated scene"),
                 ],
-            ) as get, patch("app.services.material.VideoFileClip", FakeVideoFileClip), patch("app.services.material.material_upload._validate_video"):
+            ) as get, patch("app.services.material.material_upload._probe_video_metadata", _probe_from(FakeVideoFileClip)), patch("app.services.material.material_upload._validate_video"):
                 first_path = material.save_video(first_url, save_dir=temp_dir)
                 second_path = material.save_video(second_url, save_dir=temp_dir)
                 cached_path = material.save_video(first_url, save_dir=temp_dir)
@@ -998,7 +1007,7 @@ class TestMaterialTlsVerification(unittest.TestCase):
                     _FakeVideoDownloadResponse(b"broken"),
                     _FakeVideoDownloadResponse(b"valid"),
                 ],
-            ) as get, patch("app.services.material.VideoFileClip", FakeVideoFileClip), patch("app.services.material.material_upload._validate_video"):
+            ) as get, patch("app.services.material.material_upload._probe_video_metadata", _probe_from(FakeVideoFileClip)), patch("app.services.material.material_upload._validate_video"):
                 self.assertEqual(material.save_video(url, save_dir=temp_dir), "")
                 self.assertFalse((Path(temp_dir) / cached_name).exists())
                 self.assertEqual(
@@ -1031,7 +1040,7 @@ class TestMaterialTlsVerification(unittest.TestCase):
                     "app.services.material.requests.get",
                     return_value=_FakeVideoDownloadResponse(b"valid"),
                 ) as get,
-                patch("app.services.material.VideoFileClip", FakeVideoFileClip),
+                patch("app.services.material.material_upload._probe_video_metadata", _probe_from(FakeVideoFileClip)),
                 patch("app.services.material.material_upload._validate_video"),
             ):
                 result = material.save_video(url, save_dir=temp_dir)
@@ -1060,7 +1069,7 @@ class TestMaterialTlsVerification(unittest.TestCase):
             cached_path.write_bytes(b"healthy cached video")
             with (
                 patch("app.services.material.requests.get") as get,
-                patch("app.services.material.VideoFileClip", FakeVideoFileClip),
+                patch("app.services.material.material_upload._probe_video_metadata", _probe_from(FakeVideoFileClip)),
                 patch(
                     "app.services.material.material_upload._validate_video",
                     side_effect=material.material_upload.MaterialServiceError(
@@ -1075,7 +1084,7 @@ class TestMaterialTlsVerification(unittest.TestCase):
             get.assert_not_called()
 
     def test_metadata_probe_failure_preserves_existing_cache(self):
-        """MoviePy failing to start FFmpeg is not evidence of corrupt media."""
+        """The probe failing to start FFmpeg is not evidence of corrupt media."""
         url = "https://example.com/signed-video.mp4?expires=soon"
         cached_name = f"vid-{material.utils.md5(url)}.mp4"
 
@@ -1085,8 +1094,8 @@ class TestMaterialTlsVerification(unittest.TestCase):
             with (
                 patch("app.services.material.requests.get") as get,
                 patch(
-                    "app.services.material.VideoFileClip",
-                    side_effect=FileNotFoundError("MoviePy FFmpeg is unavailable"),
+                    "app.services.material.material_upload._probe_video_metadata",
+                    side_effect=FileNotFoundError("FFmpeg is unavailable"),
                 ),
                 patch(
                     "app.services.material.material_upload._validate_video"
@@ -1114,7 +1123,7 @@ class TestMaterialTlsVerification(unittest.TestCase):
             with patch(
                 "app.services.material.requests.get",
                 return_value=_FakeVideoDownloadResponse(b"bad metadata"),
-            ), patch("app.services.material.VideoFileClip", FakeVideoFileClip), patch("app.services.material.material_upload._validate_video"):
+            ), patch("app.services.material.material_upload._probe_video_metadata", _probe_from(FakeVideoFileClip)), patch("app.services.material.material_upload._validate_video"):
                 self.assertEqual(
                     material.save_video("https://example.com/nan.mp4", save_dir=temp_dir),
                     "",

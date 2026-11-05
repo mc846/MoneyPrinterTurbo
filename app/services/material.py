@@ -1215,7 +1215,6 @@ def _describe_download_progress(
 
 def _is_valid_video_file(video_path: str) -> bool:
     """Return whether a video satisfies the cache publication contract."""
-    clip = None
     try:
         # Decode the complete stream first. Unlike MoviePy's metadata probe,
         # this validator distinguishes confirmed bad media from an FFmpeg
@@ -1232,26 +1231,17 @@ def _is_valid_video_file(video_path: str) -> bool:
         ) from exc
 
     try:
-        clip = VideoFileClip(video_path)
-        duration = clip.duration
-        fps = clip.fps
+        # Read duration and fps from the metadata only. A VideoFileClip would
+        # also start a frame reader, a second FFmpeg process per cached video.
+        duration, fps = material_upload._probe_video_metadata(video_path)
         return bool(duration > 0 and fps > 0)
     except Exception as exc:
-        # Complete decoding already succeeded. A MoviePy failure at this point
-        # is an unavailable metadata probe (for example, its configured FFmpeg
+        # Complete decoding already succeeded. A probe failure at this point
+        # is an unavailable metadata probe (for example, the configured FFmpeg
         # executable is missing), not proof that the cached bytes are corrupt.
         raise material_upload.MaterialServiceError(
             "failed to probe video metadata"
         ) from exc
-    finally:
-        if clip is not None:
-            try:
-                clip.close()
-            except Exception as close_error:
-                logger.warning(
-                    f"failed to close video clip: {video_path}, "
-                    f"error: {str(close_error)}"
-                )
 
 
 def save_video(video_url: str, save_dir: str = "") -> str:
