@@ -9,7 +9,7 @@ MoneyPrinterTurbo, bir konu ya da anahtar kelimeden kendiliğinden kısa video �
 - `webui/Main.py`: Streamlit WebUI (tek dosya, ~9,5 bin satır). API'yi kullanmaz, görevi aynı süreçte `app/services/webui_task.py` → `task.start` üzerinden çalıştırır. Metinler `tr("key")` ile `webui/i18n/*.json` dosyalarından gelir.
 - `cli.py`: tarayıcısız üretim yolu, `run_cli` → `build_video_params` → `task.start`. `--stop-at` şu aşamalardan biri olabilir: script, terms, audio, subtitle, materials, video. `--batch-file` JSON ya da JSONL alır. `--video-source` verilmezse `[app].video_source` kullanılır, o da yoksa `pexels`.
 - `app/launcher.py`: pip ile kurulan `mpt` komutunun girişi (`mpt webui`, `mpt cli`, `mpt batch`).
-- `batch.py`: toplu üretim (kişisel iş akışı; `app/services/batch_production.py` ve `batch_package.py`), bkz. "Toplu üretim" bölümü.
+- `batch.py`: toplu üretim (kişisel iş akışı; `app/services/batch_production.py` ve `batch_package.py`), bkz. "Toplu üretim" bölümü. WebUI'da üst çubuktaki "Toplu Üretim" (`webui/batch_page.py`, `app/services/batch_runner.py`).
 
 **API katmanı**
 - `app/asgi.py`: uygulama kurulumu, CORS (`CORS_ALLOWED_ORIGINS`), `app.api_key` doğrulaması, görev dosyalarının korunması.
@@ -78,6 +78,7 @@ uv run ruff check app cli.py main.py webui test docs/skill   # CI'daki lint
 - ffmpeg, `imageio-ffmpeg` paketinden gelir (`.venv\Lib\site-packages\imageio_ffmpeg\binaries\`); PATH'te ffmpeg yok. Başka bir ffmpeg kullanmak için `[app] ffmpeg_path` ya da `IMAGEIO_FFMPEG_EXE` ver. ffprobe olmadığı için `video_project.py` çalışmaz.
 - `config.toml` gitignore'da ve API anahtarları orada durur. Yeni ya da değişen her ayar `config.example.toml`'a da işlenmeli.
 - **Uçtan uca test kuralı:** `config.toml`'daki LLM sağlayıcısına güvenme; kullanıcı onu WebUI'dan değiştirir (04.11'den beri `ollama` / `gpt-oss:120b-cloud`). Sağlayıcıyı her CLI koşusunda `--llm-provider` (gerekirse `--llm-model`) ile ver, ör. `--llm-provider claude_code`. Bayraklar yalnız o süreçte geçerli, `config.toml`'a yazılmaz. Claude Code içinden `claude_code` sağlayıcısını kullanırken `CLAUDECODE` ve `CLAUDE_*` ortam değişkenlerini temizle.
+- Açık kalan WebUI süreci ayarları bellekte tutar ve ana sayfa her yeniden çalıştığında `config.toml`'a yazar. Kod güncellendikten sonra yeniden başlatılmazsa eski seçenek listeleriyle yazabilir. 05.11'de `config.toml` 19:40:47 ve 20:04:17'de değişti: render motoru `moviepy`, eşzamanlılık 1, ses `af-ZA-AdriNeural-Female`, yazı tipi `BeVietnamPro-Bold.ttf`. O sırada çalışan tek süreç, 04.11 15:42'den beri açık WebUI'ydı; dosyaya dokunulmadı, WebUI yeniden başlatıldı.
 - `listen_host` yerelde `127.0.0.1`. Docker'daki API container'ı (`main.py`) aynı `config.toml`'u okur ve container içinde `0.0.0.0` dinlemesi gerekir; değer `127.0.0.1` kalırsa host'tan erişilemez. WebUI container'ı etkilenmez, çünkü adresini komut satırından (`--server.address=0.0.0.0`) alır. Bu değer için henüz ortam değişkeni yok; ileride eklenecek.
 
 ## Portlar
@@ -87,13 +88,13 @@ Yerel çalıştırma ve Docker aynı portları kullanır: WebUI 8501, API 8080 (
 ## Test baz durumu
 
 04.11.2026, Windows 11, Python 3.11.18. Redis yok, API anahtarı yok, PATH'te ffmpeg yok. `pytest -q test` 12–23 dakika sürer.
-**3991 geçti, 3 kaldı, 244 atlandı** (05.11, toplu üretimden sonra, `main` a9620a2, 13 dk 27 sn; ayrıca 13 844 alt test geçti; düzeltmelerin, kırpma, etiket uygunluğu, görsel arama terimi, doğruluk kuralı, eşit aralıklı terim seçimi, NASA kaynağı, noktalama normalleştirmesi, CLI sağlayıcı bayraklarının, yedek kaynağın, yüz kenarı kuralının, metin filtresinin, üretim süresi hızlandırmalarının, ffmpeg son render'ının ve toplu üretimin 892 yeni testi dahil; atlananlara `MPT_RUN_SLOW_TESTS=1` ile açılan 96 matris testi eklendi). NASA testleri ağa çıkmaz; `test/resources/nasa/` altındaki kayıtlı API yanıtlarını kullanır. Yüz ve metin testleri çizilmiş bir yüz, çizilmiş yazı ve yapay bir yıldız alanı üretir (gerçek kişi fotoğrafı yok); `face` extra'sı kurulu değilse OpenCV isteyen 7'si atlanır. CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
+**4066 geçti, 3 kaldı, 244 atlandı** (05.11, WebUI toplu üretiminden sonra, `main` 04cd0fe, 13 dk 41 sn; ayrıca 15 764 alt test geçti; düzeltmelerin, kırpma, etiket uygunluğu, görsel arama terimi, doğruluk kuralı, eşit aralıklı terim seçimi, NASA kaynağı, noktalama normalleştirmesi, CLI sağlayıcı bayraklarının, yedek kaynağın, yüz kenarı kuralının, metin filtresinin, üretim süresi hızlandırmalarının, ffmpeg son render'ının, toplu üretimin ve WebUI toplu üretiminin 967 yeni testi dahil; atlananlara `MPT_RUN_SLOW_TESTS=1` ile açılan 96 matris testi eklendi). NASA testleri ağa çıkmaz; `test/resources/nasa/` altındaki kayıtlı API yanıtlarını kullanır. Yüz ve metin testleri çizilmiş bir yüz, çizilmiş yazı ve yapay bir yıldız alanı üretir (gerçek kişi fotoğrafı yok); `face` extra'sı kurulu değilse OpenCV isteyen 7'si atlanır. CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
 
 Kalan 4 testin hiçbiri bir özelliğin bozulduğunu göstermiyor; nedenleri Windows ya da ortam:
 - `test_image_sanitize_identity.py::test_long_source_name_renders_without_exceeding_filesystem_name_limit`: tam yol 260 karakteri aşıyor ve `LongPathsEnabled=0` (MAX_PATH sınırı).
 - `test_material.py::TestMaterialTlsVerification::test_metadata_probe_failure_preserves_existing_cache`: test yolun `\` ile kurulmasını bekliyor, kod `/` kullanıyor.
 - `test_utils_ffmpeg_check.py::TestGetFfmpegBinaryEnvExpansion::test_normalizes_home_path_in_os_environ`: test `HOME`'u değiştiriyor, oysa Windows'ta `expanduser` `USERPROFILE`'ı okur.
-- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 3990–3991 geçti, 3–4 kaldı arasında değişir (04.11'deki iki tam turun birinde kaldı, tek başına geçti).
+- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 4065–4066 geçti, 3–4 kaldı arasında değişir (04.11'deki iki tam turun birinde kaldı, tek başına geçti).
 - `test_webui_startup.py::TestWebuiStartup::test_external_directory_prefers_project_app_package` tam turun yükü altında bazen alt süreç zaman aşımına (60 sn) takılıyor; tek başına 9–14 sn'de geçiyor.
 
 Atlananların dağılımı: 96 ffmpeg son render'ın tam stil matrisi (`MPT_RUN_SLOW_TESTS=1` ile çalışır; varsayılan turda her boyutu kapsayan 12 çekirdek durum çalışıyor), 91 native ffmpeg/ffprobe ister, 38 Redis ister (`MPT_TEST_REDIS_HOST`), 8 Kokoro test sunucusu ister, 7 canlı sağlayıcı ister (`MPT_RUN_INTEGRATION_TESTS=1`), 3 `twelvelabs` extra'sı kurulu olmadığı için, 1 Windows'ta geçersiz bir yol yüzünden atlanıyor.
@@ -118,6 +119,7 @@ Testler `test/conftest.py` fixture'ı sayesinde izole çalışır; gerçek `conf
   - `fix/script-order-even-spread`, `feat/visual-search-terms`'in üzerinde ve içine `fix/script-order-dedup` merge edilmiş. Gerekçe: `_download_videos_by_script_order`'ın gövdesini yalnız dedup dalı değiştirdi; korunması gereken yerel yön ve uygunluk sıralaması ise yığından geliyor. Upstream'de hem yığından hem `fix/script-order-dedup`'tan sonra birleşmeli.
   - `feat/nasa-source`, `fix/script-order-even-spread`'in üzerinde (dolayısıyla bütün yığına ve dedup dalına bağlı). Üçüncü turda içine `feat/script-accuracy-rules` merge edildi (bdf6412): NASA'nın metin kuralı doğruluk kurallarıyla aynı listede numaralanıyor, bu yüzden upstream'de doğruluk kuralları dalından da sonra birleşmeli. Kırpma kuralını, `MATERIAL_TAG_SOURCES` uygunluk sıralamasını ve sıra koruma kipindeki eşit aralığı kullanır. Upstream'de even-spread'den sonra birleşmeli. İkinci commit'i (filtreler ve yüz kontrolü) `pyproject.toml`'a isteğe bağlı `face` extra'sını, `uv.lock`'a yalnız `opencv-python-headless` girdisini (25 satır, elle) ve 227 KB'lık ikili bir model dosyası ekler. Yerel uv 0.13 `uv add`/`uv lock` ile kilidin tamamını yeni biçimde (revision 5, `upload-time`) yeniden yazıyor; bu yüzden kilit elle düzenlendi ve `uv lock --check` ile doğrulandı. Upstream merge'de `uv.lock` çakışırsa çakışmayı çözüp `uv lock --check` çalıştır.
 - `feat/batch-production` (05.11, `main` 03afbb9'dan): toplu üretim. Kişisel iş akışı; upstream'e PR hedeflenmiyor. Commit'ler 4382fb0 (özellik), d85818b (Ctrl+Break), 9cd46d0 (e2e sonrası: süre/kelime uyarı, reçete talimatı); main merge'leri 59821d1, f512d22, a9620a2.
+- `feat/batch-webui` (05.11, `feat/batch-production`'ın üzerinden): WebUI'dan toplu üretim. Commit'ler b144039 (özellik), 9d6b80a (test yalıtımı), 1d657c7 (venv başlatıcısı kilidi, erken çıkış mesajı), 2e4185f (`state.json` değiştirme yeniden denemesi); main merge'leri e9d6ff5, 5739466, 469bf67, 04cd0fe.
 - **Test kuralı:** `test/conftest.py` içermeyen bir dalda test çalıştırma; önce `ls test/conftest.py` ile bak. Böyle bir dalın değişiklikleri `main`'de olduğu için testleri orada çalıştır. conftest yoksa testler gerçek `config.toml`'u okur ya da bozar ve `storage/tasks`'a yazar.
 
 ## Toplu üretim (batch.py)
@@ -212,6 +214,59 @@ mpt batch .\konular.csv --preset presets\uzay.toml                            # 
 4. `storage\batches\<klasör>\rapor.html`'i aç. Önce başarısız ve kontrol gerekli kartlara bak: işaretli iddiaları gerekçeleriyle oku. Metin düzeltilecekse konuyu `talimat` sütunuyla yeni bir girdide yeniden üret.
 5. Yüklemek için her konu klasöründen `video.mp4`'ü al, başlık, açıklama ve hashtag'leri `paylasim.md`'den kopyala, kapak olarak `kapak.jpg`'yi kullan.
 6. Yeni reçete için `presets\uzay.toml`'u kopyala; anahtar adlarını `uv run python cli.py --help`'teki bayraklardan al.
+
+### WebUI'dan toplu üretim
+
+Dal `feat/batch-webui` (`feat/batch-production` üzerinden). Kod `webui/batch_page.py` (bölüm), `app/services/batch_runner.py` (arka plan çalıştırıcı), `webui/Main.py`'de üç küçük ekleme; testler `test/services/test_batch_runner.py` ve `test_batch_webui.py` (AppTest, sahte çalıştırıcı).
+
+**Yerleşim:** WebUI tek sayfa (`pages/` yok); görev yöneticisi ve ayarlar üst çubuktan açılan diyaloglar. Toplu üretim üst çubuktaki "Toplu Üretim" düğmesiyle açılan ayrı bir görünüm (`?view=batch`; düğme orada "Tek Video" olur), ana 4 sütunlu formun yerine çizilir. Gerekçeler:
+- Diyalog uzun süren izleme için uygun değil: uygulama yeniden çalışınca kapanıyor, alan dar.
+- `st.navigation` giriş betiğini baştan kurmayı gerektirirdi.
+- Adres parametresi sayfa yenilense ya da sekme yeniden açılsa da görünümü korur.
+- Bölüm, `codex_login.py` gibi ayrı bir modülde durur ve `AppTest.from_string` ile test edilir.
+
+**config.toml:** toplu görünüm ana formu ve sayfa sonundaki `_save_runtime_config()`'i hiç çalıştırmaz, bölüm de config'e yazmaz (test: `try_save_config`/`save_config` çağrılmaz, dosya baytları aynı). Ana formun içerik alanları (konu, metin, terimler, çapalar) toplu görünümdeyken oturumda korunur. Konu listesinin taslağı `storage/batches/.taslak.json`'da.
+
+**Bölüm**
+- Konu listesi: `st.data_editor` (konu, talimat, ses; satır ekleme/silme). Ses sütunu reçetenin diline uygun seslerden seçilir (`voice.get_all_azure_voices(filter_locals=[video_language])`), boş = reçetedeki ses.
+- İçe aktarma `.csv`/`.txt` (`batch_production.read_inputs`, aynı kurallar); dışa aktarma `.csv` (UTF-8-BOM, `;`, `konu;talimat;ses`). "Listeyi temizle".
+- Reçete: `presets/*.toml` seçimi ve salt okunur özet (kaynak → yedek, ses, en-boy, hedef kelime, LLM).
+- Başlat öncesi doğrulama: boş konu (talimatı/sesi olan konusuz satır), tekrar eden konu (büyük/küçük harf duyarsız), listede olmayan ses; hatalar satır numarasıyla. Liste `storage/batches/<tarih-saat>_webui/konular.csv` olarak yazılır ve o klasörle başlatılır.
+- Çalışırken her 3 sn'de kendini yenileyen bir `st.fragment(run_every=3)`: konu başına durum tablosu (bekliyor / çalışıyor: aşama / bitti / kontrol gerekli / başarısız, süre, deneme, not), ilerleme çubuğu (geçen süre ve kalan tahmini), son 12 günlük satırı ve Durdur. Parçacık yalnız iş çalışırken çizilir; bitince sayfayı bir kez yeniden çalıştırıp durur.
+- Süreç bitince sonuç klasörden okunur: bitti, yarım kaldı ("Geçmiş'ten devam ettirin") ya da hiç başlayamadı (batch.log'un son hata satırıyla).
+- Geçmiş: `storage/batches` altındaki son 10 toplu iş (tarih, konu sayısı, bitti/başarısız/kontrol gerekli, tamamlandı/yarım/çalışıyor). "Raporu aç" (varsayılan tarayıcıda `rapor.html`), "Klasörü aç" ve yarım kalanlarda "Devam ettir". Raporu ve klasörü yalnız yerel erişimde açar: masaüstü olan sistem, Streamlit `server.address` (yoksa `listen_host`) döngü adresi ve istemci döngü adresinden. Değilse yolu gösterir.
+- Tek video sayfası, bir toplu iş çalışırken Video Oluştur düğmesinin üstünde uyarı gösterir (CPU çakışması); düğme çalışmaya devam eder.
+- 80 metin (`batch.*`) 14 dilde.
+
+**Çalıştırıcı** (`batch_runner`)
+- `start_batch`: `[python, -X, utf8, batch.py, <girdi>, --preset, <reçete>, --output, <klasör>, --gunluk-stderr]`; kabuk yok, `stdin` boş, stdout/stderr klasördeki `batch.log`'a (ekleme kipinde), Windows'ta `CREATE_NEW_PROCESS_GROUP` (POSIX'te yeni oturum). pip kurulumunda `-m app.services.batch_production`. `--gunluk-stderr` batch.py'nin aynı dosyaya ikinci kez yazmasını önler.
+- Kilit `storage/batches/.lock` (JSON: pid, süreç başlangıç zamanı, klasör, komut). `O_EXCL` ile oluşturulur. Süreç yoksa ya da PID'in başlangıç zamanı farklıysa (PID başka sürece geçmiş) kilit bayattır ve silinir. batch.py de aynı kilidi alır (`run_batch(hold_lock=True)`), komut satırından başlatılan toplu iş de korunur; meşgulse çıkış kodu 3.
+- **Windows tuzağı:** `.venv\Scripts\python.exe` bir başlatıcıdır ve asıl yorumlayıcıyı alt süreç olarak açar. WebUI kilide başlatıcının PID'ini yazar (Ctrl+Break o süreç grubuna gider), batch.py ise yorumlayıcıda çalışır. Bu yüzden batch.py üst sürecinin PID'ini de kendi kilidi sayar. İlk WebUI e2e'si bunu yakaladı: batch.py "başka bir toplu üretim çalışıyor" deyip 3 ile çıkıyordu; gerçek alt süreçli test eklendi.
+- **Windows tuzağı 2:** hedef dosya başka bir süreçte okunmak üzere açıkken `os.replace` "Erişim engellendi" verir. WebUI `state.json`'ı her 3 sn'de okuduğu için ikinci e2e'de batch.py durumu kaydederken düştü. `batch_production.replace_file` değiştirmeyi 5 sn boyunca 0,1 sn arayla yeniden dener; `state.json` ve taslak onu kullanır. Süreç bittiğinde iş yarım kalmışsa ve günlükte o çalıştırmadan bir Traceback varsa, arayüz "durdu" yerine istisnanın son satırını gösterir.
+- `stop_batch`: Ctrl+Break (POSIX'te süreç grubuna SIGINT), 30 sn içinde kapanmazsa `taskkill /T /F` ile süreç ağacı. Ardından `state.json`'da `running` kalan konu `pending` olur, kilit silinir. Ctrl+Break yalnız aynı konsolu paylaşan süreçlere ulaşır: WebUI `webui.bat` ile bir konsolda çalışıyorsa alt süreç o konsolu paylaşır. WebUI yeniden başlatıldıysa ya da konsolsuzsa sonlandırmaya düşülür; durum yine tutarlı kalır.
+- `resume_batch`: `state.json`'daki girdi ve reçeteyle aynı klasöre aynı komut. Girdi ya da reçete yoksa veya özeti değiştiyse `ResumeError` (arayüzde nedeniyle).
+- `batch_status`: `state.json` + batch.log'un son 256 KB'ı. Çalışan konunun aşaması günlükteki `toplu üretim [i/N] başladı`, `generation activity: phase=…` ve `toplu üretim [i] paket hazırlanıyor` satırlarından. Çalışırken geçen süre `ItemState.started`'dan, kalan tahmin biten konuların ortalamasından (hiç yoksa 240 sn). Süreç ölmüşse yarıda kalan konu "bekliyor" görünür.
+
+**WebUI'dan nasıl yapılır**
+1. WebUI'yı `webui.bat` ile bir konsolda başlat (Ctrl+Break'in toplu işe ulaşması için), üst çubukta "Toplu Üretim".
+2. Konuları tabloya yaz (araç çubuğundaki + ile satır ekle, hücreye çift tıkla) ya da `.csv`/`.txt` içe aktar. Reçeteyi seç, özetine bak.
+3. "Toplu üretimi başlat". Durum tablosu 3 sn'de bir yenilenir; sekmeyi kapatıp açmak durumu etkilemez (durum diskten okunur).
+4. "Durdur" o konuyu bekliyor'a çevirir; Geçmiş'ten "Devam ettir" aynı klasörde kaldığı yerden sürer.
+5. Bitince Geçmiş'ten "Raporu aç" / "Klasörü aç"; sonra paketleri yukarıdaki gibi yükle.
+
+**Uçtan uca (05.11, `main` 04cd0fe, WebUI yeniden başlatıldı, Playwright ile)**
+- Liste arayüzde oluşturuldu (iki konu: "Ay neden hep aynı yüzünü gösterir?", "Güneş bir gün sönecek mi?"), uzay reçetesiyle başlatıldı.
+- Başlatıldıktan sonra sekme kapatılıp açıldı: durum tablosu, aşama ("Çalışıyor: seslendirme"), ilerleme ve günlük doğru göründü.
+- İlk konu bitince (226 sn) Durdur: Ctrl+Break'ten ~1 sn sonra süreç temiz kapandı ("durdu", zorla sonlandırma gerekmedi), kilit kalktı, ikinci konu `pending`.
+- Geçmiş'te "yarım" + "Devam ettir": ikinci konu 201 sn'de bitti; toplam 427 sn. "Raporu aç" varsayılan tarayıcıyı (Firefox) çağırdı.
+- config.toml özeti baştan sona aynı. Ekran görüntüleri `scratchpad\e2e_webui\goruntu\` altında.
+- Önceki üç deneme iki gerçek hata ve bir betik hatası buldu:
+  1. venv başlatıcısının PID'i yüzünden kilit reddedildi.
+  2. Okunan `state.json` değiştirilemedi.
+  3. Betik eski bir klasörü izledi.
+  İki gerçek hata düzeltildi ve testlendi; üçüncü denemenin toplu işi (`20261105-204332_webui`) WebUI 3 sn'de bir okurken baştan sona çöküşsüz bitti.
+
+**Sıradaki:** arayüzde sonuç inceleme. Geçmiş'teki bir toplu işin videolarını oynatma, kapağı ve kareleri görme, işaretli iddiaları gerekçeleriyle okuma, paylaşım metnini platform başına kopyalanabilir alanlarda gösterme. Bugün bunlar için `rapor.html` açılıyor.
 
 ## Planlanan iyileştirmeler
 
