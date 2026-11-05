@@ -163,6 +163,8 @@
     "NASA Source Info": "使用 NASA Image and Video Library 的静态图片，渲染成缓慢放大的片段，不需要 API Key。大多数图片是横图；制作 9:16 视频时请开启“用另一方向的素材补足（居中裁剪）”。",
     "NASA Face Filter": "跳过含有人脸的图片",
     "NASA Face Filter Help": "在裁剪后的图片中检测人脸，检测到时改用下一个候选。人物、活动和标志的文字过滤始终生效。",
+    "NASA Text Filter": "跳过带文字的图片",
+    "NASA Text Filter Help": "下载前检查预览图，视频画面范围内有标题、说明、标注或图表文字的图片会跳过；画面范围外的文字不影响。需要可选依赖 face（uv sync --extra face）。",
     "NASA Face Filter Missing Extra": "未安装人脸检测，只使用文字过滤。安装方法：uv sync --extra face",
     "NASA Face Filter Unavailable": "未安装 NASA 图片的人脸检测，将只使用文字过滤（uv sync --extra face）。",
     "NASA Credit Overlay": "在结尾显示图片来源",

@@ -35,8 +35,9 @@ API_ROOT = "https://images-api.nasa.gov"
 USAGE_GUIDELINES_URL = "https://www.nasa.gov/nasa-brand-center/images-and-media/"
 # 过滤规则（人物、标志、版权、规格选择）的版本，写入 24 小时搜索缓存的键：规则改变后
 # 必须加 1，否则旧规则选出的候选还会被使用一整天。1 = 首个版本，2 = 活动用语、NHQ 编号、
-# 人名关键词和人脸检查，3 = 署名去掉话题标签，署名里没有 NASA 或核实过的合作方时淘汰。
-FILTER_VERSION = 3
+# 人名关键词和人脸检查，3 = 署名去掉话题标签，署名里没有 NASA 或核实过的合作方时淘汰，
+# 4 = 候选带预览图地址（文字检查用），nasa_text_filter 写入缓存键。
+FILTER_VERSION = 4
 DETAILS_PAGE = "https://images.nasa.gov/details/{nasa_id}"
 DEFAULT_CREDIT = "NASA"
 # 将来可加入 "video"；目前只实现图片。
@@ -202,6 +203,31 @@ FACE_EDGE_SCORE_THRESHOLD = 0.85
 FACE_EDGE_MIN_INSIDE = 0.15
 FACE_EDGE_MARGIN = 0.5
 
+# e) 图片上的文字（可选，同样需要 face 依赖里的 opencv）：在下载原图之前，用随附的 PP-OCRv3
+#    文字检测模型（OpenCV Zoo，Apache-2.0，cv2.dnn_TextDetectionModel_DB）检查 NASA 的 ~small
+#    预览图（长边约 640 px），并按目标比例算出预览图上的居中裁剪区域：有文字行与裁剪区域
+#    相交就淘汰，完全在裁剪区域外的文字不会出现在视频里，不淘汰。文字行要求置信度不低于
+#    0.7、宽高比不低于 2.5。可行性测量（86 个候选，其中 12 张带标题、标注或图表，40 张天文
+#    图片）：只看置信度时木星云带、星云结和红外暗斑被当成文字（天文误报 2/40），加上宽高比
+#    后 12 张都检出、天文误报 0。
+TEXT_MODEL_FILE = os.path.join(
+    os.path.dirname(__file__), "text_detection", "text_detection_en_ppocrv3_2023may.onnx"
+)
+# 预览图先放大到这个长边（32 的倍数）再检测，与测量时相同。
+TEXT_INPUT_LONG_EDGE = 1312
+TEXT_SCORE_THRESHOLD = 0.7
+TEXT_MIN_ASPECT = 2.5
+# 每个关键词按排序依次检查，直到 TEXT_CHECKED_CANDIDATES 个候选通过（被淘汰的不计）。按文案
+# 顺序匹配时一个关键词通常用 1～3 段素材（88 秒的 K3 用了 6 个关键词的 18 段），更靠后的
+# 候选只在下载失败或人脸被拒时才会用到；只查到第一个通过的候选会漏掉第二、三段素材
+# （K3 里带标题的 Egg Nebula 是 "light beam" 的第三段）。
+TEXT_CHECKED_CANDIDATES = 3
+# 默认开启。独立验证集（9 个新的太空主题、61 个关键词各自前 5 个候选，共 230 个，不含可行性
+# 测量的图片，人工复核）：裁剪区域内叠加文字（标题、说明、时间戳、坐标轴）28 张检出 26 张
+# （93%），实物上的文字（标牌、标志）算上时 40 张检出 33 张；没有文字的 190 张误报 6 张（3.2%，
+# 都是厂房和设备照片），其中天文图片 129 张误报 0 张。每个关键词平均淘汰 0.64 个候选。
+TEXT_FILTER_DEFAULT = True
+
 # ---------------------------------------------------------------- 相关度
 # NASA 的关键词很不统一：有时整条标题就是一个关键词，还常带机构和地点名称。
 # 4 个词以上的关键词按标题处理；机构名称（"Johns Hopkins Applied Physics
@@ -327,6 +353,7 @@ def search_cache_variant() -> dict[str, Any]:
     return {
         "filters": FILTER_VERSION,
         "face_filter": face_filter_enabled(),
+        "text_filter": text_filter_enabled(),
         "media_types": list(configured_media_types()),
     }
 
@@ -687,6 +714,8 @@ def _detailed_candidate(
         "asset_id": nasa_id,
         "source_page": DETAILS_PAGE.format(nasa_id=quote(nasa_id)),
         "credit": credit,
+        # 文字检查在下载原图之前看这张约 640 px 的预览图。
+        "preview": variants.get("small") or variants.get("medium") or "",
         "rendition": {"id": variant, "width": width, "height": height},
         "tags": relevance_tags(data),
         # NASA 不提供 AI 生成标记；保留字段以便 exclude_ai_generated_materials 一致处理。
@@ -1057,6 +1086,133 @@ def save_image_clip(
     except Exception as exc:
         logger.error(f"failed to render nasa image clip: error={type(exc).__name__}, detail={exc}")
         return ""
+
+
+# ---------------------------------------------------------------- 文字检查
+
+_text_lock = threading.Lock()
+_text_detector_state: dict[str, Any] = {}
+_text_lines: dict[tuple[str, float, int, str], list] = {}
+
+
+def text_filter_enabled() -> bool:
+    """读取 nasa_text_filter，默认值见 TEXT_FILTER_DEFAULT。"""
+    value = config.app.get("nasa_text_filter", TEXT_FILTER_DEFAULT)
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off", ""}
+    return bool(value)
+
+
+def _text_detector():
+    """按需加载 OpenCV 和 PP-OCRv3 文字检测模型；不可用时只警告一次并返回 None。"""
+    with _text_lock:
+        if "loaded" not in _text_detector_state:
+            try:
+                import cv2
+                import numpy
+
+                model = cv2.dnn_TextDetectionModel_DB(cv2.dnn.readNet(TEXT_MODEL_FILE))
+                # 与 OpenCV Zoo 示例相同的后处理阈值和归一化参数。
+                model.setBinaryThreshold(0.3).setPolygonThreshold(0.5).setUnclipRatio(2.0).setMaxCandidates(200)
+                model.setInputMean((123.675, 116.28, 103.53))
+                model.setInputScale(1.0 / 255.0 / numpy.array([0.229, 0.224, 0.225]))
+                _text_detector_state["loaded"] = (cv2, numpy, model)
+            except Exception as exc:
+                _text_detector_state["loaded"] = None
+                logger.warning(
+                    "nasa text filter is unavailable, images are not checked for text "
+                    f"(install it with `uv sync --extra face`): error={type(exc).__name__}, detail={exc}"
+                )
+        return _text_detector_state["loaded"]
+
+
+def text_filter_active() -> bool:
+    """nasa_text_filter 开启并且 OpenCV 可用。"""
+    return text_filter_enabled() and _text_detector() is not None
+
+
+def crop_text_lines(image_path: str, video_aspect: VideoAspect) -> list[dict] | None:
+    """
+    返回图片上与居中裁剪区域相交的文字行 [{"score", "height"}]（height 是占裁剪高度的比例）；
+    检测器不可用或读取失败时返回 None。
+
+    只计置信度不低于 TEXT_SCORE_THRESHOLD、外接矩形宽高比不低于 TEXT_MIN_ASPECT 的文字行。
+    裁剪区域按图片自身尺寸计算，因此预览图和原图给出相同的区域。
+    """
+    loaded = _text_detector()
+    if loaded is None:
+        return None
+    cv2, numpy, model = loaded
+    try:
+        aspect = VideoAspect(video_aspect)
+        stat = os.stat(image_path)
+        key = (os.path.abspath(image_path), stat.st_mtime, stat.st_size, aspect.value)
+        if key in _text_lines:
+            return _text_lines[key]
+        image = cv2.imdecode(numpy.fromfile(image_path, dtype=numpy.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            raise ValueError("unreadable image")
+        height, width = image.shape[:2]
+        scale = TEXT_INPUT_LONG_EDGE / max(width, height)
+        size = (max(32, round(width * scale / 32) * 32), max(32, round(height * scale / 32) * 32))
+        with _text_lock:
+            model.setInputSize(size)
+            polygons, scores = model.detect(image)
+        crop_width, crop_height = _center_crop_size(width, height, aspect)
+        left, top = (width - crop_width) // 2, (height - crop_height) // 2
+        lines = []
+        for polygon, score in zip(polygons, scores):
+            x, y, box_width, box_height = cv2.boundingRect(numpy.asarray(polygon, dtype=numpy.int32))
+            if score < TEXT_SCORE_THRESHOLD or box_height <= 0 or box_width / box_height < TEXT_MIN_ASPECT:
+                continue
+            if x + box_width <= left or x >= left + crop_width or y + box_height <= top or y >= top + crop_height:
+                continue
+            lines.append({"score": round(float(score), 3), "height": round(box_height / crop_height, 4)})
+        _text_lines[key] = lines
+        return lines
+    except Exception as exc:
+        logger.warning(f"nasa text check failed: error={type(exc).__name__}, detail={exc}")
+        return None
+
+
+def _preview_url(item: MaterialInfo) -> str:
+    source_info = item.source_info if isinstance(item.source_info, dict) else {}
+    preview = _public_asset_url(source_info.get("preview"))
+    if preview:
+        return preview
+    asset_id = str(source_info.get("asset_id") or "")
+    return f"https://images-assets.nasa.gov/image/{quote(asset_id)}/{quote(asset_id)}~small.jpg" if asset_id else ""
+
+
+def screen_text(items: List[MaterialInfo], video_aspect: VideoAspect, search_term: str = "") -> List[MaterialInfo]:
+    """
+    按排序依次检查 NASA 候选的预览图，淘汰裁剪区域里有文字的候选，返回剩下的候选（顺序不变）。
+
+    通过 TEXT_CHECKED_CANDIDATES 个后停止检查，后面的候选原样保留。预览图缺失、下载或检测
+    失败时保留候选：无法判断时不淘汰。预览图下载到素材缓存目录，重复任务不会再次下载。
+    """
+    save_dir = utils.storage_dir("cache_videos")
+    os.makedirs(save_dir, exist_ok=True)
+    kept, passed = [], 0
+    for index, item in enumerate(items):
+        if passed >= TEXT_CHECKED_CANDIDATES:
+            kept.extend(items[index:])
+            break
+        preview = _preview_url(item) if item.provider == "nasa" else ""
+        preview_path = _download_image(preview, save_dir) if preview else ""
+        lines = crop_text_lines(preview_path, video_aspect) if preview_path else None
+        if lines:
+            source_info = item.source_info if isinstance(item.source_info, dict) else {}
+            tallest = max(lines, key=lambda line: line["height"])
+            logger.info(
+                f"nasa text filter: skipped {source_info.get('asset_id') or item.url} for {search_term!r}, "
+                f"text lines in the crop area={len(lines)}, tallest={tallest['height']:.1%} of the crop height, "
+                f"score={tallest['score']:.2f}"
+            )
+            continue
+        kept.append(item)
+        passed += 1
+    return kept
 
 
 # ---------------------------------------------------------------- 署名

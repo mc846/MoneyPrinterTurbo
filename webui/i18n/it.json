@@ -156,6 +156,8 @@
     "NASA Source Info": "Immagini statiche della NASA Image and Video Library trasformate in clip con zoom lento. Non serve una chiave API. Quasi tutte sono orizzontali; per video 9:16 attiva «Integra con materiali nell’altro orientamento (ritaglio centrale)».",
     "NASA Face Filter": "Salta le immagini con volti",
     "NASA Face Filter Help": "Cerca volti nell'immagine ritagliata e usa il candidato successivo. I filtri di testo per persone, eventi e loghi sono sempre attivi.",
+    "NASA Text Filter": "Salta le immagini con testo impresso",
+    "NASA Text Filter Help": "Controlla l'anteprima prima del download e salta le immagini con titoli, didascalie, etichette o grafici nella parte mostrata dal video; il testo fuori da quella parte non conta. Richiede l'extra face (uv sync --extra face).",
     "NASA Face Filter Missing Extra": "Il rilevamento dei volti non è installato; vengono usati solo i filtri di testo. Installalo con: uv sync --extra face",
     "NASA Face Filter Unavailable": "Il rilevamento dei volti per le immagini NASA non è installato; verranno usati solo i filtri di testo (uv sync --extra face).",
     "NASA Credit Overlay": "Mostra il credito delle immagini alla fine",

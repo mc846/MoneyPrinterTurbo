@@ -766,7 +766,10 @@ def _stock_source_search(
         if crop_enabled or tag_enabled:
             # 每个关键词的候选按 相关度 > 同方向优先 > 素材源顺序 排列。放在缓存
             # 之后排序，旧缓存里按素材源顺序保存的结果同样生效。
-            return _order_material_candidates(items, video_aspect, **order_options)
+            items = _order_material_candidates(items, video_aspect, **order_options)
+        if provider == "nasa" and items and nasa.text_filter_active():
+            # 文字检查按排序后的顺序进行，只查靠前、真正会被用到的候选（见 nasa.screen_text）。
+            items = nasa.screen_text(items, video_aspect, search_term)
         return items
 
     return search_videos, order_options

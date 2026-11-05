@@ -18,6 +18,7 @@ NASA_KEYS = (
     "NASA Images (no key)", "NASA Source Info", "NASA Face Filter", "NASA Face Filter Help",
     "NASA Face Filter Missing Extra", "NASA Face Filter Unavailable", "NASA Credit Overlay",
     "NASA Credit Overlay Help", "NASA Usage Terms Note", "NASA Usage Guidelines",
+    "NASA Text Filter", "NASA Text Filter Help",
     "NASA Fallback Pixabay", "NASA Fallback Pixabay Help", "NASA Fallback Missing Key",
     "Fallback Min Relevance", "Fallback Min Relevance Help", "Fallback Min Candidates",
     "Fallback Min Candidates Help",
@@ -116,10 +117,15 @@ def test_nasa_settings_dialog_has_switches_and_terms_link(face_extra):
         assert any(nasa.USAGE_GUIDELINES_URL in str(item.value) for item in app.markdown)
         assert any("uv sync --extra face" in str(item.value) for item in app.warning) is (not face_extra)
 
+        # conftest 在测试里关闭 nasa_text_filter（避免下载预览图），复选框显示配置的值
+        assert app.checkbox(key="nasa_text_filter_input").value is False
+
         app.checkbox(key="nasa_credit_overlay_input").check().run()
         app.checkbox(key="nasa_face_filter_input").uncheck().run()
+        app.checkbox(key="nasa_text_filter_input").check().run()
         assert config.snapshot_config_with_pending(config.app)["nasa_credit_overlay"] is True
         assert config.snapshot_config_with_pending(config.app)["nasa_face_filter"] is False
+        assert config.snapshot_config_with_pending(config.app)["nasa_text_filter"] is True
 
 
 @pytest.mark.parametrize("pixabay_keys", [[], ["key"]])

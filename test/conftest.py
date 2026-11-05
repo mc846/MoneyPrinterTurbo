@@ -49,3 +49,13 @@ def isolated_runtime_home(pytestconfig):
             returncode=pytest.ExitCode.USAGE_ERROR,
         )
     return runtime_home
+
+
+@pytest.fixture(autouse=True)
+def no_nasa_preview_downloads(monkeypatch):
+    """nasa_text_filter is on by default and downloads NASA previews before the
+    images themselves. Tests must not reach the network, so the filter is off
+    unless a test turns it on (test_nasa_text_filter.py sets it explicitly)."""
+    from app.config import config as app_config
+
+    monkeypatch.setitem(app_config.app, "nasa_text_filter", False)

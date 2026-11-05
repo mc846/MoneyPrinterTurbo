@@ -156,6 +156,8 @@
     "NASA Source Info": "Standbilder aus der NASA Image and Video Library, als langsame Zoom-Clips gerendert. Kein API-Schlüssel nötig. Die meisten Bilder sind im Querformat; für 9:16-Videos „Lücken mit Material anderer Ausrichtung füllen (zentriert zuschneiden)“ aktivieren.",
     "NASA Face Filter": "Bilder mit Gesichtern überspringen",
     "NASA Face Filter Help": "Prüft das zugeschnittene Bild auf Gesichter und nimmt stattdessen den nächsten Kandidaten. Die Textfilter für Personen, Veranstaltungen und Logos laufen immer.",
+    "NASA Text Filter": "Bilder mit eingebranntem Text überspringen",
+    "NASA Text Filter Help": "Prüft vor dem Herunterladen die Vorschau und überspringt Bilder mit Titeln, Bildunterschriften, Beschriftungen oder Diagrammtext im Bereich, den das Video zeigt; Text außerhalb dieses Bereichs stört nicht. Benötigt das face-Extra (uv sync --extra face).",
     "NASA Face Filter Missing Extra": "Die Gesichtserkennung ist nicht installiert, es laufen nur die Textfilter. Installation: uv sync --extra face",
     "NASA Face Filter Unavailable": "Die Gesichtserkennung für NASA-Bilder ist nicht installiert; es werden nur die Textfilter verwendet (uv sync --extra face).",
     "NASA Credit Overlay": "Bildnachweis am Ende anzeigen",

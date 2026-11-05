@@ -156,6 +156,8 @@
     "NASA Source Info": "Gambar diam dari NASA Image and Video Library dijadikan klip dengan zoom perlahan. Tidak perlu kunci API. Sebagian besar gambar lanskap; untuk video 9:16 aktifkan \"Lengkapi dengan materi orientasi lain (potong tengah)\".",
     "NASA Face Filter": "Lewati gambar yang berisi wajah",
     "NASA Face Filter Help": "Mencari wajah pada gambar yang dipotong dan memakai kandidat berikutnya. Filter teks untuk orang, acara, dan logo selalu berjalan.",
+    "NASA Text Filter": "Lewati gambar dengan teks tertanam",
+    "NASA Text Filter Help": "Memeriksa pratinjau sebelum mengunduh dan melewati gambar yang berisi judul, keterangan, label, atau grafik di bagian yang ditampilkan video; teks di luar bagian itu tidak masalah. Memerlukan extra face (uv sync --extra face).",
     "NASA Face Filter Missing Extra": "Deteksi wajah belum terpasang, hanya filter teks yang berjalan. Pasang dengan: uv sync --extra face",
     "NASA Face Filter Unavailable": "Deteksi wajah untuk gambar NASA belum terpasang; hanya filter teks yang digunakan (uv sync --extra face).",
     "NASA Credit Overlay": "Tampilkan kredit gambar di akhir",

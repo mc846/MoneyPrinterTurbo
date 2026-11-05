@@ -156,6 +156,8 @@
     "NASA Source Info": "NASA Image and Video Library'den alınan durağan görseller yavaş yakınlaşan kliplere dönüştürülür. API anahtarı gerekmez. Görsellerin çoğu yatay; 9:16 video için \"Eksikleri Diğer Yöndeki Görüntülerle Tamamla (ortadan kırp)\" seçeneğini açın.",
     "NASA Face Filter": "Yüz içeren görselleri atla",
     "NASA Face Filter Help": "Kırpılmış görselde yüz arar ve bulursa sıradaki adayı kullanır. Kişi, etkinlik ve logo için metin filtreleri her zaman çalışır.",
+    "NASA Text Filter": "Yazı içeren görselleri atla",
+    "NASA Text Filter Help": "İndirmeden önce önizlemeye bakar; videonun gösterdiği bölümde başlık, açıklama, etiket ya da grafik yazısı olan görselleri atlar. Bu bölümün dışındaki yazılar sorun değildir. face extra'sı gerekir (uv sync --extra face).",
     "NASA Face Filter Missing Extra": "Yüz tespiti kurulu değil; yalnız metin filtreleri çalışır. Kurmak için: uv sync --extra face",
     "NASA Face Filter Unavailable": "NASA görselleri için yüz tespiti kurulu değil; yalnız metin filtreleri kullanılacak (uv sync --extra face).",
     "NASA Credit Overlay": "Sonda görsel kaynağını göster",

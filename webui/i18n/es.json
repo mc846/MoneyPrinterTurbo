@@ -156,6 +156,8 @@
     "NASA Source Info": "Imágenes fijas de la NASA Image and Video Library convertidas en clips con zoom lento. No se necesita clave API. La mayoría son horizontales; para vídeos 9:16 activa «Completar con material en otra orientación (recorte central)».",
     "NASA Face Filter": "Omitir imágenes con rostros",
     "NASA Face Filter Help": "Busca rostros en la imagen recortada y usa el siguiente candidato. Los filtros de texto para personas, eventos y logotipos siempre se aplican.",
+    "NASA Text Filter": "Omitir imágenes con texto incrustado",
+    "NASA Text Filter Help": "Revisa la vista previa antes de descargar y omite las imágenes con títulos, leyendas, etiquetas o gráficos en la parte que muestra el vídeo; el texto fuera de esa parte no importa. Requiere el extra face (uv sync --extra face).",
     "NASA Face Filter Missing Extra": "La detección de rostros no está instalada; solo se aplican los filtros de texto. Instálala con: uv sync --extra face",
     "NASA Face Filter Unavailable": "La detección de rostros para imágenes de la NASA no está instalada; solo se usarán los filtros de texto (uv sync --extra face).",
     "NASA Credit Overlay": "Mostrar el crédito de las imágenes al final",
