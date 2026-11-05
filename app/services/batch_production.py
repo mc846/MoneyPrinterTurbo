@@ -20,6 +20,7 @@ import io
 import json
 import os
 import re
+import signal
 import string
 import sys
 import time
@@ -591,8 +592,14 @@ def main(argv: list[str] | None = None, prog: str = "batch.py") -> int:
     from app.utils.logging_utils import configure_terminal_logger, get_logging_options
 
     configure_terminal_logger(sys.stderr, level=get_logging_options()[0], colorize=False)
+    # Windows'ta Ctrl+Break (CTRL_BREAK_EVENT) da Ctrl+C gibi KeyboardInterrupt olur ve temiz durdurur.
+    has_break = hasattr(signal, "SIGBREAK")
+    previous_break = signal.signal(signal.SIGBREAK, signal.default_int_handler) if has_break else None
     try:
         return run_batch(args.input, args.preset, output=args.output, new=args.yeni)
     except (BatchInputError, PresetError) as exc:
         logger.error(str(exc))
         return 2
+    finally:
+        if has_break:
+            signal.signal(signal.SIGBREAK, previous_break or signal.SIG_DFL)
