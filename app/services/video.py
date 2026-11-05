@@ -58,6 +58,8 @@ class SubClippedVideoClip:
         height=None,
         duration=None,
         source_file_path=None,
+        source_duration=None,
+        owns_file=True,
     ):
         self.file_path = file_path
         self.start_time = start_time
@@ -65,6 +67,10 @@ class SubClippedVideoClip:
         self.width = width
         self.height = height
         self.source_file_path = source_file_path or file_path
+        # 源文件的完整时长：判断一个分段是否就是整段素材。
+        self.source_duration = source_duration
+        # False 表示直接使用素材文件本身（未重新写出），拼接后不能删除。
+        self.owns_file = owns_file
         if duration is None:
             self.duration = end_time - start_time
         else:
@@ -763,11 +769,34 @@ def _video_stream_signature(video_file: str) -> tuple | None:
     streams = re.findall(r"Stream #0:\d+.*?: (Video: [^\r\n]*)", stderr)
     if result.returncode != 0 or len(streams) != 1 or not streams[0].startswith("Video: h264"):
         return None
+    # 带音轨的文件不直接参与拼接：重新编码的拼接没有 -map，会带上音频。
+    if re.search(r"Stream #0:\d+.*?: Audio:", stderr):
+        return None
     if b"x264 - core" not in result.stdout or b" bframes=0 " not in result.stdout:
         return None
     units = re.split(rb"\x00\x00\x00\x01|\x00\x00\x01", result.stdout)
     parameter_sets = tuple(unit for unit in units if unit and unit[0] & 0x1F in (7, 8))
     return _STREAM_BITRATE.sub("", streams[0]).strip(), parameter_sets
+
+
+def _clip_usable_as_is(video_file: str, target_size: tuple[int, int]) -> bool:
+    """
+    素材本身已是成片尺寸、fps 和 yuv420p，并且是可复制拼接的 x264 无 B 帧编码（例如
+    直接按成片尺寸渲染的图片片段）时返回 True：整段使用时可以不重新编码。
+    """
+    try:
+        signature = _video_stream_signature(video_file)
+    except Exception:
+        return False
+    if signature is None:
+        return False
+    description = signature[0]
+    width, height = target_size
+    return (
+        re.search(rf"\b{width}x{height}\b", description) is not None
+        and re.search(rf"\b{fps} fps\b", description) is not None
+        and "yuv420p(" in description
+    )
 
 
 def _clips_allow_stream_copy(clip_files: List[str]) -> bool:
@@ -1253,6 +1282,7 @@ def combine_videos(
                         width=clip_w,
                         height=clip_h,
                         source_file_path=video_path,
+                        source_duration=clip_duration,
                     )
                 )
 
@@ -1270,7 +1300,7 @@ def combine_videos(
     logger.debug(f"total subclipped items: {len(subclipped_items)}")
     
     # Add downloaded clips over and over until the duration of the audio (max_duration) has been reached
-    def process_one_clip(indexed_item):
+    def process_one_clip(indexed_item, allow_as_is=True):
         """把一个源片段裁剪、变速、转场后写出，失败时返回 None。"""
         index, subclipped_item = indexed_item
         source_clip = None
@@ -1281,13 +1311,31 @@ def combine_videos(
                 f"processing clip {index + 1}: {subclipped_item.width}x{subclipped_item.height}, "
                 f"source: {os.path.basename(subclipped_item.source_file_path)}"
             )
-            # 只需缩放/裁剪的片段（不变速、无转场）由一条 ffmpeg 命令完成，不经过
-            # MoviePy 逐帧处理；有转场或变速时转场效果由 MoviePy 实现，仍走下面的路径。
+            # 整段使用、已是成片尺寸且编码可复制拼接的素材（例如按成片尺寸渲染的图片片段）
+            # 不变速、无转场时原样进入拼接列表，不再重新编码。
             if (
-                transition_value is None
+                allow_as_is
+                and transition_value is None
                 and normalized_clip_speed == 1.0
-                and (subclipped_item.width, subclipped_item.height) != (video_width, video_height)
+                and (subclipped_item.width, subclipped_item.height) == (video_width, video_height)
+                and subclipped_item.start_time == 0
+                and subclipped_item.end_time == subclipped_item.source_duration
+                and _clip_usable_as_is(subclipped_item.file_path, (video_width, video_height))
             ):
+                logger.debug(f"clip {index + 1} used as it is")
+                return SubClippedVideoClip(
+                    file_path=subclipped_item.file_path,
+                    duration=subclipped_item.end_time,
+                    width=subclipped_item.width,
+                    height=subclipped_item.height,
+                    source_file_path=subclipped_item.source_file_path,
+                    source_duration=subclipped_item.source_duration,
+                    owns_file=False,
+                )
+            # 其余不变速、无转场的片段（需要缩放/裁剪，或只取成片尺寸素材的一部分）由一条
+            # ffmpeg 命令完成，取帧与 MoviePy 相同；有转场或变速时转场效果由 MoviePy 实现，
+            # 仍走下面的路径。复制码流截取一部分会从关键帧开始、多出帧，不使用。
+            if transition_value is None and normalized_clip_speed == 1.0:
                 with tempfile.NamedTemporaryFile(
                     dir=output_dir or ".", prefix="temp-clip-", suffix=".mp4", delete=False
                 ) as temporary_clip:
@@ -1503,7 +1551,30 @@ def combine_videos(
         logger.warning("no clips available for merging")
         return combined_video_path
     
+    as_is_clips = [clip for clip in dict.fromkeys(processed_clips) if not clip.owns_file]
+    if as_is_clips and not _clips_allow_stream_copy([clip.file_path for clip in processed_clips]):
+        # 原样使用的素材与其它片段的码流参数不同（例如其它片段由硬件编码器写出），不能
+        # 复制拼接；重新编码的拼接也要求各文件参数一致，所以按原来的方式重新写出它们。
+        logger.info(f"re-encoding {len(as_is_clips)} clips used as they are: stream copy is not possible")
+        replacements = {}
+        for clip in as_is_clips:
+            item = SubClippedVideoClip(
+                file_path=clip.file_path,
+                start_time=0,
+                end_time=clip.duration,
+                width=clip.width,
+                height=clip.height,
+                source_file_path=clip.source_file_path,
+                source_duration=clip.source_duration,
+            )
+            replacement = process_one_clip((0, item), allow_as_is=False)
+            if replacement is not None:
+                replacements[id(clip)] = replacement
+        processed_clips = [replacements.get(id(clip), clip) for clip in processed_clips]
+
     clip_files = [clip.file_path for clip in processed_clips]
+    # 原样使用的素材文件属于素材缓存，只删除这里写出的临时片段。
+    owned_files = [clip.file_path for clip in processed_clips if clip.owns_file]
     logger.info(f"concatenating {len(clip_files)} clips with ffmpeg")
     try:
         concat_video_clips_with_ffmpeg(
@@ -1524,7 +1595,7 @@ def combine_videos(
     finally:
         # FFmpeg failures and timeouts must not strand one encoded MP4 per clip.
         # Repeated clips share a path; delete_files already deduplicates them.
-        delete_files(clip_files)
+        delete_files(owned_files)
             
     logger.info("video combining completed")
     return combined_video_path

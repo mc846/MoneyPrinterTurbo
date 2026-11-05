@@ -26,6 +26,9 @@ def test_concurrent_combinations_own_intermediate_clips(tmp_path, monkeypatch):
     monkeypatch.setattr(VideoAspect, "to_resolution", lambda self: (64, 64))
     monkeypatch.setattr(video, "_get_configured_video_codec", lambda: "libx264")
     monkeypatch.setattr(video, "_get_effective_video_codec", lambda *args: "libx264")
+    # This covers the MoviePy writer; the ffmpeg normalization reserves its
+    # temporary clip the same way.
+    monkeypatch.setattr(video, "_normalize_clip_with_ffmpeg", lambda *args: (_ for _ in ()).throw(RuntimeError("MoviePy")))
     # Serialize the two real encodes, then hold both until they have completed.
     # This deterministically exposes a shared filename before either concat.
     encode_lock = threading.Lock()
