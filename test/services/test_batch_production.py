@@ -1,6 +1,7 @@
 """Toplu üretim (batch.py)：输入解析、预设校验、目录名、断点续跑与失败重试。任务函数用假实现替代，不生成真实视频。"""
 
 import json
+import signal
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -323,6 +324,22 @@ def test_main_reports_preset_errors(tmp_path):
     finally:
         logger.remove(handler)
     assert any("video_sorce" in message for message in messages)
+
+
+@pytest.mark.skipif(not hasattr(signal, "SIGBREAK"), reason="Ctrl+Break yalnız Windows'ta")
+def test_ctrl_break_stops_like_ctrl_c_and_handler_is_restored(tmp_path):
+    source = write(tmp_path / "k.txt", "A\n")
+    before = signal.getsignal(signal.SIGBREAK)
+    seen = []
+
+    def fake_run_batch(*args, **kwargs):
+        seen.append(signal.getsignal(signal.SIGBREAK))
+        return 130
+
+    with patch.object(bp, "run_batch", fake_run_batch), patch("app.utils.logging_utils.configure_terminal_logger"):
+        assert bp.main([str(source), "--preset", str(PRESET)]) == 130
+    assert seen == [signal.default_int_handler]
+    assert signal.getsignal(signal.SIGBREAK) == before
 
 
 def test_launcher_dispatches_batch():
