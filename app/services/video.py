@@ -6,6 +6,7 @@ import json
 import math
 import os
 import random
+import re
 import gc
 import subprocess
 import sys
@@ -954,6 +955,25 @@ def concat_video_clips_with_ffmpeg(
             dir=os.path.dirname(os.path.abspath(output_file)),
         )
         os.close(descriptor)
+        if _clips_allow_stream_copy(clip_files):
+            # 片段由同一编码设置写出且没有 B 帧：直接复制码流，少一次有损编码。
+            # 复制失败时（例如文件被并发清理）继续走下面的重新编码。
+            copy_command = [
+                utils.get_ffmpeg_binary(), "-y", "-f", "concat", "-safe", "0",
+                "-i", concat_list_file, "-map", "0:v", "-c", "copy",
+            ]
+            if max_duration is not None and max_duration > 0:
+                copy_command.extend(["-t", f"{max_duration:.3f}"])
+            copy_command.append(staged_output)
+            result = _run_concat_with_heartbeat(copy_command, staged_output)
+            if result.returncode == 0 and os.path.getsize(staged_output) > 0:
+                os.replace(staged_output, output_file)
+                logger.info(f"concatenated {len(clip_files)} clips by stream copy")
+                return "copy"
+            logger.warning(
+                "stream copy concat failed, re-encoding: "
+                f"{(result.stderr or result.stdout or '').strip()[-300:]}"
+            )
         effective_codec = _get_effective_video_codec()
         try:
             result_codec = run_concat(effective_codec)
@@ -974,6 +994,147 @@ def concat_video_clips_with_ffmpeg(
         return result_codec
     finally:
         delete_files([concat_list_file, staged_output])
+
+
+# ---------------------------------------------------------------- 片段归一化与码流复制
+# 临时片段不使用 B 帧：解码顺序与显示顺序一致，拼接时才能直接复制码流并按音频时长精确
+# 截断（有 B 帧时按时间截断复制的码流会多出帧、显示顺序错乱）。
+_TEMP_CLIP_FFMPEG_PARAMS = [*_BT709_FFMPEG_PARAMS, "-bf", "0"]
+_STREAM_BITRATE = re.compile(r", \d+ kb/s")
+
+
+def _video_stream_signature(video_file: str) -> tuple | None:
+    """
+    返回可直接复制拼接的 H.264 片段的特征（流描述、SPS/PPS）；不是 x264 无 B 帧
+    片段或读取失败时返回 None。流描述包含编码、档次、像素格式、色彩、尺寸、帧率和时间基。
+    """
+    try:
+        result = subprocess.run(
+            [
+                utils.get_ffmpeg_binary(), "-hide_banner", "-nostdin", "-i", video_file,
+                "-map", "0:v:0", "-c:v", "copy", "-bsf:v", "h264_mp4toannexb",
+                "-frames:v", "1", "-f", "h264", "-",
+            ],
+            capture_output=True,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    # 只看输入部分；输出部分同样以 "Stream #0:0" 列出复制出的流。
+    stderr = result.stderr.decode("utf-8", errors="replace").split("Output #0", 1)[0]
+    streams = re.findall(r"Stream #0:\d+.*?: (Video: [^\r\n]*)", stderr)
+    if result.returncode != 0 or len(streams) != 1 or not streams[0].startswith("Video: h264"):
+        return None
+    if b"x264 - core" not in result.stdout or b" bframes=0 " not in result.stdout:
+        return None
+    units = re.split(rb"\x00\x00\x00\x01|\x00\x00\x01", result.stdout)
+    parameter_sets = tuple(unit for unit in units if unit and unit[0] & 0x1F in (7, 8))
+    return _STREAM_BITRATE.sub("", streams[0]).strip(), parameter_sets
+
+
+def _clips_allow_stream_copy(clip_files: List[str]) -> bool:
+    """全部片段的编码、尺寸、帧率、像素格式、时间基和 SPS/PPS 都相同时才复制码流。"""
+    try:
+        signatures = {_video_stream_signature(file) for file in dict.fromkeys(clip_files)}
+    except Exception as exc:
+        # 检查失败只意味着不能复制，拼接仍按原来的方式重新编码。
+        logger.warning(f"failed to inspect clips for stream copy: {type(exc).__name__}: {exc}")
+        return False
+    return len(signatures) == 1 and None not in signatures
+
+
+def _fit_filter(
+    source_width: int, source_height: int, target_width: int, target_height: int, fit_mode: VideoFitMode
+) -> str:
+    """与 _fit_clip_to_canvas 相同的尺寸、取整和摆放方式，写成在 RGB 中执行的 ffmpeg 滤镜。"""
+    if (source_width, source_height) == (target_width, target_height):
+        return ""
+    if source_width * target_height == source_height * target_width:
+        return f"scale={target_width}:{target_height}:flags=lanczos"
+    width_scale = target_width / source_width
+    height_scale = target_height / source_height
+    if VideoFitMode(fit_mode) == VideoFitMode.cover:
+        scale_factor = max(width_scale, height_scale)
+        resized_width = max(target_width, math.ceil(source_width * scale_factor))
+        resized_height = max(target_height, math.ceil(source_height * scale_factor))
+        crop_x = max(0, (resized_width - target_width) // 2)
+        crop_y = max(0, (resized_height - target_height) // 2)
+        return (
+            f"scale={resized_width}:{resized_height}:flags=lanczos,"
+            f"crop={target_width}:{target_height}:{crop_x}:{crop_y}"
+        )
+    scale_factor = min(width_scale, height_scale)
+    resized_width = max(1, min(target_width, int(source_width * scale_factor)))
+    resized_height = max(1, min(target_height, int(source_height * scale_factor)))
+    x, y = compute_position(
+        (resized_width, resized_height), (target_width, target_height), ("center", "center")
+    )
+    return (
+        f"scale={resized_width}:{resized_height}:flags=lanczos,"
+        f"pad={target_width}:{target_height}:{int(x)}:{int(y)}:color=black"
+    )
+
+
+def _normalize_clip_with_ffmpeg(
+    subclipped_item: SubClippedVideoClip,
+    target_size: tuple[int, int],
+    fit_mode: VideoFitMode,
+    output_file: str,
+) -> None:
+    """
+    用一条 ffmpeg 命令完成 process_one_clip 对需要缩放/裁剪的片段做的事：按 MoviePy
+    的方式解码成 RGB、按同样的规则缩放裁剪、转 BT.709，并用与 MoviePy 写出时相同的
+    编码参数（无 B 帧）写出 int(时长 × fps) 帧。
+    """
+    start = subclipped_item.start_time
+    duration = subclipped_item.end_time - start
+    total_frames = int(duration * fps)
+    width, height = subclipped_item.width, subclipped_item.height
+    # MoviePy 在 t = start + i / fps 时取时间不晚于 t 的最后一帧（可能早于 start）。从
+    # start 之前半秒开始解码、把时间轴移到 start，fps 的 round=up 正是同一取帧规则，
+    # 再丢掉 start 之前的输出帧。
+    seek_from = max(0.0, start - 0.5)
+    filters = [
+        f"setpts=PTS-{start - seek_from:.6f}/TB",
+        f"fps={fps}:round=up",
+        "trim=start_pts=0",
+        "setpts=PTS-STARTPTS",
+        f"scale={width}:{height}:flags=bicubic",
+        "format=rgb24",
+        _fit_filter(width, height, *target_size, fit_mode),
+        # MoviePy 写出的原始 RGB 帧不带宽高比信息；保持一致，片段的 SPS 才相同。
+        "setsar=0",
+        _BT709_VIDEO_FILTER,
+        # 源视频末尾的帧不足时与 MoviePy 一样重复最后一帧。
+        f"tpad=stop_mode=clone:stop={total_frames}",
+    ]
+    seek = ["-ss", f"{seek_from:.6f}"] if seek_from > 0 else []
+
+    def run(codec: str) -> None:
+        chain = filters + (["format=yuv420p"] if codec in ("libx264", "h264_nvenc") else [])
+        result = subprocess.run(
+            [
+                utils.get_ffmpeg_binary(), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                *seek, "-i", subclipped_item.file_path, "-an",
+                "-vf", ",".join(part for part in chain if part),
+                "-c:v", codec, "-preset", "medium", "-bf", "0",
+                "-r", str(fps), "-frames:v", str(total_frames), output_file,
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            check=False, timeout=_DEFAULT_FFMPEG_CONCAT_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0 or os.path.getsize(output_file) == 0:
+            raise RuntimeError((result.stderr or "").strip()[-500:] or "ffmpeg produced no output")
+
+    codec = _get_effective_video_codec(_get_configured_video_codec())
+    try:
+        run(codec)
+    except Exception as exc:
+        if codec == _DEFAULT_VIDEO_CODEC:
+            raise
+        run(_DEFAULT_VIDEO_CODEC)
+        _disable_runtime_video_codec(codec, str(exc))
 
 
 def _sanitize_image_file(image_path: str) -> str:
@@ -1383,6 +1544,47 @@ def combine_videos(
                 f"processing clip {index + 1}: {subclipped_item.width}x{subclipped_item.height}, "
                 f"source: {os.path.basename(subclipped_item.source_file_path)}"
             )
+            # 只需缩放/裁剪的片段（不变速、无转场）由一条 ffmpeg 命令完成，不经过
+            # MoviePy 逐帧处理；有转场或变速时转场效果由 MoviePy 实现，仍走下面的路径。
+            if (
+                transition_value is None
+                and normalized_clip_speed == 1.0
+                and (subclipped_item.width, subclipped_item.height) != (video_width, video_height)
+            ):
+                with tempfile.NamedTemporaryFile(
+                    dir=output_dir or ".", prefix="temp-clip-", suffix=".mp4", delete=False
+                ) as temporary_clip:
+                    clip_file = temporary_clip.name
+                try:
+                    _normalize_clip_with_ffmpeg(
+                        subclipped_item,
+                        (video_width, video_height),
+                        _clip_fit_mode(
+                            subclipped_item.width,
+                            subclipped_item.height,
+                            video_width,
+                            video_height,
+                            fit_mode,
+                            crop_cross_orientation_clips,
+                        ),
+                        clip_file,
+                    )
+                    logger.debug(f"clip {index + 1} normalized with ffmpeg")
+                    processed_clip = SubClippedVideoClip(
+                        file_path=clip_file,
+                        duration=subclipped_item.end_time - subclipped_item.start_time,
+                        width=subclipped_item.width,
+                        height=subclipped_item.height,
+                        source_file_path=subclipped_item.source_file_path,
+                    )
+                    clip_file = None
+                    return processed_clip
+                except Exception as exc:
+                    logger.warning(
+                        f"ffmpeg clip normalization failed, using MoviePy: {type(exc).__name__}: {exc}"
+                    )
+                    delete_files(clip_file)
+                    clip_file = None
             source_clip = _open_video_clip_quietly(subclipped_item.file_path)
             clip = source_clip.subclipped(
                 subclipped_item.start_time, subclipped_item.end_time
@@ -1465,6 +1667,7 @@ def combine_videos(
                 codec=_get_configured_video_codec(),
                 logger=None,
                 fps=fps,
+                ffmpeg_params=_TEMP_CLIP_FFMPEG_PARAMS,
             )
 
             clip_duration_saved = clip.duration
