@@ -706,7 +706,9 @@ def _write_final_video_with_ffmpeg(
         os.close(descriptor)
 
         def build_command(selected_codec: str) -> list[str]:
-            last = f"[v{len(overlays)}]{_BT709_VIDEO_FILTER}"
+            # 帧数在滤镜里截断，而不用 -frames:v：后者写满视频帧就结束整个输出，
+            # 视频之后的最后几个音频包会被丢掉；MoviePy 写出的成片保留完整音频。
+            last = f"[v{len(overlays)}]trim=end_frame={total_frames},{_BT709_VIDEO_FILTER}"
             if selected_codec in ("libx264", "h264_nvenc") and width % 2 == 0 and height % 2 == 0:
                 last += ",format=yuv420p"
             with open(graph_file, "w", encoding="utf-8") as script:
@@ -718,7 +720,6 @@ def _write_final_video_with_ffmpeg(
                 "-map", "[out]", *audio_map,
                 "-c:v", selected_codec, "-preset", "medium",
                 *(["-threads", str(params.n_threads)] if params.n_threads else []),
-                "-frames:v", str(total_frames),
                 staged_output,
             ]
 
