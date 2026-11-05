@@ -116,6 +116,10 @@ def _cached_source_info(item: MaterialInfo) -> dict | None:
     credit = source.get("credit")
     if isinstance(credit, str) and credit.strip():
         cached["credit"] = credit.strip()[:200]
+    # NASA 素材的公开预览图（文字过滤在下载原图之前检查它）。
+    preview = _safe_public_url(source.get("preview"))
+    if preview:
+        cached["preview"] = preview
     return cached
 
 

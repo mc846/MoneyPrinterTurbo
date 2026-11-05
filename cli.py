@@ -591,6 +591,17 @@ Batch manifests:
         ),
     )
     video_group.add_argument(
+        "--nasa-text-filter",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "skip NASA images with burned-in text inside the area the video shows, checked on "
+            "the preview before downloading (needs the face extra); for this run only, "
+            "overrides [app].nasa_text_filter in memory and never writes config.toml "
+            "(default: the config.toml value)"
+        ),
+    )
+    video_group.add_argument(
         "--material-tag-relevance",
         default=None,
         choices=_MATERIAL_TAG_RELEVANCE_MODES,
@@ -1261,6 +1272,15 @@ def _validate_video_source_fallback(params: VideoParams) -> None:
         )
     if fallback == params.video_source:
         raise ValueError("video_source_fallback must differ from video_source")
+
+
+def apply_nasa_overrides(args: argparse.Namespace) -> None:
+    """--nasa-text-filter 只改本进程的 config.app，不写回 config.toml。"""
+    if getattr(args, "nasa_text_filter", None) is None:
+        return
+    from app.config import config
+
+    config.app["nasa_text_filter"] = bool(args.nasa_text_filter)
 
 
 def _load_batch_manifest(raw_path: str) -> tuple[str, list[dict[str, Any]]]:
@@ -1975,6 +1995,7 @@ def apply_llm_overrides(args: argparse.Namespace) -> None:
 def run_cli(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     import app.config  # noqa: F401 -- 初始化配置及进程日志设置。
+    apply_nasa_overrides(args)
     from app.utils.logging_utils import configure_terminal_logger, get_logging_options
 
     # 配置模块默认把终端日志发往 stdout。CLI 的 stdout 是机器可读 JSON，

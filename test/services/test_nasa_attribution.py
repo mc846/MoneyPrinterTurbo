@@ -44,7 +44,8 @@ ENDORSEMENT_WORDING = ("presents", "presented by", "in partnership", "sunar", "i
 
 def test_nasa_cache_key_always_carries_the_filter_version_and_settings():
     variant = nasa.search_cache_variant()
-    assert variant == {"filters": nasa.FILTER_VERSION, "face_filter": True, "media_types": ["image"]}
+    assert variant == {"filters": nasa.FILTER_VERSION, "face_filter": True,
+                       "text_filter": nasa.text_filter_enabled(), "media_types": ["image"]}
 
     def key(**kwargs):
         return material_cache._cache_key("nasa", "black hole", 5, PORTRAIT, crop_to_aspect=True, **kwargs)

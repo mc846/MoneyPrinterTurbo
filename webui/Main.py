@@ -3661,6 +3661,14 @@ def _render_nasa_settings(app_settings):
         on_change=_save_settings_change,
         args=("app", "nasa_face_filter", "nasa_face_filter_input", bool),
     )
+    st.checkbox(
+        tr("NASA Text Filter"),
+        value=nasa.text_filter_enabled(),
+        help=tr("NASA Text Filter Help"),
+        key="nasa_text_filter_input",
+        on_change=_save_settings_change,
+        args=("app", "nasa_text_filter", "nasa_text_filter_input", bool),
+    )
     if not nasa.face_extra_installed():
         st.warning(tr("NASA Face Filter Missing Extra"))
     st.checkbox(

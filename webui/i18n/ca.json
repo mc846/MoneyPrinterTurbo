@@ -156,6 +156,8 @@
     "NASA Source Info": "Imatges fixes de la NASA Image and Video Library convertides en clips amb zoom lent. No cal clau API. La majoria són horitzontals; per a vídeos 9:16 activa «Completa amb material en l’altra orientació (retall central)».",
     "NASA Face Filter": "Omet les imatges amb cares",
     "NASA Face Filter Help": "Cerca cares a la imatge retallada i fa servir el candidat següent. Els filtres de text per a persones, esdeveniments i logotips sempre s'apliquen.",
+    "NASA Text Filter": "Omet les imatges amb text incrustat",
+    "NASA Text Filter Help": "Revisa la previsualització abans de baixar i omet les imatges amb títols, peus, etiquetes o gràfics a la part que mostra el vídeo; el text fora d'aquesta part no importa. Cal l'extra face (uv sync --extra face).",
     "NASA Face Filter Missing Extra": "La detecció de cares no està instal·lada; només s'apliquen els filtres de text. Instal·la-la amb: uv sync --extra face",
     "NASA Face Filter Unavailable": "La detecció de cares per a imatges de la NASA no està instal·lada; només es faran servir els filtres de text (uv sync --extra face).",
     "NASA Credit Overlay": "Mostra el crèdit de les imatges al final",
