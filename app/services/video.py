@@ -661,13 +661,11 @@ def concat_video_clips_with_ffmpeg(
             concat_list_file,
             "-c:v",
             codec,
-            "-threads",
-            str(threads or 2),
-            "-vf",
-            _BT709_VIDEO_FILTER,
-            "-pix_fmt",
-            "yuv420p",
         ]
+        # 未指定线程数时由 FFmpeg 按 CPU 核数自行决定。
+        if threads:
+            command.extend(["-threads", str(threads)])
+        command.extend(["-vf", _BT709_VIDEO_FILTER, "-pix_fmt", "yuv420p"])
         if max_duration is not None and max_duration > 0:
             command.extend(["-t", f"{max_duration:.3f}"])
         command.append(staged_output)
@@ -978,7 +976,7 @@ def combine_videos(
     video_concat_mode: VideoConcatMode = VideoConcatMode.random,
     video_transition_mode: VideoTransitionMode = None,
     max_clip_duration: int = 5,
-    threads: int = 2,
+    threads: int | None = None,
     clip_speed: float = 1.0,
     video_fit_mode: VideoFitMode = VideoFitMode.cover,
     source_usage: dict[str, int] | None = None,
@@ -1961,7 +1959,8 @@ def generate_video(
                 audio_fps=output_audio_fps,
                 audio_bitrate=audio_bitrate,
                 temp_audiofile_path=_get_temp_audio_dir(output_dir),
-                threads=params.n_threads or 2,
+                # None：不传 -threads，由 FFmpeg 按 CPU 核数决定。
+                threads=params.n_threads,
                 logger=None,
                 fps=fps,
             )

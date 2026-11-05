@@ -496,7 +496,7 @@ Batch manifests:
         "--n-threads",
         type=_positive_int,
         default=None,
-        help="FFmpeg worker thread count, at least 1 (default: 2)",
+        help="FFmpeg worker thread count, at least 1 (default: chosen by FFmpeg)",
     )
 
     audio_group = parser.add_argument_group("voiceover and background music")
