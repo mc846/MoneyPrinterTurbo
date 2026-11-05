@@ -84,8 +84,13 @@ class TestVideoService(unittest.TestCase):
         self.test_img_path = os.path.join(resources_dir, "1.png")
         vd._runtime_disabled_video_codecs.clear()
         vd._ffmpeg_encoder_exists.cache_clear()
+        # 这些用例覆盖重新编码的拼接（替换 subprocess.run 并统计调用）；码流复制拼接
+        # 及其前置检查见 test_ffmpeg_concat_normalize.py。
+        self.stream_copy_patch = patch.object(vd, "_clips_allow_stream_copy", return_value=False)
+        self.stream_copy_patch.start()
 
     def tearDown(self):
+        self.stream_copy_patch.stop()
         config.app.clear()
         config.app.update(self.original_app_config)
         vd._runtime_disabled_video_codecs.clear()
