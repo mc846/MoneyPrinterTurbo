@@ -1863,6 +1863,22 @@ def _render_pending_version_check():
     _render_brand()
 
 
+def _batch_view_active():
+    """“Toplu Üretim”视图由地址参数 ?view=batch 决定：刷新页面或重新打开标签页后保持不变。"""
+    from webui.batch_page import VIEW_BATCH, VIEW_PARAM
+
+    return st.query_params.get(VIEW_PARAM) == VIEW_BATCH
+
+
+def _toggle_batch_view():
+    from webui.batch_page import VIEW_BATCH, VIEW_PARAM
+
+    if _batch_view_active():
+        del st.query_params[VIEW_PARAM]
+    else:
+        st.query_params[VIEW_PARAM] = VIEW_BATCH
+
+
 def _render_top_bar():
     """渲染品牌、任务管理、设置和语言切换组成的页面顶部栏。"""
     # 顶部栏分为品牌区和操作区两个独立区域。窄屏下由 Streamlit
@@ -1891,6 +1907,16 @@ def _render_top_bar():
             width="stretch",
         ):
             _render_task_manager_entry()
+
+            in_batch_view = _batch_view_active()
+            st.button(
+                tr("batch.nav.back") if in_batch_view else tr("batch.nav.open"),
+                key="batch_view_toggle_button",
+                type="secondary",
+                icon=":material/arrow_back:" if in_batch_view else ":material/playlist_play:",
+                width="content",
+                on_click=_toggle_batch_view,
+            )
 
             st.button(
                 tr("Settings"),
@@ -9294,6 +9320,17 @@ def _render_generation_controls(
 
     _render_settings_transfer(params)
 
+    from app.services import batch_runner
+
+    batch_lock = batch_runner.current_lock()
+    if batch_lock:
+        # 批量生成占满 CPU；同时生成单个视频会让两边都变慢。
+        st.warning(
+            tr("batch.single_warning").format(
+                name=os.path.basename(str(batch_lock.get("batch_dir") or ""))
+            )
+        )
+
     generation_busy = _generation_is_busy(_current_generation_task_id())
     start_button = st.button(
         tr("Generating Video") if generation_busy else tr("Generate Video"),
@@ -9760,6 +9797,17 @@ def _render_application():
 
     if _apply_pending_settings_preset():
         st.success(tr("Settings Preset Imported"))
+
+    if _batch_view_active():
+        # 未渲染的控件状态会被 Streamlit 清除；重新赋值让创作内容在切回单视频视图后仍在。
+        for content_key in ("video_subject", "video_script", "video_terms", "video_anchors"):
+            if content_key in st.session_state:
+                st.session_state[content_key] = st.session_state[content_key]
+        from webui.batch_page import render_batch_page
+
+        render_batch_page(tr)
+        # 批量视图不渲染生成表单，也不请求保存配置：config.toml 不会被写入。
+        return
 
     restore_applied = _apply_pending_task_restore()
     restore_candidate_id = st.session_state.get("task_restore_candidate_id")
