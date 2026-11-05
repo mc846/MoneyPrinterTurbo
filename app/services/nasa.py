@@ -1082,7 +1082,11 @@ def save_image_clip(
     if not prepared_path or _shows_face(item, prepared_path, image_path, video_aspect):
         return ""
     try:
-        return video.render_image_zoom_video(prepared_path, int(math.ceil(clip_duration)), image_motion=image_motion)
+        # 处理后的图片已是目标比例并带有放大余量，直接渲染成成片尺寸，合成阶段不再缩放。
+        return video.render_image_zoom_video(
+            prepared_path, int(math.ceil(clip_duration)), image_motion=image_motion,
+            output_size=VideoAspect(video_aspect).to_resolution(),
+        )
     except Exception as exc:
         logger.error(f"failed to render nasa image clip: error={type(exc).__name__}, detail={exc}")
         return ""

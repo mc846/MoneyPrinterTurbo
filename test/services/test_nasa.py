@@ -464,7 +464,9 @@ def test_save_image_clip_prepares_then_renders(tmp_path):
     assert clip == str(tmp_path / "clip.mp4")
     download.assert_called_once_with(item.url, str(tmp_path))
     prepared, duration = render.call_args.args
-    assert duration == 5 and render.call_args.kwargs == {"image_motion": ImageMotion.static}
+    assert duration == 5 and render.call_args.kwargs == {
+        "image_motion": ImageMotion.static, "output_size": (1080, 1920),
+    }
     with Image.open(prepared) as image:
         assert image.size == (1080, 1920)
 
