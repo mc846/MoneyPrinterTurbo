@@ -1,0 +1,51 @@
+# Uzay reçetesi: toplu üretim (batch.py) için ayarlar.
+# Kullanım: uv run python batch.py konular.csv --preset presets/uzay.toml
+#
+# [video] anahtarları `uv run python cli.py --help` bayraklarının alt çizgili adıdır
+# (--video-source-fallback -> video_source_fallback). Burada olmayan ayarlar config.toml'dan
+# gelir. Bilinmeyen anahtar ya da geçersiz değer üretim başlamadan hata verir.
+
+[video]
+llm_provider = "claude_code"
+# llm_model = ""                       # boşsa sağlayıcının config.toml'daki modeli
+video_language = "tr-TR"
+script_accuracy_rules = true
+video_source = "nasa"
+video_source_fallback = "pixabay"
+video_aspect = "9:16"
+crop_materials_to_aspect = true
+material_tag_relevance = "rank"
+match_materials_to_script = true
+video_terms_style = "visual"
+exclude_ai_generated_materials = false
+nasa_credit_overlay = true
+nasa_text_filter = true
+voice_name = "tr-TR-EmelNeural-Female"
+font_name = "STHeitiMedium.ttc"
+stroke_width = 3
+video_clip_duration = 5
+final_render_engine = "ffmpeg"
+
+# Yalnız bu süreçte geçerli config.app ayarları; config.toml'a yazılmaz.
+[app]
+material_concurrency = 3
+video_clip_concurrency = 3
+nasa_face_filter = true
+video_source_fallback_min_relevance = 0.5
+video_source_fallback_min_candidates = 1
+
+# Metin talimatı. Yer tutucular: {kelime_min}, {kelime_max} (target_words'ten), {konu}.
+# Girdideki "talimat" sütunu bu metnin sonuna eklenir.
+[script]
+target_words = [90, 100]
+prompt = """
+Yaklaşık {kelime_min}-{kelime_max} kelime yaz. Merak uyandıran bir soru veya şaşırtıcı bir gerçekle \
+başla. Konuyu tek bir somut, gerçek örnekle anlat: adı bilinen bir gök cismi, bir gözlem ya da bir \
+ölçüm. Konu bir takma ad ya da benzetme içeriyorsa bunu söyle ve gerçekte neyi kastettiğini açıkla. \
+Akıcı, sade ve heyecanlı bir dil kullan.
+"""
+
+# Kalite kontrolü: süre hedefi (saniye) ve bağımsız doğruluk denetimi.
+[quality]
+target_duration = [35, 60]
+audit = true
