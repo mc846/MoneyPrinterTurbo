@@ -146,7 +146,11 @@ def test_failed_motion_render_keeps_previous_output_and_removes_partial_file(tmp
         raise RuntimeError("encoder interrupted")
 
     with patch.object(video.CompositeVideoClip, "write_videofile", interrupted_write):
+        # The published clip is reused without encoding it again.
+        assert video.render_image_zoom_video(str(source), 0.2, image_motion=motion) == output
+        # A different duration is a new clip; its failed render publishes nothing.
         with pytest.raises(RuntimeError, match="encoder interrupted"):
-            video.render_image_zoom_video(str(source), 0.2, image_motion=motion)
+            video.render_image_zoom_video(str(source), 0.3, image_motion=motion)
     assert Path(output).read_bytes() == completed
     assert not list(tmp_path.glob(".image-zoom-*.mp4"))
+    assert [path.name for path in tmp_path.glob("*.mp4")] == [Path(output).name]
