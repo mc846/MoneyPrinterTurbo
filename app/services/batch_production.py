@@ -464,6 +464,7 @@ def _process(item: ItemState, state: BatchState, preset: Preset, batch_dir: Path
     try:
         result = task_runner(build_task_argv(preset, item), item.task_id)
     except KeyboardInterrupt:
+        item.seconds = round(item.seconds + time.monotonic() - started, 1)  # kesilen denemenin süresi de sayılır
         raise
     except Exception as exc:
         item.status, item.failures = "failed", item.failures + 1

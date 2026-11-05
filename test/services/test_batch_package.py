@@ -111,13 +111,14 @@ def test_audit_prompt_is_independent_and_skeptical():
     assert prompt.endswith("Zombi yıldızlar ölmez.")
 
 
-def test_technical_issues_are_review_reasons():
+def test_missing_glyphs_and_credit_problems_need_review_while_targets_only_warn():
     checks = {"sure_sn": 72.0, "sure_hedef": [35.0, 60.0], "sure_uygun": False, "kelime": 130,
               "kelime_hedef": [90, 100], "kelime_uygun": False, "glifsiz_karakterler": ["☄"],
               "kredi_sorunlari": ["X: ©Getty"]}
     assert bpk.review_reasons({"durum": "tamam", "sayim": {"D": 3}}, checks) == [
-        "süre 72.0 sn (hedef 35-60)", "kelime sayısı 130 (hedef 90-100)",
         "yazı tipinde glifi olmayan karakter: ☄", "NASA/izinli ortak dışı kredi: 1"]
+    assert bpk.check_warnings(checks) == ["süre 72.0 sn (hedef 35-60)", "kelime sayısı 130 (hedef 90-100)"]
+    assert bpk.check_warnings({"sure_uygun": True, "kelime_uygun": True}) == []
 
 
 # ---------------------------------------------------------------- paylaşım metni
@@ -271,9 +272,10 @@ def test_package_contents(finished_task, tmp_path):
     assert quality["teknik"]["kelime"] == 100 and quality["teknik"]["kelime_uygun"]
     assert quality["teknik"]["sure_sn"] == 4.0 and not quality["teknik"]["sure_uygun"]
     assert quality["teknik"]["bos_terimler"] == ["pulsar's beam"]
-    assert quality["nedenler"] == ["süre 4.0 sn (hedef 35-60)"]
-    assert summary == {"kontrol_gerekli": True, "nedenler": quality["nedenler"], "sure_sn": 4.0, "kelime": 100,
-                       "sayim": {"D": 1, "B": 1, "Y": 0, "X": 0}}
+    # Hedef dışı süre yalnız uyarıdır; D ve B iddialarla kontrol gerekmez.
+    assert quality["nedenler"] == [] and quality["uyarilar"] == ["süre 4.0 sn (hedef 35-60)"]
+    assert summary == {"kontrol_gerekli": False, "nedenler": [], "uyarilar": quality["uyarilar"], "sure_sn": 4.0,
+                       "kelime": 100, "sayim": {"D": 1, "B": 1, "Y": 0, "X": 0}}
     moments = quality["kareler_sn"]
     assert len(moments) == bpk.SHEET_FRAMES and moments == sorted(moments) and 0 < moments[0] and moments[-1] < 4
 
@@ -304,7 +306,8 @@ def test_audit_off_skips_the_auditor(finished_task, tmp_path):
     preset = bp.load_preset(PRESET)
     preset.audit, preset.target_duration = False, None
     summary = build(finished_task, tmp_path / "03-x", [("social", json.dumps(SOCIAL))], preset)
-    assert summary == {"kontrol_gerekli": False, "nedenler": [], "sure_sn": 4.0, "kelime": 100, "sayim": {}}
+    assert summary == {"kontrol_gerekli": False, "nedenler": [], "uyarilar": [], "sure_sn": 4.0, "kelime": 100,
+                       "sayim": {}}
 
 
 # ---------------------------------------------------------------- rapor
@@ -320,6 +323,7 @@ def report_state(tmp_path):
         claims = [{"claim": "Hepsi pulsardır.", "rating": "Y", "reason": "Hepsi değil."}] if reasons else []
         (batch / folder / "kalite.json").write_text(json.dumps({
             "kontrol_gerekli": bool(reasons), "nedenler": reasons,
+            "uyarilar": [] if reasons else ["kelime sayısı 86 (hedef 90-100)"],
             "dogruluk": {"durum": "tamam", "iddialar": claims, "sayim": {"Y": len(claims)}},
             "teknik": {"sure_sn": 44.2, "sure_hedef": [35, 60], "kelime": 94, "kelime_hedef": [90, 100],
                        "filtre_elemeleri": {"yuz": 1, "kisi": 0}},
@@ -357,6 +361,8 @@ def test_report_shows_failure_flags_and_escapes_text(tmp_path):
     assert "Metin &lt;b&gt;kalın değil&lt;/b&gt;" in page
     assert "<b>Kontrol nedenleri:</b> doğruluk: 1 Y (yanıltıcı)" in page
     assert "<td>Y</td><td>Hepsi pulsardır.</td><td>Hepsi değil.</td>" in page
+    assert "<b>Uyarılar:</b> kelime sayısı 86 (hedef 90-100)" in page
+    assert "<th>Filtre elemeleri</th><td>yüz 1</td>" in page
     assert "Bu konu henüz üretilmedi." in page and "durum: sürüyor ya da durduruldu" in page
 
 

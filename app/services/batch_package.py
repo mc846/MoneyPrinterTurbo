@@ -439,15 +439,23 @@ def review_reasons(audit: dict, checks: dict) -> list[str]:
     for rating in FLAGGED_RATINGS:
         if audit.get("sayim", {}).get(rating):
             reasons.append(f"doğruluk: {audit['sayim'][rating]} {rating} ({RATING_LABELS[rating]})")
-    if not checks.get("sure_uygun", True):
-        reasons.append(f"süre {checks['sure_sn']} sn (hedef {checks['sure_hedef'][0]:g}-{checks['sure_hedef'][1]:g})")
-    if not checks.get("kelime_uygun", True):
-        reasons.append(f"kelime sayısı {checks['kelime']} (hedef {checks['kelime_hedef'][0]}-{checks['kelime_hedef'][1]})")
     if checks.get("glifsiz_karakterler"):
         reasons.append(f"yazı tipinde glifi olmayan karakter: {' '.join(checks['glifsiz_karakterler'])}")
     if checks.get("kredi_sorunlari"):
         reasons.append(f"NASA/izinli ortak dışı kredi: {len(checks['kredi_sorunlari'])}")
     return reasons
+
+
+def check_warnings(checks: dict) -> list[str]:
+    """Hedef dışı süre ve kelime sayısı: raporda uyarı olarak görünür, tek başına kontrol gerektirmez."""
+    warnings = []
+    if not checks.get("sure_uygun", True):
+        low, high = checks["sure_hedef"]
+        warnings.append(f"süre {checks['sure_sn']} sn (hedef {low:g}-{high:g})")
+    if not checks.get("kelime_uygun", True):
+        low, high = checks["kelime_hedef"]
+        warnings.append(f"kelime sayısı {checks['kelime']} (hedef {low}-{high})")
+    return warnings
 
 
 # ---------------------------------------------------------------- paket
@@ -490,11 +498,13 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
         "durum": "kapalı", "iddialar": [], "sayim": {}, "isaretli": []}
     checks = technical_checks(task_dir, final_video, script, params, terms, material_sources, log_lines, preset)
     reasons = review_reasons(audit, checks) if preset.audit else review_reasons({"durum": "tamam"}, checks)
+    warnings = check_warnings(checks)
     quality = {
         "konu": item.subject,
         "gorev": item.task_id,
         "kontrol_gerekli": bool(reasons),
         "nedenler": reasons,
+        "uyarilar": warnings,
         "dogruluk": audit,
         "teknik": checks,
         "kapak": {**cover_info, "kural": COVER_RULE},
@@ -504,8 +514,8 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
         "terimler": terms,
     }
     (folder / "kalite.json").write_text(json.dumps(quality, ensure_ascii=False, indent=1), encoding="utf-8")
-    return {"kontrol_gerekli": quality["kontrol_gerekli"], "nedenler": reasons, "sure_sn": checks["sure_sn"],
-            "kelime": checks["kelime"], "sayim": audit.get("sayim", {})}
+    return {"kontrol_gerekli": quality["kontrol_gerekli"], "nedenler": reasons, "uyarilar": warnings,
+            "sure_sn": checks["sure_sn"], "kelime": checks["kelime"], "sayim": audit.get("sayim", {})}
 
 
 # ---------------------------------------------------------------- rapor
@@ -531,6 +541,7 @@ table { border-collapse:collapse; width:100%; font-size:14px; } td, th { border-
   padding:4px 6px; text-align:left; vertical-align:top; } pre { white-space:pre-wrap; background:var(--bg);
   border:1px solid var(--line); border-radius:6px; padding:8px; font-size:13px; }
 details { margin-top:8px; } summary { cursor:pointer; font-weight:600; } a { color:inherit; }
+h3 { font-size:15px; margin:16px 0 4px; } .note { color:var(--warn); }
 .row { display:grid; grid-template-columns: 1fr 160px; gap:12px; } img.cover { width:160px; border-radius:6px; }
 @media (max-width:640px) { .row { grid-template-columns:1fr; } img.cover { width:120px; } }
 """
@@ -541,6 +552,13 @@ def _load_quality(batch_dir: Path, item) -> dict:
         return json.loads((batch_dir / item.folder / "kalite.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+
+
+# kalite.json'daki filtre eleme anahtarlarının rapordaki adları.
+ELIMINATION_LABELS = {
+    "yazi_onizleme": "önizlemede yazı", "yuz": "yüz", "kisi": "kişi (metaveri)", "yazi_metaveri": "yazı/grafik (metaveri)",
+    "telif": "telif", "kredi": "üçüncü taraf kredisi", "cozunurluk": "çözünürlük", "diger": "diğer",
+}
 
 
 def _claims_table(claims: list[dict]) -> str:
@@ -583,6 +601,9 @@ def _item_card(batch_dir: Path, item) -> str:
     reasons = quality.get("nedenler", [])
     if reasons:
         parts.append("<p><b>Kontrol nedenleri:</b> " + "; ".join(esc(r) for r in reasons) + "</p>")
+    warnings = quality.get("uyarilar", [])
+    if warnings:
+        parts.append('<p class="note"><b>Uyarılar:</b> ' + "; ".join(esc(w) for w in warnings) + "</p>")
     if "teknik" not in quality:  # paket yazılamadı
         parts.append("</section>")
         return "".join(parts)
@@ -595,7 +616,7 @@ def _item_card(batch_dir: Path, item) -> str:
     parts.append(f'<div class="row"><div><p>{esc(script)}</p>')
     flagged = [c for c in audit.get("iddialar", []) if c["rating"] in FLAGGED_RATINGS]
     if flagged:
-        parts.append("<p><b>İşaretli iddialar</b></p>" + _claims_table(flagged))
+        parts.append("<h3>İşaretli iddialar</h3>" + _claims_table(flagged))
     counts = audit.get("sayim") or {}
     audit_text = (" / ".join(f"{k} {counts.get(k, 0)}" for k in RATINGS) if audit.get("durum") == "tamam"
                   else esc(audit.get("durum", "")))
@@ -608,9 +629,10 @@ def _item_card(batch_dir: Path, item) -> str:
         ("Kredi sorunu", "; ".join(checks.get("kredi_sorunlari", [])) or "yok"),
         ("Boş terim", ", ".join(checks.get("bos_terimler", [])) or "yok"),
         ("Yedeğe geçen terim", ", ".join(checks.get("yedege_gecen_terimler", [])) or "yok"),
-        ("Filtre elemeleri", ", ".join(f"{k} {v}" for k, v in elim.items() if v) or "yok"),
+        ("Filtre elemeleri", ", ".join(f"{ELIMINATION_LABELS.get(k, k)} {v}" for k, v in elim.items() if v) or "yok"),
     ]
-    parts.append("<table>" + "".join(f"<tr><th>{esc(k)}</th><td>{esc(str(v))}</td></tr>" for k, v in rows) + "</table>")
+    parts.append("<h3>Kontroller</h3><table>"
+                 + "".join(f"<tr><th>{esc(k)}</th><td>{esc(str(v))}</td></tr>" for k, v in rows) + "</table>")
     parts.append(f"</div><div>{cover}</div></div>")
     if (batch_dir / item.folder / "kareler.jpg").exists():
         parts.append(f'<p><img class="sheet" src="{esc(item.folder)}/kareler.jpg" alt="kareler"></p>')

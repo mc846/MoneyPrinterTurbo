@@ -4,6 +4,7 @@ import json
 import signal
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -97,7 +98,8 @@ def test_space_preset_loads():
     assert preset.target_words == (90, 100) and preset.target_duration == (35.0, 60.0) and preset.audit
     assert preset.app["material_concurrency"] == 3
     prompt = preset.script_prompt("Nötron yıldızları", "Pulsarlardan söz et.")
-    assert prompt.startswith("Yaklaşık 90-100 kelime yaz.") and prompt.endswith("\nPulsarlardan söz et.")
+    assert prompt.startswith("En az 90, en çok 100 kelime yaz; 90 kelimenin altına inme.")
+    assert prompt.endswith("\nPulsarlardan söz et.") and "{" not in prompt
 
 
 def preset_file(tmp_path, text):
@@ -258,6 +260,15 @@ def test_ctrl_c_stops_cleanly_and_same_command_resumes(tmp_path):
     assert second.calls == ["C", "D"]
     assert only_batch(tmp_path) == batch
     assert all(i.status == "done" for i in bp.BatchState.load(batch).items)
+
+
+def test_interrupted_attempt_counts_its_time(tmp_path, monkeypatch):
+    ticks = iter(range(0, 10_000, 5))
+    monkeypatch.setattr(bp, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    source = write(tmp_path / "k.txt", "A\n")
+    assert run(source, FakeRunner(interrupt_at=1)) == 130
+    item = bp.BatchState.load(only_batch(tmp_path)).items[0]
+    assert (item.status, item.attempts) == ("pending", 1) and item.seconds > 0
 
 
 def test_killed_run_leaves_running_item_which_resumes(tmp_path):
