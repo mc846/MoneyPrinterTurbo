@@ -133,15 +133,17 @@ _BT709_VIDEO_FILTER = (
 _BT709_FFMPEG_PARAMS = ["-vf", _BT709_VIDEO_FILTER]
 # 图片片段按“源图像素 + 渲染参数”命名，已发布的片段在后续任务里直接复用。
 # 渲染方式、编码参数或命名规则改变时把版本号加一，旧版本的片段不再被复用。
-_IMAGE_CLIP_RENDER_VERSION = 2
+_IMAGE_CLIP_RENDER_VERSION = 3
 # 放大模式每秒放大 3%。
 _IMAGE_ZOOM_RATE_PER_SECOND = 0.03
 _IMAGE_CLIP_FPS = 30
-# 即 MoviePy 写 .mp4 时的默认编码设置；显式写出，让命名和实际编码使用同一份参数。
+# MoviePy 写 .mp4 的默认设置（libx264、medium），另外不使用 B 帧：与 combine_videos
+# 写出的临时片段编码相同，成片尺寸的片段可以不经重新编码直接复制拼接。显式写出，
+# 让命名和实际编码使用同一份参数。
 _IMAGE_CLIP_ENCODING = {
     "codec": "libx264",
     "preset": "medium",
-    "ffmpeg_params": _BT709_FFMPEG_PARAMS,
+    "ffmpeg_params": [*_BT709_FFMPEG_PARAMS, "-bf", "0"],
 }
 
 

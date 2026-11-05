@@ -1,6 +1,7 @@
 """Image clips: reuse of rendered clips and direct rendering at the output size."""
 
 import math
+import subprocess
 import wave
 from pathlib import Path
 from unittest.mock import patch
@@ -84,6 +85,19 @@ def test_source_pixels_and_settings_name_the_clip_in_the_image_directory(tmp_pat
     assert Path(native).name.split(".")[0] == Path(sized).name.split(".")[0]
     Image.new("RGB", (64, 64), "blue").save(source)
     assert video.render_image_zoom_video(str(source), 0.2, output_size=(32, 48)) != sized
+
+
+def test_clips_are_encoded_without_b_frames(tmp_path):
+    """Same encoder settings as combine_videos' temporary clips, so they can be stream-copied."""
+    source = _scene(tmp_path / "scene.png", (64, 64))
+    output = video.render_image_zoom_video(str(source), 0.5, output_size=(32, 48))
+    stream = subprocess.run(
+        [utils.get_ffmpeg_binary(), "-i", output, "-c:v", "copy", "-bsf:v", "h264_mp4toannexb",
+         "-frames:v", "1", "-f", "h264", "-"],
+        capture_output=True,
+    ).stdout
+    assert b"x264 - core" in stream and b" bframes=0 " in stream
+    assert video._IMAGE_CLIP_RENDER_VERSION == 3
 
 
 # ---------------------------------------------------------------- reuse and partial files
