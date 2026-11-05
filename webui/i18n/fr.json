@@ -626,6 +626,12 @@
     "batch.resume.missing_preset": "Le fichier de préréglage est introuvable : {path}",
     "batch.resume.changed_input": "Le fichier d'entrée a changé après le lancement du lot : {path}",
     "batch.resume.changed_preset": "Le préréglage a changé après le lancement du lot : {path}",
-    "batch.error.exited": "Le processus du lot s'est arrêté prématurément : {line}"
+    "batch.error.exited": "Le processus du lot s'est arrêté prématurément : {line}",
+    "batch.col.voice_hint": "Une cellule de voix vide utilise la voix du préréglage ({voice}).",
+    "batch.translations.label": "Traductions des sous-titres",
+    "batch.translations.help": "Ajoute à chaque paquet un altyazi.<langue>.srt pour chaque langue choisie. Valable pour ce lot uniquement ; le fichier de préréglage et config.toml ne changent pas.",
+    "batch.preset.translations": "Traductions des sous-titres",
+    "batch.preset.no_translations": "aucune",
+    "batch.history.files": "Fichiers de sous-titres"
   }
 }

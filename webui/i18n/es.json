@@ -626,6 +626,12 @@
     "batch.resume.missing_preset": "Falta el archivo de plantilla: {path}",
     "batch.resume.changed_input": "El archivo de entrada cambió después de iniciar el lote: {path}",
     "batch.resume.changed_preset": "La plantilla cambió después de iniciar el lote: {path}",
-    "batch.error.exited": "El proceso del lote terminó antes de tiempo: {line}"
+    "batch.error.exited": "El proceso del lote terminó antes de tiempo: {line}",
+    "batch.col.voice_hint": "Las celdas de voz vacías usan la voz de la plantilla ({voice}).",
+    "batch.translations.label": "Traducciones de subtítulos",
+    "batch.translations.help": "Añade a cada paquete un altyazi.<idioma>.srt por cada idioma elegido. Solo para este lote; el archivo de plantilla y config.toml no cambian.",
+    "batch.preset.translations": "Traducciones de subtítulos",
+    "batch.preset.no_translations": "ninguna",
+    "batch.history.files": "Archivos de subtítulos"
   }
 }

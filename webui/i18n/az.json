@@ -626,6 +626,12 @@
     "batch.resume.missing_preset": "Şablon faylı yoxdur: {path}",
     "batch.resume.changed_input": "Giriş faylı toplu iş başladıqdan sonra dəyişib: {path}",
     "batch.resume.changed_preset": "Şablon toplu iş başladıqdan sonra dəyişib: {path}",
-    "batch.error.exited": "Toplu iş prosesi vaxtından əvvəl bitdi: {line}"
+    "batch.error.exited": "Toplu iş prosesi vaxtından əvvəl bitdi: {line}",
+    "batch.col.voice_hint": "Səs xanası boşdursa şablondakı səs istifadə olunur ({voice}).",
+    "batch.translations.label": "Altyazı tərcümələri",
+    "batch.translations.help": "Seçilən hər dil üçün paketə altyazi.<dil>.srt əlavə olunur. Yalnız bu toplu iş üçün keçərlidir; şablon faylı və config.toml dəyişmir.",
+    "batch.preset.translations": "Altyazı tərcümələri",
+    "batch.preset.no_translations": "yoxdur",
+    "batch.history.files": "Altyazı faylları"
   }
 }

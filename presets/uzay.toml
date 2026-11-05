@@ -21,10 +21,18 @@ exclude_ai_generated_materials = false
 nasa_credit_overlay = true
 nasa_text_filter = true
 voice_name = "tr-TR-EmelNeural-Female"
+voice_rate = 1.0
 font_name = "STHeitiMedium.ttc"
 stroke_width = 3
 video_clip_duration = 5
 final_render_engine = "ffmpeg"
+# Altyazı görünümü de burada sabit: config.toml'daki WebUI değerleri değişse de (05.11'de eski bir WebUI
+# süreci altyazıyı kapatmış, sesi 0,8'e çekmişti) toplu iş aynı videoyu üretir; .srt için altyazı açık olmalı.
+subtitle_enabled = true
+subtitle_position = "bottom"
+font_size = 60
+text_fore_color = "#FFFFFF"
+stroke_color = "#000000"
 
 # Yalnız bu süreçte geçerli config.app ayarları; config.toml'a yazılmaz.
 [app]
@@ -50,3 +58,8 @@ hiçbir şeye takma ad deme. Akıcı, sade ve heyecanlı bir dil kullan.
 [quality]
 target_duration = [35, 60]
 audit = true
+
+# Yükleme paketi: altyazi.tr.srt her zaman; burada listelenen diller için çeviri (altyazi.<dil>.srt).
+# BCP-47 kodları, ör. ["en", "de"]; WebUI'da yalnız o toplu iş için değiştirilebilir.
+[package]
+subtitle_translations = ["en"]

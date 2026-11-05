@@ -27,7 +27,7 @@ import time
 import tomllib
 import unicodedata
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -73,7 +73,8 @@ APP_OPTIONS = {
 }
 SCRIPT_OPTIONS = {"prompt", "target_words"}
 QUALITY_OPTIONS = {"target_duration", "audit"}
-PRESET_SECTIONS = {"video", "app", "script", "quality"}
+PACKAGE_OPTIONS = {"subtitle_translations"}
+PRESET_SECTIONS = {"video", "app", "script", "quality", "package"}
 PROMPT_PLACEHOLDERS = {"kelime_min", "kelime_max", "konu"}
 
 _TURKISH_ASCII = str.maketrans({
@@ -180,6 +181,7 @@ class Preset:
     target_words: tuple[int, int] | None = None
     target_duration: tuple[float, float] | None = None
     audit: bool = True
+    subtitle_translations: tuple[str, ...] = ()  # altyazi.<dil>.srt çevirileri
 
     def script_prompt(self, subject: str, instruction: str = "") -> str:
         """Reçetedeki talimat şablonu (yer tutucular dolu) ve satırın talimatı."""
@@ -285,7 +287,9 @@ def load_preset(path: str | Path) -> Preset:
 
     script = dict(data.get("script", {}))
     quality = dict(data.get("quality", {}))
-    for section, keys, values in (("script", SCRIPT_OPTIONS, script), ("quality", QUALITY_OPTIONS, quality)):
+    package = dict(data.get("package", {}))
+    for section, keys, values in (("script", SCRIPT_OPTIONS, script), ("quality", QUALITY_OPTIONS, quality),
+                                  ("package", PACKAGE_OPTIONS, package)):
         for key in values:
             if key not in keys:
                 raise PresetError(f"[{section}] bilinmeyen anahtar: {key}{_suggest(key, keys)}; "
@@ -307,10 +311,32 @@ def load_preset(path: str | Path) -> Preset:
     audit = quality.get("audit", True)
     if not isinstance(audit, bool):
         raise PresetError("[quality] audit true ya da false olmalı")
+    raw_translations = package.get("subtitle_translations", [])
+    if not isinstance(raw_translations, list):  # virgüllü metin yalnız CLI'da (--altyazi-cevirileri)
+        raise PresetError('[package] subtitle_translations dil kodları listesi olmalı, ör. ["en"]')
+    translations = parse_languages(raw_translations, "[package] subtitle_translations")
     return Preset(
         path=str(path.resolve()), sha256=hashlib.sha256(raw).hexdigest(), video=video, app=app,
         prompt=prompt, target_words=target_words, target_duration=target_duration, audit=audit,
+        subtitle_translations=translations,
     )
+
+
+def parse_languages(value, name: str) -> tuple[str, ...]:
+    """Çeviri altyazı dilleri: BCP-47 kodları listesi (CLI'da virgülle ayrılmış metin); tekrarlar atılır."""
+    from app.services.batch_subtitles import LANGUAGE_CODE
+
+    if isinstance(value, str):
+        value = [part for part in value.split(",") if part.strip()]
+    if not isinstance(value, list):
+        raise PresetError(f'{name} dil kodları listesi olmalı, ör. ["en"]')
+    codes: list[str] = []
+    for code in value:
+        if not isinstance(code, str) or not LANGUAGE_CODE.match(code.strip()):
+            raise PresetError(f"{name}: geçersiz dil kodu {code!r} (BCP-47, ör. en, pt-BR)")
+        if code.strip() not in codes:
+            codes.append(code.strip())
+    return tuple(codes)
 
 
 def _suggest(key: str, choices) -> str:
@@ -351,6 +377,8 @@ class BatchState:
     version: int = STATE_VERSION
     run_seconds: float = 0.0
     finished: str = ""
+    # Bu toplu işin çeviri dilleri (WebUI ya da --altyazi-cevirileri); None ise reçetedeki.
+    subtitle_translations: list[str] | None = None
 
     def save(self, directory: Path) -> None:
         payload = json.dumps(asdict(self), ensure_ascii=False, indent=1)
@@ -524,12 +552,15 @@ def run_batch(
     reporter: Callable | None = None,
     hold_lock: bool = False,
     log_file: bool = True,
+    translations: list[str] | tuple[str, ...] | None = None,
 ) -> int:
     """
     Toplu üretimi çalıştırır; tamamı bittiyse 0, başarısız konu kaldıysa 1, Ctrl+C ile
     durdurulduysa 130 döner. task_runner/packager/reporter testlerde sahte fonksiyonla değişir.
     hold_lock: süreç boyunca batch_runner kilidini tutar (batch.py). log_file=False iken günlük
     klasördeki batch.log'a ayrıca yazılmaz (WebUI stderr'i zaten oraya yönlendirir).
+    translations: bu toplu işin çeviri altyazı dilleri (reçetedekinin yerine); state.json'a yazılır,
+    devam ettirilen çalıştırma da aynılarını kullanır.
     """
     from app.services import batch_package
 
@@ -546,19 +577,21 @@ def run_batch(
         previous = None if new else find_previous_batch(input_path, preset)
         batch_dir = previous or new_batch_dir(input_path)
     batch_dir.mkdir(parents=True, exist_ok=True)
+    arguments = (batch_dir, input_path, preset, items, task_runner, packager, reporter, log_file, translations)
     if not hold_lock:
-        return _run_in_folder(batch_dir, input_path, preset, items, task_runner, packager, reporter, log_file)
+        return _run_in_folder(*arguments)
     from app.services import batch_runner
 
     batch_runner.acquire_lock(batch_dir)  # başka bir toplu üretim çalışıyorsa BatchBusy
     try:
-        return _run_in_folder(batch_dir, input_path, preset, items, task_runner, packager, reporter, log_file)
+        return _run_in_folder(*arguments)
     finally:
         batch_runner.release_lock()
 
 
 def _run_in_folder(batch_dir: Path, input_path: Path, preset: Preset, items: list[BatchInput],
-                   task_runner: Callable, packager: Callable, reporter: Callable, log_file: bool) -> int:
+                   task_runner: Callable, packager: Callable, reporter: Callable, log_file: bool,
+                   translations) -> int:
     if (batch_dir / STATE_FILE).exists():
         state = BatchState.load(batch_dir)
         if state.input_sha256 != _file_sha256(input_path) or state.preset_sha256 != preset.sha256:
@@ -572,6 +605,10 @@ def _run_in_folder(batch_dir: Path, input_path: Path, preset: Preset, items: lis
         logger.info(f"toplu üretim kaldığı yerden devam ediyor: {batch_dir}")
     else:
         state = new_state(input_path, preset, items)
+    if translations is not None:
+        state.subtitle_translations = list(translations)
+    if state.subtitle_translations is not None:
+        preset = replace(preset, subtitle_translations=tuple(state.subtitle_translations))
     state.finished = ""
     state.save(batch_dir)
 
@@ -631,6 +668,9 @@ def main(argv: list[str] | None = None, prog: str = "batch.py") -> int:
                         help="aynı girdi ve reçeteyle önceki bir toplu üretim olsa da yeni klasörde baştan başla")
     # WebUI (batch_runner) stdout/stderr'i batch.log'a yönlendirir; günlük ikinci kez yazılmaz.
     parser.add_argument("--gunluk-stderr", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--altyazi-cevirileri", metavar="DİLLER",
+                        help="çeviri altyazı dilleri, virgülle (ör. en,de; boş = çeviri yok); reçetedeki "
+                             "subtitle_translations yerine yalnız bu toplu iş için geçerli")
     args = parser.parse_args(argv)
     import app.config  # noqa: F401 -- yapılandırma ve günlük ayarları
     from app.utils.logging_utils import configure_terminal_logger, get_logging_options
@@ -642,8 +682,10 @@ def main(argv: list[str] | None = None, prog: str = "batch.py") -> int:
     from app.services.batch_runner import BatchBusy
 
     try:
+        translations = (None if args.altyazi_cevirileri is None
+                        else parse_languages(args.altyazi_cevirileri, "--altyazi-cevirileri"))
         return run_batch(args.input, args.preset, output=args.output, new=args.yeni, hold_lock=True,
-                         log_file=not args.gunluk_stderr)
+                         log_file=not args.gunluk_stderr, translations=translations)
     except (BatchInputError, PresetError) as exc:
         logger.error(str(exc))
         return 2

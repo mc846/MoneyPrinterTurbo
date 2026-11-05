@@ -626,6 +626,12 @@
     "batch.resume.missing_preset": "Thiếu tệp cấu hình mẫu: {path}",
     "batch.resume.changed_input": "Tệp đầu vào đã thay đổi sau khi lô bắt đầu: {path}",
     "batch.resume.changed_preset": "Cấu hình mẫu đã thay đổi sau khi lô bắt đầu: {path}",
-    "batch.error.exited": "Tiến trình của lô đã kết thúc sớm: {line}"
+    "batch.error.exited": "Tiến trình của lô đã kết thúc sớm: {line}",
+    "batch.col.voice_hint": "Ô giọng đọc để trống sẽ dùng giọng trong cấu hình mẫu ({voice}).",
+    "batch.translations.label": "Phụ đề dịch",
+    "batch.translations.help": "Thêm vào mỗi gói một tệp altyazi.<ngôn ngữ>.srt cho từng ngôn ngữ đã chọn. Chỉ áp dụng cho lô này; tệp cấu hình mẫu và config.toml không thay đổi.",
+    "batch.preset.translations": "Phụ đề dịch",
+    "batch.preset.no_translations": "không có",
+    "batch.history.files": "Tệp phụ đề"
   }
 }

@@ -626,6 +626,12 @@
     "batch.resume.missing_preset": "Berkas preset tidak ada: {path}",
     "batch.resume.changed_input": "Berkas masukan berubah setelah batch dimulai: {path}",
     "batch.resume.changed_preset": "Preset berubah setelah batch dimulai: {path}",
-    "batch.error.exited": "Proses batch berakhir lebih awal: {line}"
+    "batch.error.exited": "Proses batch berakhir lebih awal: {line}",
+    "batch.col.voice_hint": "Sel suara yang kosong memakai suara dari preset ({voice}).",
+    "batch.translations.label": "Terjemahan subtitel",
+    "batch.translations.help": "Menambahkan altyazi.<bahasa>.srt ke setiap paket untuk setiap bahasa yang dipilih. Hanya untuk batch ini; berkas preset dan config.toml tidak berubah.",
+    "batch.preset.translations": "Terjemahan subtitel",
+    "batch.preset.no_translations": "tidak ada",
+    "batch.history.files": "Berkas subtitel"
   }
 }

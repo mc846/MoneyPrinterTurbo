@@ -881,6 +881,12 @@
     "batch.resume.missing_preset": "The preset file is missing: {path}",
     "batch.resume.changed_input": "The input file changed after the batch started: {path}",
     "batch.resume.changed_preset": "The preset changed after the batch started: {path}",
-    "batch.error.exited": "The batch process ended early: {line}"
+    "batch.error.exited": "The batch process ended early: {line}",
+    "batch.col.voice_hint": "Empty voice cells use the preset's voice ({voice}).",
+    "batch.translations.label": "Subtitle translations",
+    "batch.translations.help": "Adds an altyazi.<language>.srt to each package for every selected language. Applies to this batch only; the preset file and config.toml stay unchanged.",
+    "batch.preset.translations": "Subtitle translations",
+    "batch.preset.no_translations": "none",
+    "batch.history.files": "Subtitle files"
   }
 }

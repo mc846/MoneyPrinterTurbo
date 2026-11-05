@@ -626,6 +626,12 @@
     "batch.resume.missing_preset": "Manca il file del preset: {path}",
     "batch.resume.changed_input": "Il file di input è cambiato dopo l'avvio della serie: {path}",
     "batch.resume.changed_preset": "Il preset è cambiato dopo l'avvio della serie: {path}",
-    "batch.error.exited": "Il processo della serie è terminato in anticipo: {line}"
+    "batch.error.exited": "Il processo della serie è terminato in anticipo: {line}",
+    "batch.col.voice_hint": "Le celle della voce vuote usano la voce del preset ({voice}).",
+    "batch.translations.label": "Traduzioni dei sottotitoli",
+    "batch.translations.help": "Aggiunge a ogni pacchetto un altyazi.<lingua>.srt per ogni lingua scelta. Vale solo per questa serie; il file del preset e config.toml non cambiano.",
+    "batch.preset.translations": "Traduzioni dei sottotitoli",
+    "batch.preset.no_translations": "nessuna",
+    "batch.history.files": "File dei sottotitoli"
   }
 }

@@ -130,6 +130,71 @@ def test_preset_errors(tmp_path, text, message):
         bp.load_preset(preset_file(tmp_path, text))
 
 
+@pytest.mark.parametrize("text, message", [
+    ("[package]\nsubtitle_translations = 'en'\n", r"dil kodları listesi olmalı"),
+    ("[package]\nsubtitle_translations = ['EN']\n", "geçersiz dil kodu 'EN'"),
+    ("[package]\nsubtitle_translations = ['en_US']\n", "geçersiz dil kodu 'en_US'"),
+    ("[package]\ntranslations = ['en']\n", r"\[package\] bilinmeyen anahtar: translations"),
+])
+def test_package_section_errors(tmp_path, text, message):
+    with pytest.raises(bp.PresetError, match=message):
+        bp.load_preset(preset_file(tmp_path, text))
+
+
+def test_package_section_reads_bcp47_codes(tmp_path):
+    preset = bp.load_preset(preset_file(tmp_path, "[package]\nsubtitle_translations = ['en', 'pt-BR', 'en']\n"))
+    assert preset.subtitle_translations == ("en", "pt-BR")
+    assert bp.load_preset(preset_file(tmp_path, "")).subtitle_translations == ()
+    assert bp.load_preset(PRESET).subtitle_translations == ("en",)
+
+
+def test_batch_translations_override_the_preset_and_are_kept_for_resume(tmp_path):
+    source = write(tmp_path / "k.txt", "A\nB\n")
+    seen = []
+
+    def packager(item, result, preset, folder, log_lines):
+        seen.append(preset.subtitle_translations)
+        return {}
+
+    output = tmp_path / "out"
+    assert bp.run_batch(source, PRESET, output=output, task_runner=FakeRunner(interrupt_at=2), packager=packager,
+                        reporter=lambda state, folder: None, translations=["de", "fr"]) == 130
+    assert bp.BatchState.load(output).subtitle_translations == ["de", "fr"]
+    # Devam ettirilen çalıştırma (seçenek verilmeden) aynı dilleri kullanır.
+    bp.run_batch(source, PRESET, output=output, task_runner=FakeRunner(), packager=packager,
+                 reporter=lambda state, folder: None)
+    assert seen == [("de", "fr"), ("de", "fr")]
+
+
+def test_without_an_override_the_preset_languages_are_used(tmp_path):
+    seen = []
+    bp.run_batch(write(tmp_path / "k.txt", "A\n"), PRESET, output=tmp_path / "out", task_runner=FakeRunner(),
+                 packager=lambda item, result, preset, folder, log_lines: seen.append(preset.subtitle_translations) or {},
+                 reporter=lambda state, folder: None)
+    assert seen == [("en",)] and bp.BatchState.load(tmp_path / "out").subtitle_translations is None
+
+
+@pytest.mark.parametrize("value, expected", [("en,de", ["en", "de"]), ("", [])])
+def test_cli_translation_option(tmp_path, value, expected):
+    source = write(tmp_path / "k.txt", "A\n")
+    with patch.object(bp, "run_batch", return_value=0) as run, \
+            patch("app.utils.logging_utils.configure_terminal_logger"):
+        assert bp.main([str(source), "--preset", str(PRESET), "--altyazi-cevirileri", value]) == 0
+    assert list(run.call_args.kwargs["translations"]) == expected
+
+
+def test_cli_rejects_a_bad_language_code(tmp_path):
+    source = write(tmp_path / "k.txt", "A\n")
+    with patch("app.utils.logging_utils.configure_terminal_logger"):
+        assert bp.main([str(source), "--preset", str(PRESET), "--altyazi-cevirileri", "en,İngilizce"]) == 2
+
+
+def test_space_preset_pins_the_subtitle_look_independent_of_config():
+    # 05.11'de eski bir WebUI config.toml'da altyazıyı kapatmış, sesi 0,8'e çekmişti; reçete bunları sabitler.
+    args = bp._parse_cli(["--video-subject", "x", *bp.video_option_argv(bp.load_preset(PRESET).video)])
+    assert (args.subtitle_enabled, args.subtitle_position, args.font_size, args.voice_rate) == (True, "bottom", 60, 1.0)
+
+
 def test_preset_integer_accepted_for_float_option(tmp_path):
     preset = bp.load_preset(preset_file(tmp_path, "[app]\nvideo_source_fallback_min_relevance = 1\n"))
     assert preset.app == {"video_source_fallback_min_relevance": 1}

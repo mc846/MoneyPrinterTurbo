@@ -214,27 +214,35 @@ def release_lock(pid: int | None = None) -> None:
 
 # ---------------------------------------------------------------- başlatma
 
-def batch_command(input_path: Path, preset_path: Path, batch_dir: Path) -> list[str]:
-    """Sabit argümanlı komut; günlük çağıranın açtığı batch.log'a stderr üzerinden gider."""
+def batch_command(input_path: Path, preset_path: Path, batch_dir: Path,
+                  translations: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    """
+    Sabit argümanlı komut; günlük çağıranın açtığı batch.log'a stderr üzerinden gider. translations
+    verilirse (boş liste = çeviri yok) reçetedeki çeviri dillerinin yerine geçer; state.json'a yazılır.
+    """
     if paths.is_source_checkout():
         entry = [str(paths.SOURCE_ROOT / "batch.py")]
     else:
         entry = ["-m", "app.services.batch_production"]
-    return [sys.executable, "-X", "utf8", *entry, str(Path(input_path).resolve()), "--preset",
-            str(Path(preset_path).resolve()), "--output", str(Path(batch_dir).resolve()), "--gunluk-stderr"]
+    command = [sys.executable, "-X", "utf8", *entry, str(Path(input_path).resolve()), "--preset",
+               str(Path(preset_path).resolve()), "--output", str(Path(batch_dir).resolve()), "--gunluk-stderr"]
+    if translations is not None:
+        command += ["--altyazi-cevirileri", ",".join(translations)]
+    return command
 
 
 _children: dict[int, subprocess.Popen] = {}
 
 
-def start_batch(input_path: Path, preset_path: Path, batch_dir: Path) -> int:
+def start_batch(input_path: Path, preset_path: Path, batch_dir: Path,
+                translations: list[str] | tuple[str, ...] | None = None) -> int:
     """batch.py'yi ayrı süreçte başlatır ve kilidi onun PID'iyle yazar; çalışan varsa BatchBusy."""
     lock = current_lock()
     if lock:
         raise BatchBusy(lock)
     batch_dir = Path(batch_dir)
     batch_dir.mkdir(parents=True, exist_ok=True)
-    command = batch_command(input_path, preset_path, batch_dir)
+    command = batch_command(input_path, preset_path, batch_dir, translations)
     options = {}
     if _WINDOWS:
         options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -364,6 +372,7 @@ class ItemStatus:
     seconds: float = 0.0
     attempts: int = 0
     note: str = ""
+    folder: str = ""
 
 
 @dataclass
@@ -461,7 +470,7 @@ def batch_status(batch_dir: Path, lock: dict | None = None, now: datetime | None
         else:
             status = "pending"  # süreç öldüyse yarıda kalan konu devam ettirilince baştan üretilir
         items.append(ItemStatus(item.index, item.subject, status, current_stage(log_lines, item.index)
-                                if status == "running" else "", round(seconds, 1), item.attempts, note))
+                                if status == "running" else "", round(seconds, 1), item.attempts, note, item.folder))
     elapsed = state.run_seconds
     if running:
         elapsed += _seconds_since(lock.get("started", ""), now)

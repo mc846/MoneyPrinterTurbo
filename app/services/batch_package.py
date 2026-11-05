@@ -22,7 +22,7 @@ import numpy as np
 from loguru import logger
 from PIL import Image, ImageDraw
 
-from app.services import llm, nasa, video
+from app.services import batch_subtitles, llm, nasa, video
 from app.utils import utils
 
 RATINGS = ("D", "B", "Y", "X")
@@ -243,7 +243,7 @@ def social_texts(subject: str, script: str, material_sources, ask=_ask) -> dict:
     return texts
 
 
-def social_markdown(subject: str, texts: dict) -> str:
+def social_markdown(subject: str, texts: dict, subtitle_files: list[str] | None = None) -> str:
     youtube = texts["youtube"]
     lines = [
         f"# {subject}", "",
@@ -251,6 +251,10 @@ def social_markdown(subject: str, texts: dict) -> str:
         f"**Başlık** ({len(youtube['title'])}/{YOUTUBE_TITLE_MAX}):", "", youtube["title"], "",
         "**Açıklama:**", "", youtube["description"], "",
         f"**Etiketler:** {' '.join(youtube['tags'])}", "",
+    ]
+    if subtitle_files:
+        lines += [f"**Altyazı dosyaları:** {', '.join(subtitle_files)} (YouTube Studio > Altyazılar > Dosya yükle)", ""]
+    lines += [
         "## TikTok", "",
         f"**Açıklama** ({len(texts['tiktok']['caption'])}/{CAPTION_MAX}, hashtag'ler dahil):", "",
         texts["tiktok"]["caption"], "",
@@ -487,8 +491,15 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
     if (task_dir / nasa.CREDITS_FILE).is_file():
         shutil.copy2(task_dir / nasa.CREDITS_FILE, folder / "credits.txt")
 
+    # Altyazılar önce: paylasim.md dosya adlarını anar.
+    source_language = str(params.get("video_language") or "tr").split("-")[0].lower() or "tr"
+    subtitles = batch_subtitles.write_subtitles(
+        folder, task_dir / "subtitle.srt", utils.normalize_script_for_subtitle_matching(script),
+        int(_media_duration(final_video) * 1000), source_language,
+        [code for code in preset.subtitle_translations if code.split("-")[0] != source_language], ask,
+    )
     texts = social_texts(item.subject, script, material_sources, ask=ask)
-    (folder / "paylasim.md").write_text(social_markdown(item.subject, texts), encoding="utf-8")
+    (folder / "paylasim.md").write_text(social_markdown(item.subject, texts, subtitles["dosyalar"]), encoding="utf-8")
     cover, cover_info = choose_cover(material_sources, task_dir, final_video, params.get("video_source", ""))
     if cover is not None:
         cover.save(folder / "kapak.jpg", "JPEG", quality=90)
@@ -498,7 +509,7 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
         "durum": "kapalı", "iddialar": [], "sayim": {}, "isaretli": []}
     checks = technical_checks(task_dir, final_video, script, params, terms, material_sources, log_lines, preset)
     reasons = review_reasons(audit, checks) if preset.audit else review_reasons({"durum": "tamam"}, checks)
-    warnings = check_warnings(checks)
+    warnings = check_warnings(checks) + subtitles["uyarilar"]
     quality = {
         "konu": item.subject,
         "gorev": item.task_id,
@@ -507,6 +518,7 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
         "uyarilar": warnings,
         "dogruluk": audit,
         "teknik": checks,
+        "altyazi": subtitles,
         "kapak": {**cover_info, "kural": COVER_RULE},
         "kareler_sn": moments,
         "video": placement,
@@ -515,7 +527,8 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
     }
     (folder / "kalite.json").write_text(json.dumps(quality, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"kontrol_gerekli": quality["kontrol_gerekli"], "nedenler": reasons, "uyarilar": warnings,
-            "sure_sn": checks["sure_sn"], "kelime": checks["kelime"], "sayim": audit.get("sayim", {})}
+            "sure_sn": checks["sure_sn"], "kelime": checks["kelime"], "sayim": audit.get("sayim", {}),
+            "altyazilar": subtitles["dosyalar"]}
 
 
 # ---------------------------------------------------------------- rapor
@@ -561,6 +574,12 @@ ELIMINATION_LABELS = {
 }
 
 
+def subtitle_files(folder: Path) -> list[str]:
+    """Paketteki .srt dosyaları; kaynak dil (Türkçe) önce, sonra çeviriler alfabetik."""
+    names = sorted(path.name for path in folder.glob("altyazi.*.srt"))
+    return sorted(names, key=lambda name: name != "altyazi.tr.srt")
+
+
 def _claims_table(claims: list[dict]) -> str:
     esc = html.escape
     rows = "".join(
@@ -590,6 +609,8 @@ def _item_card(batch_dir: Path, item) -> str:
         meta.append(f'<a href="{esc(item.folder)}/">{esc(item.folder)}/</a>')
     if (folder / "video.mp4").exists():
         meta.append(f'<a href="{esc(item.folder)}/video.mp4">video.mp4</a>')
+    for name in subtitle_files(folder):
+        meta.append(f'<a href="{esc(item.folder)}/{esc(name)}">{esc(name)}</a>')
     parts.append(f'<div class="meta">{" · ".join(meta)}</div>')
     if item.status == "failed":
         stage = f" (aşama: {esc(item.failed_stage)})" if item.failed_stage else ""
@@ -630,6 +651,7 @@ def _item_card(batch_dir: Path, item) -> str:
         ("Boş terim", ", ".join(checks.get("bos_terimler", [])) or "yok"),
         ("Yedeğe geçen terim", ", ".join(checks.get("yedege_gecen_terimler", [])) or "yok"),
         ("Filtre elemeleri", ", ".join(f"{ELIMINATION_LABELS.get(k, k)} {v}" for k, v in elim.items() if v) or "yok"),
+        ("Altyazı dosyaları", ", ".join(subtitle_files(batch_dir / item.folder)) or "yok"),
     ]
     parts.append("<h3>Kontroller</h3><table>"
                  + "".join(f"<tr><th>{esc(k)}</th><td>{esc(str(v))}</td></tr>" for k, v in rows) + "</table>")

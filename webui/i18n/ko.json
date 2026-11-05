@@ -626,6 +626,12 @@
     "batch.resume.missing_preset": "프리셋 파일이 없습니다: {path}",
     "batch.resume.changed_input": "일괄 작업 시작 후 입력 파일이 바뀌었습니다: {path}",
     "batch.resume.changed_preset": "일괄 작업 시작 후 프리셋이 바뀌었습니다: {path}",
-    "batch.error.exited": "일괄 작업 프로세스가 일찍 종료되었습니다: {line}"
+    "batch.error.exited": "일괄 작업 프로세스가 일찍 종료되었습니다: {line}",
+    "batch.col.voice_hint": "음성 칸이 비어 있으면 프리셋의 음성({voice})을 사용합니다.",
+    "batch.translations.label": "번역 자막",
+    "batch.translations.help": "선택한 언어마다 패키지에 altyazi.<언어>.srt를 추가합니다. 이번 일괄 작업에만 적용되며 프리셋 파일과 config.toml은 바뀌지 않습니다.",
+    "batch.preset.translations": "번역 자막",
+    "batch.preset.no_translations": "없음",
+    "batch.history.files": "자막 파일"
   }
 }

@@ -10,6 +10,7 @@ from PIL import Image
 
 from app.services import batch_package as bpk
 from app.services import batch_production as bp
+from app.services import batch_subtitles as bst
 from app.utils import utils
 
 FF = utils.get_ffmpeg_binary()
@@ -31,14 +32,15 @@ SOCIAL = {
 
 
 def asker(*responses):
-    """Sırayla yanıt veren sahte LLM; denetçi ve paylaşım istemlerini ayrı sıralarla yanıtlar."""
-    queues = {"audit": [], "social": []}
+    """Sırayla yanıt veren sahte LLM; denetçi, çeviri ve paylaşım istemlerini ayrı sıralarla yanıtlar."""
+    queues = {"audit": [], "social": [], "translate": []}
     for response in responses:
         kind, text = response
         queues[kind].append(text)
 
     def ask(prompt):
-        kind = "audit" if "fact-checker" in prompt else "social"
+        kind = ("audit" if "fact-checker" in prompt else "translate" if "Subtitle translator" in prompt
+                else "social")
         ask.prompts.append((kind, prompt))
         return queues[kind].pop(0)
 
@@ -241,10 +243,16 @@ def finished_task(tmp_path, monkeypatch):
         "script": script, "search_terms": ["neutron star", "pulsar's beam"],
         "params": {"font_name": "STHeitiMedium.ttc", "video_source": "nasa"}, "material_sources": sources,
     }), encoding="utf-8")
-    (task / "subtitle.srt").write_text("1\n00:00:00,000 --> 00:00:02,000\nBir çay kaşığı\n\n", encoding="utf-8")
+    # Görevin altyazısı, pipeline'ın yaptığı gibi cümle sonu noktalamasız: 10 cümle 4 sn'ye.
+    cues = [f"{index + 1}\n00:00:0{index * 4 // 10},{index * 4 % 10}00 --> 00:00:0{index * 4 // 10},"
+            f"{index * 4 % 10 + 3}50\nBir çay kaşığı nötron yıldızı bir dağ kadar çok ağırdır\n" for index in range(10)]
+    (task / "subtitle.srt").write_text("\n".join(cues), encoding="utf-8")
     (task / "credits.txt").write_text("NASA PIA14871\n", encoding="utf-8")
     make_video(task / "final-1.mp4", "testsrc", seconds=4)
     return task
+
+
+TRANSLATION = json.dumps(["A teaspoon of neutron star weighs as much as a mountain."] * 10)
 
 
 def build(task, folder, responses, preset=None):
@@ -257,9 +265,18 @@ def build(task, folder, responses, preset=None):
 
 def test_package_contents(finished_task, tmp_path):
     folder = tmp_path / "batch" / "01-notron-yildizlari"
-    summary = build(finished_task, folder, [("social", json.dumps(SOCIAL)), ("audit", json.dumps(AUDIT))])
+    summary = build(finished_task, folder, [("social", json.dumps(SOCIAL)), ("audit", json.dumps(AUDIT)),
+                                            ("translate", TRANSLATION)])
     assert sorted(p.name for p in folder.iterdir()) == [
-        "credits.txt", "kalite.json", "kapak.jpg", "kareler.jpg", "paylasim.md", "script.txt", "video.mp4"]
+        "altyazi.en.srt", "altyazi.tr.srt", "credits.txt", "kalite.json", "kapak.jpg", "kareler.jpg", "paylasim.md",
+        "script.txt", "video.mp4"]
+    turkish = (folder / "altyazi.tr.srt").read_bytes()
+    assert turkish.startswith(b"1\r\n00:00:00,000 --> 00:00:00,350\r\nBir \xc3\xa7ay")
+    assert bst.validate_srt(turkish.decode("utf-8"), 4000) == []
+    # Noktalama seslendirilen metinden geri geldi; İngilizce aynı zamanlamada.
+    assert [cue.text for cue in bst.parse_srt(turkish.decode())][0].endswith("ağırdır.")
+    english = bst.parse_srt((folder / "altyazi.en.srt").read_text(encoding="utf-8"))
+    assert [(cue.start, cue.end) for cue in english] == [(cue.start, cue.end) for cue in bst.parse_srt(turkish.decode())]
     assert (folder / "video.mp4").read_bytes() == (finished_task / "final-1.mp4").read_bytes()
     assert (folder / "script.txt").read_text(encoding="utf-8").startswith("Bir çay kaşığı")
     assert Image.open(folder / "kapak.jpg").size == bpk.COVER_SIZE
@@ -267,7 +284,11 @@ def test_package_contents(finished_task, tmp_path):
     share = (folder / "paylasim.md").read_text(encoding="utf-8")
     assert "## YouTube Shorts" in share and "## TikTok" in share and "## Instagram Reels" in share
     assert "Görüntüler: NASA ve ortakları (images.nasa.gov)" in share
+    assert ("**Altyazı dosyaları:** altyazi.tr.srt, altyazi.en.srt (YouTube Studio > Altyazılar > Dosya yükle)"
+            in share.split("## TikTok")[0])
     quality = json.loads((folder / "kalite.json").read_text(encoding="utf-8"))
+    assert quality["altyazi"]["dosyalar"] == ["altyazi.tr.srt", "altyazi.en.srt"]
+    assert quality["altyazi"]["tr"]["noktalama_geri_geldi"] and quality["altyazi"]["en"]["yontem"] == "tek çağrı"
     # 100 kelime hedefin içinde, 4 sn süre hedefin dışında.
     assert quality["teknik"]["kelime"] == 100 and quality["teknik"]["kelime_uygun"]
     assert quality["teknik"]["sure_sn"] == 4.0 and not quality["teknik"]["sure_uygun"]
@@ -275,7 +296,8 @@ def test_package_contents(finished_task, tmp_path):
     # Hedef dışı süre yalnız uyarıdır; D ve B iddialarla kontrol gerekmez.
     assert quality["nedenler"] == [] and quality["uyarilar"] == ["süre 4.0 sn (hedef 35-60)"]
     assert summary == {"kontrol_gerekli": False, "nedenler": [], "uyarilar": quality["uyarilar"], "sure_sn": 4.0,
-                       "kelime": 100, "sayim": {"D": 1, "B": 1, "Y": 0, "X": 0}}
+                       "kelime": 100, "sayim": {"D": 1, "B": 1, "Y": 0, "X": 0},
+                       "altyazilar": ["altyazi.tr.srt", "altyazi.en.srt"]}
     moments = quality["kareler_sn"]
     assert len(moments) == bpk.SHEET_FRAMES and moments == sorted(moments) and 0 < moments[0] and moments[-1] < 4
 
@@ -297,17 +319,35 @@ def test_flagged_claim_makes_package_need_review(finished_task, tmp_path):
     preset = bp.load_preset(PRESET)
     preset.target_duration = None
     audit = {"claims": [{"claim": "Güneş nötron yıldızı olacak.", "rating": "X", "reason": "Kütlesi yetmez."}]}
-    summary = build(finished_task, tmp_path / "02-x", [("social", json.dumps(SOCIAL)), ("audit", json.dumps(audit))],
-                    preset)
+    summary = build(finished_task, tmp_path / "02-x", [("social", json.dumps(SOCIAL)), ("audit", json.dumps(audit)),
+                                                       ("translate", TRANSLATION)], preset)
     assert summary["kontrol_gerekli"] and summary["nedenler"] == ["doğruluk: 1 X (yanlış)"]
 
 
 def test_audit_off_skips_the_auditor(finished_task, tmp_path):
     preset = bp.load_preset(PRESET)
-    preset.audit, preset.target_duration = False, None
+    preset.audit, preset.target_duration, preset.subtitle_translations = False, None, ()
     summary = build(finished_task, tmp_path / "03-x", [("social", json.dumps(SOCIAL))], preset)
     assert summary == {"kontrol_gerekli": False, "nedenler": [], "uyarilar": [], "sure_sn": 4.0, "kelime": 100,
-                       "sayim": {}}
+                       "sayim": {}, "altyazilar": ["altyazi.tr.srt"]}
+
+
+def test_translation_warnings_reach_the_quality_file_and_the_report(finished_task, tmp_path):
+    preset = bp.load_preset(PRESET)
+    preset.target_duration = None
+    untranslated = json.dumps(["Bir çay kaşığı nötron yıldızı bir dağ kadar çok ağırdır."] + ["A mountain."] * 9)
+    folder = tmp_path / "batch" / "04-x"
+    summary = build(finished_task, folder, [("social", json.dumps(SOCIAL)), ("audit", json.dumps(AUDIT)),
+                                            ("translate", untranslated)], preset)
+    assert not summary["kontrol_gerekli"]
+    assert summary["uyarilar"][0].startswith("altyazi.en.srt: 1. altyazı: çevrilmemiş görünüyor")
+    assert "altyazi.en.srt: 2. altyazı: uzunluk oranı 0.20" in summary["uyarilar"]  # 11 / 56 karakter
+    item = bp.ItemState(index=1, subject="x", folder="04-x", status="done", quality=summary)
+    state = bp.BatchState(input="a.txt", input_sha256="", preset="r.toml", preset_sha256="", created="", items=[item])
+    page = bpk.write_report(state, tmp_path / "batch").read_text(encoding="utf-8")
+    assert '<a href="04-x/altyazi.tr.srt">altyazi.tr.srt</a> · <a href="04-x/altyazi.en.srt">altyazi.en.srt</a>' in page
+    assert "<th>Altyazı dosyaları</th><td>altyazi.tr.srt, altyazi.en.srt</td>" in page
+    assert "çevrilmemiş görünüyor" in page
 
 
 # ---------------------------------------------------------------- rapor
