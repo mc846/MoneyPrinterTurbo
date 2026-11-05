@@ -85,6 +85,16 @@ def test_command_runs_batch_py_with_fixed_arguments(tmp_path):
                        "--preset", str(PRESET), "--output", str(tmp_path / "out"), "--gunluk-stderr"]
 
 
+@pytest.mark.parametrize("translations, tail", [
+    (None, ["--gunluk-stderr"]),
+    (["en", "de"], ["--gunluk-stderr", "--altyazi-cevirileri", "en,de"]),
+    ([], ["--gunluk-stderr", "--altyazi-cevirileri", ""]),
+])
+def test_command_passes_the_batch_translations(tmp_path, translations, tail):
+    command = br.batch_command(tmp_path / "k.csv", PRESET, tmp_path, translations)
+    assert command[-len(tail):] == tail
+
+
 def test_installed_package_runs_the_module(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "is_source_checkout", lambda: False)
     assert br.batch_command(tmp_path / "k.csv", PRESET, tmp_path)[3:5] == ["-m", "app.services.batch_production"]

@@ -23,8 +23,8 @@ from loguru import logger
 
 from app import paths
 from app.config import config
+from app.services import batch_package, batch_runner, batch_subtitles, voice
 from app.services import batch_production as bp
-from app.services import batch_runner, voice
 
 VIEW_PARAM = "view"
 VIEW_BATCH = "batch"
@@ -158,7 +158,20 @@ def preset_summary(preset: bp.Preset, tr) -> list[tuple[str, str]]:
         (tr("batch.preset.aspect"), video.get("video_aspect") or default),
         (tr("batch.preset.words"), words),
         (tr("batch.preset.llm"), llm),
+        (tr("batch.preset.translations"), ", ".join(preset.subtitle_translations) or tr("batch.preset.no_translations")),
     ]
+
+
+def translation_options(preset: bp.Preset, language: str) -> list[str]:
+    """Çeviri dilleri: bilinen diller (videonun dili hariç) ve reçetedeki listede olmayan kodlar."""
+    source = (language or "tr").split("-")[0].lower()
+    options = [code for code in batch_subtitles.LANGUAGES if code != source]
+    return options + [code for code in preset.subtitle_translations if code not in options]
+
+
+def language_label(code: str) -> str:
+    names = batch_subtitles.LANGUAGES.get(code.split("-")[0])
+    return f"{code} · {names[1]}" if names else code
 
 
 # ---------------------------------------------------------------- yerel açma
@@ -332,10 +345,18 @@ def _render_editor(tr, running: bool) -> None:
             st.error(tr("batch.preset.error").format(error=exc))
     language = (preset.video.get("video_language") if preset else "") or ""
     voices = voices_for(language)
+    translations: list[str] = []
     if preset is not None:
         summary = preset_summary(preset, tr)
         st.dataframe(pd.DataFrame(summary, columns=[tr("batch.preset.setting"), tr("batch.preset.value")]),
                      hide_index=True, width="stretch")
+        # Yalnız bu toplu iş için: reçete dosyasına ve config.toml'a yazılmaz; batch.py'ye argüman olarak gider.
+        options = translation_options(preset, language)
+        translations = st.multiselect(
+            tr("batch.translations.label"), options,
+            default=[code for code in preset.subtitle_translations if code in options],
+            format_func=language_label, key=f"batch_translations_{name}", help=tr("batch.translations.help"),
+        )
 
     notice = st.session_state.pop("batch_editor_flash", None)
     if notice:
@@ -364,10 +385,12 @@ def _render_editor(tr, running: bool) -> None:
         num_rows="dynamic",
         hide_index=True,
         width="stretch",
+        # Yeni satırların boş hücreleri "None" yerine boş görünsün: varsayılan "" ve sesin "" seçeneği
+        # (boş = reçetedeki ses; ipucu başlıkta ve tablonun altında).
         column_config={
-            "konu": st.column_config.TextColumn(tr("batch.col.subject"), width="large"),
-            "talimat": st.column_config.TextColumn(tr("batch.col.instruction"), width="large"),
-            "ses": st.column_config.SelectboxColumn(tr("batch.col.voice"), options=voices,
+            "konu": st.column_config.TextColumn(tr("batch.col.subject"), width="large", default=""),
+            "talimat": st.column_config.TextColumn(tr("batch.col.instruction"), width="large", default=""),
+            "ses": st.column_config.SelectboxColumn(tr("batch.col.voice"), options=["", *voices], default="",
                                                     help=tr("batch.col.voice_help")),
         },
     )
@@ -377,7 +400,8 @@ def _render_editor(tr, running: bool) -> None:
         save_draft(rows, selected_preset)
         st.session_state["batch_saved_rows"] = rows
         st.session_state["batch_saved_preset"] = selected_preset
-    st.caption(tr("batch.list.draft_note"))
+    preset_voice = (preset.video.get("voice_name") if preset else "") or tr("batch.preset.default")
+    st.caption(f"{tr('batch.col.voice_hint').format(voice=preset_voice)} {tr('batch.list.draft_note')}")
 
     with st.container(horizontal=True, gap="small"):
         start = st.button(tr("batch.start"), key="batch_start", type="primary", icon=":material/play_arrow:",
@@ -394,7 +418,7 @@ def _render_editor(tr, running: bool) -> None:
         try:
             batch_dir = bp.new_batch_dir(Path("webui"))
             input_path = write_input(items, batch_dir)
-            batch_runner.start_batch(input_path, preset_path, batch_dir)
+            batch_runner.start_batch(input_path, preset_path, batch_dir, translations=list(translations))
         except batch_runner.BatchBusy as exc:
             name = Path(exc.lock.get("batch_dir") or "").name
             st.error(tr("batch.error.busy").format(name=name))
@@ -456,6 +480,20 @@ def _render_history(tr, running: bool) -> None:
                 st.session_state["batch_running_dir"] = str(folder)
                 _flash("success", tr("batch.history.resumed").format(name=folder.name))
                 st.rerun(scope="app")
+            files = subtitle_listing(status)
+            if files:
+                with st.expander(tr("batch.history.files")):
+                    st.markdown("\n".join(f"- {line}" for line in files))
+
+
+def subtitle_listing(status: batch_runner.BatchStatus) -> list[str]:
+    """Geçmiş kartı için video başına .srt dosyaları ("1. Konu: altyazi.tr.srt, altyazi.en.srt")."""
+    lines = []
+    for item in status.items:
+        names = batch_package.subtitle_files(status.directory / item.folder) if item.folder else []
+        if names:
+            lines.append(f"{item.index}. {item.subject}: " + ", ".join(f"`{name}`" for name in names))
+    return lines
 
 
 def render_batch_page(tr) -> None:

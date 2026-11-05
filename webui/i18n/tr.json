@@ -626,6 +626,12 @@
     "batch.resume.missing_preset": "Reçete dosyası yok: {path}",
     "batch.resume.changed_input": "Girdi dosyası toplu üretim başladıktan sonra değişmiş: {path}",
     "batch.resume.changed_preset": "Reçete toplu üretim başladıktan sonra değişmiş: {path}",
-    "batch.error.exited": "Toplu üretim süreci erken sonlandı: {line}"
+    "batch.error.exited": "Toplu üretim süreci erken sonlandı: {line}",
+    "batch.col.voice_hint": "Ses hücresi boşsa reçetedeki ses kullanılır ({voice}).",
+    "batch.translations.label": "Çeviri altyazıları",
+    "batch.translations.help": "Seçilen her dil için pakete bir altyazi.<dil>.srt eklenir. Yalnız bu toplu iş için geçerli; reçete dosyası ve config.toml değişmez.",
+    "batch.preset.translations": "Çeviri altyazıları",
+    "batch.preset.no_translations": "yok",
+    "batch.history.files": "Altyazı dosyaları"
   }
 }

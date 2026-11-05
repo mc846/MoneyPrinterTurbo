@@ -626,6 +626,12 @@
     "batch.resume.missing_preset": "Нет файла пресета: {path}",
     "batch.resume.changed_input": "Входной файл изменился после запуска пакета: {path}",
     "batch.resume.changed_preset": "Пресет изменился после запуска пакета: {path}",
-    "batch.error.exited": "Процесс пакета завершился раньше времени: {line}"
+    "batch.error.exited": "Процесс пакета завершился раньше времени: {line}",
+    "batch.col.voice_hint": "Если голос не указан, используется голос из пресета ({voice}).",
+    "batch.translations.label": "Переводы субтитров",
+    "batch.translations.help": "Для каждого выбранного языка в пакет добавляется altyazi.<язык>.srt. Действует только для этого пакета; файл пресета и config.toml не меняются.",
+    "batch.preset.translations": "Переводы субтитров",
+    "batch.preset.no_translations": "нет",
+    "batch.history.files": "Файлы субтитров"
   }
 }

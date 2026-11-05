@@ -626,6 +626,12 @@
     "batch.resume.missing_preset": "O arquivo de predefinição não existe: {path}",
     "batch.resume.changed_input": "O arquivo de entrada mudou depois que o lote começou: {path}",
     "batch.resume.changed_preset": "A predefinição mudou depois que o lote começou: {path}",
-    "batch.error.exited": "O processo do lote terminou antes do tempo: {line}"
+    "batch.error.exited": "O processo do lote terminou antes do tempo: {line}",
+    "batch.col.voice_hint": "Células de voz vazias usam a voz da predefinição ({voice}).",
+    "batch.translations.label": "Traduções de legendas",
+    "batch.translations.help": "Adiciona a cada pacote um altyazi.<idioma>.srt para cada idioma escolhido. Vale só para este lote; o arquivo de predefinição e o config.toml não mudam.",
+    "batch.preset.translations": "Traduções de legendas",
+    "batch.preset.no_translations": "nenhuma",
+    "batch.history.files": "Arquivos de legendas"
   }
 }

@@ -84,7 +84,7 @@ def test_empty_page_shows_the_preset_summary_and_refuses_to_start(batches, no_co
     app = page()
     summary = dict(app.dataframe[0].value.itertuples(index=False))
     assert summary == {"Source": "nasa → pixabay", "Voice": "tr-TR-EmelNeural-Female", "Aspect ratio": "9:16",
-                       "Target words": "90–100", "LLM": "claude_code"}
+                       "Target words": "90–100", "LLM": "claude_code", "Subtitle translations": "en"}
     assert app.selectbox(key="batch_preset_select").value == "uzay.toml"
     app.button(key="batch_start").click()
     run(app)
@@ -112,6 +112,46 @@ def test_clear_empties_the_list(batches):
     run(app)
     assert app.session_state["batch_rows"] == [] and app.dataframe[1].value.empty
     assert json.loads((batches / batch_page.DRAFT_FILE).read_text(encoding="utf-8"))["rows"] == []
+
+
+def test_empty_cells_of_new_rows_are_blank_not_none(batches):
+    app = page()
+    columns = json.loads(app.dataframe[1].proto.columns)
+    assert columns["konu"]["default"] == "" and columns["talimat"]["default"] == ""
+    assert columns["ses"]["default"] == "" and columns["ses"]["type_config"]["options"] == ["", *VOICES]
+    assert columns["ses"]["help"] == "Empty: the preset's voice"
+    hint = [item.value for item in app.caption if "preset's voice" in item.value]
+    assert hint and hint[0].startswith("Empty voice cells use the preset's voice (tr-TR-EmelNeural-Female).")
+    # Ses seçilmemiş eklenmiş satır taslakta "" olarak durur.
+    edit(app, added=[{"konu": "Ay"}])
+    assert json.loads((batches / batch_page.DRAFT_FILE).read_text(encoding="utf-8"))["rows"] == [
+        {"konu": "Ay", "talimat": "", "ses": ""}]
+
+
+def test_translation_languages_start_from_the_preset_and_apply_to_this_batch_only(batches, no_config_writes):
+    preset_bytes = (ROOT / "presets/uzay.toml").read_bytes()
+    app = page()
+    choice = app.multiselect(key="batch_translations_uzay.toml")
+    assert choice.value == ["en"] and "tr" not in choice.options and "de · Deutsch" in choice.options
+    choice.select("de").unselect("en")
+    run(app)
+    edit(app, added=[{"konu": "Ay"}])
+    with patch.object(br, "start_batch", return_value=4242) as start:
+        app.button(key="batch_start").click()
+        run(app)
+    assert start.call_args.kwargs["translations"] == ["de"]
+    assert (ROOT / "presets/uzay.toml").read_bytes() == preset_bytes
+
+
+def test_no_translation_is_passed_as_an_empty_list(batches):
+    app = page()
+    app.multiselect(key="batch_translations_uzay.toml").unselect("en")
+    run(app)
+    edit(app, added=[{"konu": "Ay"}])
+    with patch.object(br, "start_batch", return_value=4242) as start:
+        app.button(key="batch_start").click()
+        run(app)
+    assert start.call_args.kwargs["translations"] == []
 
 
 def test_draft_survives_a_new_session(batches):
@@ -320,6 +360,21 @@ def history(batches, local):
     patcher = patch.object(batch_page, "local_access", return_value=local)
     patcher.start()
     return patcher
+
+
+def test_history_lists_the_srt_files_of_each_video(batches):
+    patcher = history(batches, local=True)
+    try:
+        video = batches / "20261104-100000_webui" / "01-a"
+        video.mkdir()
+        for name in ("altyazi.en.srt", "altyazi.tr.srt"):
+            (video / name).write_text("1\n", encoding="utf-8")
+        app = page()
+        expanders = [item for item in app.expander if item.label == "Subtitle files"]
+        assert len(expanders) == 1  # yalnız .srt'si olan toplu işte
+        assert expanders[0].markdown[0].value == "- 1. A: `altyazi.tr.srt`, `altyazi.en.srt`"
+    finally:
+        patcher.stop()
 
 
 def test_history_lists_batches_and_opens_reports_and_folders_locally(batches, no_config_writes):

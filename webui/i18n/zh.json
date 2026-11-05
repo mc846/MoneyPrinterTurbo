@@ -881,6 +881,12 @@
     "batch.resume.missing_preset": "预设文件不存在：{path}",
     "batch.resume.changed_input": "批量任务开始后输入文件已更改：{path}",
     "batch.resume.changed_preset": "批量任务开始后预设已更改：{path}",
-    "batch.error.exited": "批量任务进程提前结束：{line}"
+    "batch.error.exited": "批量任务进程提前结束：{line}",
+    "batch.col.voice_hint": "配音为空时使用预设中的配音（{voice}）。",
+    "batch.translations.label": "翻译字幕",
+    "batch.translations.help": "为每种选中的语言在上传包中添加 altyazi.<语言>.srt。只对本次批量任务有效，不会修改预设文件和 config.toml。",
+    "batch.preset.translations": "翻译字幕",
+    "batch.preset.no_translations": "无",
+    "batch.history.files": "字幕文件"
   }
 }

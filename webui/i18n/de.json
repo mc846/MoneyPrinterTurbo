@@ -626,6 +626,12 @@
     "batch.resume.missing_preset": "Die Vorlagendatei fehlt: {path}",
     "batch.resume.changed_input": "Die Eingabedatei wurde nach dem Start geändert: {path}",
     "batch.resume.changed_preset": "Die Vorlage wurde nach dem Start geändert: {path}",
-    "batch.error.exited": "Der Stapelprozess wurde vorzeitig beendet: {line}"
+    "batch.error.exited": "Der Stapelprozess wurde vorzeitig beendet: {line}",
+    "batch.col.voice_hint": "Leere Stimmenzellen verwenden die Stimme der Vorlage ({voice}).",
+    "batch.translations.label": "Untertitel-Übersetzungen",
+    "batch.translations.help": "Fügt jedem Paket für jede gewählte Sprache eine altyazi.<Sprache>.srt hinzu. Gilt nur für diesen Stapel; die Vorlagendatei und config.toml bleiben unverändert.",
+    "batch.preset.translations": "Untertitel-Übersetzungen",
+    "batch.preset.no_translations": "keine",
+    "batch.history.files": "Untertiteldateien"
   }
 }
