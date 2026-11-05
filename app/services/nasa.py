@@ -10,7 +10,9 @@ NASA Image and Video Library（images.nasa.gov）素材源。
 
 from __future__ import annotations
 
+import hashlib
 import html
+import json
 import math
 import os
 import re
@@ -217,6 +219,11 @@ TEXT_MODEL_FILE = os.path.join(
 TEXT_INPUT_LONG_EDGE = 1312
 TEXT_SCORE_THRESHOLD = 0.7
 TEXT_MIN_ASPECT = 2.5
+# DB 后处理参数，与 OpenCV Zoo 示例相同：二值化阈值、多边形阈值、扩张比例、最多候选数。
+TEXT_DB_BINARY_THRESHOLD = 0.3
+TEXT_DB_POLYGON_THRESHOLD = 0.5
+TEXT_DB_UNCLIP_RATIO = 2.0
+TEXT_DB_MAX_CANDIDATES = 200
 # 每个关键词按排序依次检查，直到 TEXT_CHECKED_CANDIDATES 个候选通过（被淘汰的不计）。按文案
 # 顺序匹配时一个关键词通常用 1～3 段素材（88 秒的 K3 用了 6 个关键词的 18 段），更靠后的
 # 候选只在下载失败或人脸被拒时才会用到；只查到第一个通过的候选会漏掉第二、三段素材
@@ -1113,7 +1120,8 @@ def _text_detector():
 
                 model = cv2.dnn_TextDetectionModel_DB(cv2.dnn.readNet(TEXT_MODEL_FILE))
                 # 与 OpenCV Zoo 示例相同的后处理阈值和归一化参数。
-                model.setBinaryThreshold(0.3).setPolygonThreshold(0.5).setUnclipRatio(2.0).setMaxCandidates(200)
+                model.setBinaryThreshold(TEXT_DB_BINARY_THRESHOLD).setPolygonThreshold(TEXT_DB_POLYGON_THRESHOLD)
+                model.setUnclipRatio(TEXT_DB_UNCLIP_RATIO).setMaxCandidates(TEXT_DB_MAX_CANDIDATES)
                 model.setInputMean((123.675, 116.28, 103.53))
                 model.setInputScale(1.0 / 255.0 / numpy.array([0.229, 0.224, 0.225]))
                 _text_detector_state["loaded"] = (cv2, numpy, model)
@@ -1184,12 +1192,84 @@ def _preview_url(item: MaterialInfo) -> str:
     return f"https://images-assets.nasa.gov/image/{quote(asset_id)}/{quote(asset_id)}~small.jpg" if asset_id else ""
 
 
+def _text_result_path(preview_url: str, video_aspect: VideoAspect, save_dir: str) -> str:
+    """
+    文字检查结果的缓存文件。文件名由预览图地址、FILTER_VERSION、目标比例（决定裁剪区域）
+    和全部检测参数决定，其中任何一项改变都会重新检测。
+    """
+    settings = {
+        "filter_version": FILTER_VERSION,
+        "preview": preview_url,
+        "aspect": VideoAspect(video_aspect).value,
+        "model": os.path.basename(TEXT_MODEL_FILE),
+        "input_long_edge": TEXT_INPUT_LONG_EDGE,
+        "score_threshold": TEXT_SCORE_THRESHOLD,
+        "min_aspect": TEXT_MIN_ASPECT,
+        "db": [TEXT_DB_BINARY_THRESHOLD, TEXT_DB_POLYGON_THRESHOLD, TEXT_DB_UNCLIP_RATIO, TEXT_DB_MAX_CANDIDATES],
+    }
+    digest = hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()
+    return os.path.join(save_dir, f"nasa-text-{digest}.json")
+
+
+def _load_text_result(path: str) -> list[dict] | None:
+    """读取缓存的文字行；文件不存在或内容不完整时返回 None（重新检测）。"""
+    try:
+        with open(path, encoding="utf-8") as cached:
+            lines = json.load(cached)["lines"]
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        logger.warning(f"discarding invalid nasa text check cache: {path}, error={type(exc).__name__}")
+        return None
+    numeric = (int, float)
+    if isinstance(lines, list) and all(
+        isinstance(line, dict) and isinstance(line.get("score"), numeric) and isinstance(line.get("height"), numeric)
+        for line in lines
+    ):
+        return lines
+    logger.warning(f"discarding invalid nasa text check cache: {path}")
+    return None
+
+
+def _save_text_result(path: str, lines: list[dict]) -> None:
+    """先写临时文件再整体替换，并发任务不会读到写了一半的结果；写入失败只影响缓存。"""
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", prefix=".nasa-text-", suffix=".json", dir=os.path.dirname(path), delete=False
+        ) as temp:
+            temp_path = temp.name
+            json.dump({"lines": lines}, temp)
+        os.replace(temp_path, path)
+        temp_path = ""
+    except OSError as exc:
+        logger.warning(f"failed to cache nasa text check: error={type(exc).__name__}, detail={exc}")
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+def _preview_text_lines(preview_url: str, video_aspect: VideoAspect, save_dir: str) -> list[dict] | None:
+    """返回预览图裁剪区域里的文字行：先查结果缓存，未命中时下载预览图并检测，结果写入缓存。"""
+    result_path = _text_result_path(preview_url, video_aspect, save_dir)
+    lines = _load_text_result(result_path)
+    if lines is not None:
+        return lines
+    preview_path = _download_image(preview_url, save_dir)
+    lines = crop_text_lines(preview_path, video_aspect) if preview_path else None
+    # 下载或检测失败（None）不缓存，下次任务再试。
+    if lines is not None:
+        _save_text_result(result_path, lines)
+    return lines
+
+
 def screen_text(items: List[MaterialInfo], video_aspect: VideoAspect, search_term: str = "") -> List[MaterialInfo]:
     """
     按排序依次检查 NASA 候选的预览图，淘汰裁剪区域里有文字的候选，返回剩下的候选（顺序不变）。
 
     通过 TEXT_CHECKED_CANDIDATES 个后停止检查，后面的候选原样保留。预览图缺失、下载或检测
-    失败时保留候选：无法判断时不淘汰。预览图下载到素材缓存目录，重复任务不会再次下载。
+    失败时保留候选：无法判断时不淘汰。预览图和检测结果都缓存在素材缓存目录，重复任务不会
+    再次下载预览图，也不会再次检测。
     """
     save_dir = utils.storage_dir("cache_videos")
     os.makedirs(save_dir, exist_ok=True)
@@ -1199,8 +1279,7 @@ def screen_text(items: List[MaterialInfo], video_aspect: VideoAspect, search_ter
             kept.extend(items[index:])
             break
         preview = _preview_url(item) if item.provider == "nasa" else ""
-        preview_path = _download_image(preview, save_dir) if preview else ""
-        lines = crop_text_lines(preview_path, video_aspect) if preview_path else None
+        lines = _preview_text_lines(preview, video_aspect, save_dir) if preview else None
         if lines:
             source_info = item.source_info if isinstance(item.source_info, dict) else {}
             tallest = max(lines, key=lambda line: line["height"])

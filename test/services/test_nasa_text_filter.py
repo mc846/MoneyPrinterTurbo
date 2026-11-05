@@ -3,6 +3,7 @@ opencv 缺失、设置开关、缓存键和各层传递。不访问网络。"""
 
 import random
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 from unittest.mock import patch
@@ -104,10 +105,12 @@ def _screen(items, flagged, *, failed_downloads=()):
         checked.append(name)
         return [{"score": 0.9, "height": 0.05}] if name in flagged else []
 
+    # 每次用空的缓存目录：检测结果会缓存在这里，不能写进工作目录，也不能被下一次调用复用。
     with (
+        tempfile.TemporaryDirectory() as cache_dir,
         patch.object(nasa, "_download_image", side_effect=download),
         patch.object(nasa, "crop_text_lines", side_effect=lines),
-        patch.object(nasa.utils, "storage_dir", return_value=str(Path.cwd())),
+        patch.object(nasa.utils, "storage_dir", return_value=cache_dir),
     ):
         kept = nasa.screen_text(items, PORTRAIT, "black hole")
     return [i.source_info["asset_id"] for i in kept], checked
