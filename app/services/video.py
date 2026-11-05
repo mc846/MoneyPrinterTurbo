@@ -30,6 +30,7 @@ from moviepy import (
     afx,
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
+from moviepy.tools import compute_position
 from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageOps
 
 from app.config import config
@@ -497,6 +498,257 @@ def _write_videofile_with_codec_fallback(
             reason=str(exc),
             **kwargs,
         )
+
+
+# ---------------------------------------------------------------- ffmpeg 成片
+# final_render_engine = "ffmpeg" 时，成片不再由 MoviePy 在 Python 里逐帧合成：字幕和其它
+# 静态叠加层按 MoviePy 的画法各画成一张透明 PNG，由 ffmpeg 用 overlay 在同样的帧上叠到
+# 原视频上；音频仍由 MoviePy 按原方式混音写出，再原样封装，声音与 MoviePy 路径一致。
+# 不支持的内容（随时间变化的叠加层、字幕动画、帧率不同的原视频）直接使用 MoviePy，
+# ffmpeg 路径出错时也回退到 MoviePy。
+_FINAL_RENDER_ENGINES = ("moviepy", "ffmpeg")
+_DEFAULT_FINAL_RENDER_ENGINE = "moviepy"
+_ANIMATED_SUBTITLES = ("pop_spring", "spring", "pop")
+
+
+class _FfmpegFinalRenderUnsupported(Exception):
+    """成片包含 ffmpeg 路径无法等价复现的内容。"""
+
+
+def _get_final_render_engine() -> str:
+    engine = str(
+        config.app.get("final_render_engine", _DEFAULT_FINAL_RENDER_ENGINE)
+        or _DEFAULT_FINAL_RENDER_ENGINE
+    ).strip().lower()
+    if engine not in _FINAL_RENDER_ENGINES:
+        logger.warning(
+            f"unsupported final render engine: {engine}, "
+            f"fallback to {_DEFAULT_FINAL_RENDER_ENGINE}"
+        )
+        return _DEFAULT_FINAL_RENDER_ENGINE
+    return engine
+
+
+def _final_overlay_layers(clip, base) -> list:
+    """按叠放顺序展开叠在原视频上的各层（字幕、署名等）。"""
+    # 没有叠加层时 with_audio 返回的是原视频片段的副本。
+    if clip is base or (
+        isinstance(clip, VideoFileClip)
+        and clip.filename == base.filename
+        and tuple(clip.size) == tuple(base.size)
+        and not clip.start
+    ):
+        return []
+    if (
+        not isinstance(clip, CompositeVideoClip)
+        or not clip.clips
+        or tuple(clip.size) != tuple(base.size)
+    ):
+        raise _FfmpegFinalRenderUnsupported(
+            "the composition does not start with the source video"
+        )
+    return _final_overlay_layers(clip.clips[0], base) + list(clip.clips[1:])
+
+
+def _static_layer_rgba(layer, canvas_size) -> tuple[np.ndarray, tuple[int, int]]:
+    """
+    把一个叠加层画成 RGBA 数组，返回数组和它在画面上的位置（与 compose_on 相同的
+    取整和遮罩裁剪方式）。内容或位置随时间变化时抛出 _FfmpegFinalRenderUnsupported。
+    """
+    duration = float(layer.duration or 0)
+    images, positions = [], []
+    for time_seconds in sorted({0.0, duration / 2, max(0.0, duration - 1e-3)}):
+        frame = np.asarray(layer.get_frame(time_seconds)).astype("uint8")[:, :, :3]
+        height, width = frame.shape[:2]
+        if layer.mask is None:
+            alpha = Image.new("L", (width, height), 255)
+        else:
+            mask = (layer.mask.get_frame(time_seconds) * 255).astype("uint8")
+            alpha = Image.new("L", (width, height), 0)
+            alpha.paste(Image.fromarray(mask).convert("L"), (0, 0))
+        images.append(np.dstack([frame, np.asarray(alpha)]))
+        positions.append(
+            compute_position(
+                (width, height), canvas_size, layer.pos(time_seconds), layer.relative_pos
+            )
+        )
+    if len(set(positions)) > 1 or any(
+        image.shape != images[0].shape or not np.array_equal(image, images[0])
+        for image in images[1:]
+    ):
+        raise _FfmpegFinalRenderUnsupported("an overlay changes over time")
+    return images[0], tuple(int(value) for value in positions[0])
+
+
+def _layer_frame_range(layer, frame_rate: float, total_frames: int) -> tuple[int, int] | None:
+    """MoviePy 在 t = i / fps 时显示满足 start <= t < end 的层；返回首末帧号。"""
+    start, end = float(layer.start or 0), layer.end
+    first = max(0, math.floor(start * frame_rate) - 1)
+    while first < total_frames and first / frame_rate < start:
+        first += 1
+    last = total_frames - 1
+    if end is not None:
+        last = min(last, math.ceil(float(end) * frame_rate) + 1)
+        while last >= first and not last / frame_rate < end:
+            last -= 1
+    return (first, last) if first <= last else None
+
+
+def _run_ffmpeg_final_command(command: list[str], cwd: str) -> None:
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=_DEFAULT_FFMPEG_CONCAT_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "").strip()[-2000:] or "ffmpeg failed")
+
+
+def _render_final_video_with_ffmpeg(
+    final_clip,
+    base_clip,
+    video_path: str,
+    output_file: str,
+    params: VideoParams,
+    audio_fps: int,
+    output_dir: str,
+) -> bool:
+    """
+    final_render_engine 为 ffmpeg 时用 ffmpeg 写出成片并返回 True；设置为 moviepy、
+    成片包含不支持的内容或 ffmpeg 失败时返回 False，由调用方用 MoviePy 写出。
+    """
+    if _get_final_render_engine() != "ffmpeg":
+        return False
+    try:
+        if getattr(params, "subtitle_animation", "none") in _ANIMATED_SUBTITLES:
+            raise _FfmpegFinalRenderUnsupported(
+                f"subtitle animation {params.subtitle_animation}"
+            )
+        if final_clip.duration is None or round(float(base_clip.fps or 0), 3) != fps:
+            raise _FfmpegFinalRenderUnsupported(
+                f"source video frame rate {base_clip.fps} is not {fps}"
+            )
+        layers = _final_overlay_layers(final_clip, base_clip)
+        total_frames = int(final_clip.duration * fps)
+        canvas_size = tuple(base_clip.size)
+        overlays = []
+        for layer in layers:
+            frame_range = _layer_frame_range(layer, fps, total_frames)
+            if frame_range is not None:
+                overlays.append((*_static_layer_rgba(layer, canvas_size), frame_range))
+    except _FfmpegFinalRenderUnsupported as exc:
+        logger.info(f"final video render uses MoviePy: {exc}")
+        return False
+
+    try:
+        with _stage_heartbeat("final video render (ffmpeg)"):
+            _write_final_video_with_ffmpeg(
+                final_clip, video_path, output_file, params, audio_fps, output_dir,
+                overlays, total_frames, int(base_clip.duration * fps), canvas_size,
+            )
+        logger.info(f"final video rendered with ffmpeg: overlays={len(overlays)}")
+        return True
+    except Exception as exc:
+        logger.warning(
+            "ffmpeg final render failed, falling back to MoviePy: "
+            f"error={type(exc).__name__}, detail={exc}"
+        )
+        return False
+
+
+def _write_final_video_with_ffmpeg(
+    final_clip,
+    video_path: str,
+    output_file: str,
+    params: VideoParams,
+    audio_fps: int,
+    output_dir: str,
+    overlays: list,
+    total_frames: int,
+    source_frames: int,
+    canvas_size: tuple[int, int],
+) -> None:
+    with tempfile.TemporaryDirectory(prefix="mpt-final-") as work_dir:
+        # 相同的叠加层（同一条字幕重复出现时）只写一张 PNG；输入用短的相对路径，
+        # 字幕很多时命令行也不会超长。
+        inputs, names = [], {}
+        for rgba, _, _ in overlays:
+            digest = hashlib.sha256(str(rgba.shape).encode() + rgba.tobytes()).hexdigest()[:16]
+            if digest not in names:
+                names[digest] = f"{len(names):04d}.png"
+                Image.fromarray(rgba).save(
+                    os.path.join(work_dir, names[digest]), compress_level=1
+                )
+            inputs.extend(["-i", names[digest]])
+        width, height = canvas_size
+        # 与 MoviePy 读取原视频的方式相同（bicubic 缩放器转 RGB），在 RGB 中叠加，
+        # 再与 MoviePy 写出时一样转成 BT.709。
+        graph = [f"[0:v]scale={width}:{height}:flags=bicubic,format=rgb24"]
+        if total_frames > source_frames:
+            # 原视频结束后 MoviePy 的合成画面是黑底（字幕仍可叠在上面）。
+            graph[0] += f",tpad=stop={total_frames - source_frames + 2}:color=black"
+        graph[0] += "[v0]"
+        for index, (_, (x, y), (first, last)) in enumerate(overlays, start=1):
+            graph.append(
+                f"[v{index - 1}][{index}:v]overlay=x={x}:y={y}:format=rgb:"
+                f"enable='between(n,{first},{last})'[v{index}]"
+            )
+        codec = _get_effective_video_codec(_get_configured_video_codec())
+        graph_file = os.path.join(work_dir, "graph.txt")
+
+        audio_args, audio_map = [], []
+        if final_clip.audio is not None:
+            audio_file = os.path.join(work_dir, "audio.m4a")
+            # 与 write_videofile 内部写临时音频的调用相同，音频随后原样封装。
+            final_clip.audio.write_audiofile(
+                audio_file, audio_fps, 4, 2000, audio_codec,
+                bitrate=audio_bitrate, write_logfile=False, logger=None,
+            )
+            audio_args = ["-i", audio_file]
+            audio_map = ["-map", f"{len(overlays) + 1}:a", "-c:a", "copy"]
+
+        descriptor, staged_output = tempfile.mkstemp(
+            prefix=f".{os.path.basename(output_file)}.",
+            suffix=os.path.splitext(output_file)[1] or ".mp4",
+            dir=os.path.dirname(os.path.abspath(output_file)),
+        )
+        os.close(descriptor)
+
+        def build_command(selected_codec: str) -> list[str]:
+            last = f"[v{len(overlays)}]{_BT709_VIDEO_FILTER}"
+            if selected_codec in ("libx264", "h264_nvenc") and width % 2 == 0 and height % 2 == 0:
+                last += ",format=yuv420p"
+            with open(graph_file, "w", encoding="utf-8") as script:
+                script.write(";\n".join([*graph, f"{last}[out]"]))
+            return [
+                utils.get_ffmpeg_binary(), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-i", os.path.abspath(video_path), *inputs, *audio_args,
+                "-filter_complex_script", "graph.txt",
+                "-map", "[out]", *audio_map,
+                "-c:v", selected_codec, "-preset", "medium",
+                *(["-threads", str(params.n_threads)] if params.n_threads else []),
+                "-frames:v", str(total_frames),
+                staged_output,
+            ]
+
+        try:
+            try:
+                _run_ffmpeg_final_command(build_command(codec), work_dir)
+            except Exception as exc:
+                if codec == _DEFAULT_VIDEO_CODEC:
+                    raise
+                _run_ffmpeg_final_command(build_command(_DEFAULT_VIDEO_CODEC), work_dir)
+                _disable_runtime_video_codec(codec, str(exc))
+            if os.path.getsize(staged_output) == 0:
+                raise RuntimeError("ffmpeg final render produced no output")
+            os.replace(staged_output, output_file)
+        finally:
+            delete_files(staged_output)
 
 
 def _escape_ffmpeg_concat_path(file_path: str) -> str:
@@ -2067,6 +2319,16 @@ def generate_video(
         # 显式沿用输入音频的采样率；如果取不到，再回退 MoviePy 默认的 44100Hz。
         # 这样可以减少不同环境，尤其 Docker 中再次重采样带来的音质波动。
         output_audio_fps = int(getattr(audio_clip, "fps", 0) or 44100)
+        if _render_final_video_with_ffmpeg(
+            final_video_clip,
+            source_video_clip,
+            video_path,
+            output_file,
+            params,
+            output_audio_fps,
+            output_dir,
+        ):
+            return bgm_mix_succeeded
         with _stage_heartbeat("final video render"):
             _write_videofile_with_codec_fallback(
                 final_video_clip,
