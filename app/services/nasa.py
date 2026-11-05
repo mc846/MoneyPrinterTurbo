@@ -193,6 +193,14 @@ FACE_DETECT_WIDTH = 720
 FACE_SCORE_THRESHOLD = 0.75
 FACE_NMS_THRESHOLD = 0.3
 FACE_MIN_SIZE = 24
+# 被裁剪边缘切掉一部分的脸在裁剪图上常常检测不到。裁剪图没有检出人脸时，再在原图上
+# 以同样的比例检测裁剪区域及其两侧（各 FACE_EDGE_MARGIN 个裁剪宽度），至少 15% 落在
+# 裁剪区域内、置信度不低于 0.85 的脸也算。实测（138 张可辨认人物照片、379 张天文图片）：
+# 裁剪图单独检测 100 张检出；加上这一步 107 张，天文误报仍为 0。置信度 0.75 时一张黑洞
+# 示意图的辉光误报；落入比例 20% 时会漏掉 Rocket Lab 照片里只露出约 20% 的半张脸。
+FACE_EDGE_SCORE_THRESHOLD = 0.85
+FACE_EDGE_MIN_INSIDE = 0.15
+FACE_EDGE_MARGIN = 0.5
 
 # ---------------------------------------------------------------- 相关度
 # NASA 的关键词很不统一：有时整条标题就是一个关键词，还常带机构和地点名称。
@@ -849,6 +857,7 @@ def prepare_image(
 _face_lock = threading.Lock()
 _face_detector_state: dict[str, Any] = {}
 _face_counts: dict[tuple[str, float, int], int] = {}
+_edge_face_counts: dict[tuple[str, float, int, str], int] = {}
 
 
 def face_filter_enabled() -> bool:
@@ -929,25 +938,85 @@ def count_faces(image_path: str) -> int | None:
         return None
 
 
+def count_edge_faces(image_path: str, video_aspect: VideoAspect) -> int | None:
+    """
+    在原图上找被裁剪边缘切掉一部分的脸，返回人脸数；检测器不可用或读取失败时返回 None。
+
+    检测区域是居中裁剪区域向四周各扩 FACE_EDGE_MARGIN 个裁剪宽度（不超出原图），按与
+    count_faces 相同的比例（裁剪宽度缩到 FACE_DETECT_WIDTH）缩小。只计置信度不低于
+    FACE_EDGE_SCORE_THRESHOLD、至少 FACE_EDGE_MIN_INSIDE 落在裁剪区域内的脸；完全在
+    裁剪区域外的脸不会出现在视频里，不计。
+    """
+    loaded = _face_detector()
+    if loaded is None:
+        return None
+    numpy, detector = loaded
+    try:
+        aspect = VideoAspect(video_aspect)
+        stat = os.stat(image_path)
+        key = (os.path.abspath(image_path), stat.st_mtime, stat.st_size, aspect.value)
+        if key in _edge_face_counts:
+            return _edge_face_counts[key]
+        with Image.open(image_path) as image:
+            width, height = image.size
+            crop_width, crop_height = _center_crop_size(width, height, aspect)
+            crop_left, crop_top = (width - crop_width) // 2, (height - crop_height) // 2
+            margin = round(crop_width * FACE_EDGE_MARGIN)
+            window = (max(0, crop_left - margin), max(0, crop_top - margin),
+                      min(width, crop_left + crop_width + margin), min(height, crop_top + crop_height + margin))
+            scale = FACE_DETECT_WIDTH / crop_width
+            if scale < 1 and image.format == "JPEG":
+                image.draft("RGB", (math.ceil(width * scale), math.ceil(height * scale)))
+            ratio = image.width / width
+            region = image.convert("RGB").crop(tuple(round(value * ratio) for value in window))
+            size = (max(1, round((window[2] - window[0]) * scale)), max(1, round((window[3] - window[1]) * scale)))
+            region = region.resize(size, Image.LANCZOS)
+            bgr = numpy.ascontiguousarray(numpy.asarray(region)[:, :, ::-1])
+        with _face_lock:
+            detector.setInputSize((bgr.shape[1], bgr.shape[0]))
+            _, faces = detector.detect(bgr)
+        x0, y0 = (crop_left - window[0]) * scale, (crop_top - window[1]) * scale
+        x1, y1 = x0 + crop_width * scale, y0 + crop_height * scale
+        count = 0
+        for face in faces if faces is not None else []:
+            fx, fy, fw, fh = (float(value) for value in face[:4])
+            if face[14] < FACE_EDGE_SCORE_THRESHOLD or min(fw, fh) < FACE_MIN_SIZE:
+                continue
+            inside_width = max(0.0, min(fx + fw, x1) - max(fx, x0))
+            inside_height = max(0.0, min(fy + fh, y1) - max(fy, y0))
+            if inside_width * inside_height >= FACE_EDGE_MIN_INSIDE * fw * fh:
+                count += 1
+        _edge_face_counts[key] = count
+        return count
+    except Exception as exc:
+        logger.warning(f"nasa edge face check failed: error={type(exc).__name__}, detail={exc}")
+        return None
+
+
 def _prepared_image(
     item: MaterialInfo, save_dir: str, video_aspect: VideoAspect, clip_duration: float, image_motion: ImageMotion,
-) -> str:
+) -> tuple[str, str]:
+    """下载并处理图片，返回（原图路径, 处理后的路径）；失败时对应路径为空字符串。"""
     if not save_dir:
         save_dir = utils.storage_dir("cache_videos")
     os.makedirs(save_dir, exist_ok=True)
     image_path = _download_image(item.url, save_dir)
     if not image_path:
-        return ""
-    return prepare_image(image_path, video_aspect, clip_duration, image_motion)
+        return "", ""
+    return image_path, prepare_image(image_path, video_aspect, clip_duration, image_motion)
 
 
-def _shows_face(item: MaterialInfo, prepared_path: str) -> bool:
+def _shows_face(item: MaterialInfo, prepared_path: str, image_path: str = "",
+                video_aspect: VideoAspect | None = None) -> bool:
     if not face_filter_enabled():
         return False
-    faces = count_faces(prepared_path)
+    faces, where = count_faces(prepared_path), "faces"
+    # 裁剪图上没有检出时，再看原图里裁剪边缘被切掉的脸。
+    if not faces and image_path and video_aspect is not None:
+        faces, where = count_edge_faces(image_path, video_aspect), "faces at the crop edge"
     if faces:
         source_info = item.source_info if isinstance(item.source_info, dict) else {}
-        logger.info(f"nasa face filter: skipped {source_info.get('asset_id') or item.url}, faces={faces}")
+        logger.info(f"nasa face filter: skipped {source_info.get('asset_id') or item.url}, {where}={faces}")
         return True
     return False
 
@@ -966,8 +1035,8 @@ def screen_image(
     按文案顺序匹配时先用它筛选，被拒绝的图片换成同一关键词的下一个候选；
     下载和处理结果会被随后的 save_image_clip 复用。
     """
-    prepared_path = _prepared_image(item, save_dir, video_aspect, clip_duration, image_motion)
-    return bool(prepared_path) and not _shows_face(item, prepared_path)
+    image_path, prepared_path = _prepared_image(item, save_dir, video_aspect, clip_duration, image_motion)
+    return bool(prepared_path) and not _shows_face(item, prepared_path, image_path, video_aspect)
 
 
 def save_image_clip(
@@ -980,8 +1049,8 @@ def save_image_clip(
 ) -> str:
     """下载 NASA 图片，裁剪缩小并检查人脸后渲染成片段，返回片段路径；失败或有人脸时返回空字符串。"""
     generation_progress.downloading()
-    prepared_path = _prepared_image(item, save_dir, video_aspect, clip_duration, image_motion)
-    if not prepared_path or _shows_face(item, prepared_path):
+    image_path, prepared_path = _prepared_image(item, save_dir, video_aspect, clip_duration, image_motion)
+    if not prepared_path or _shows_face(item, prepared_path, image_path, video_aspect):
         return ""
     try:
         return video.render_image_zoom_video(prepared_path, int(math.ceil(clip_duration)), image_motion=image_motion)
