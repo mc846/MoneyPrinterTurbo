@@ -29,11 +29,19 @@ _VIDEO_CACHE_TEMP_FILE_PATTERN = re.compile(
 _GENERATED_CACHE_FILE_PATTERNS = (
     re.compile(r"^[0-9a-f]{64}\.(?:zoom|static)-[0-9a-f]{16}\.mp4$"),
     re.compile(r"^[0-9a-f]{64}\.sanitized\.png$"),
+    # NASA 图片（原图和 ~small 预览图按地址的 MD5 命名）、按目标比例处理后的图片，
+    # 以及预览图的文字检查结果。
+    re.compile(r"^nasa-[0-9a-f]{32}\.[a-z0-9]{1,5}$"),
+    re.compile(r"^nasa-[0-9a-f]{32}-(?:portrait|landscape|square)-\d+x\d+\.jpg$"),
+    re.compile(r"^nasa-text-[0-9a-f]{64}\.json$"),
 )
 # 上面这些文件发布前的临时文件（tempfile.mkstemp 的随机后缀）。
 _GENERATED_CACHE_TEMP_FILE_PATTERNS = (
     re.compile(r"^\.image-zoom-[a-z0-9_]+\.mp4$"),
     re.compile(r"^\.image-sanitize-[a-z0-9_]+\.png$"),
+    re.compile(r"^\.nasa-[a-z0-9_]+\.[a-z0-9]{1,5}$"),
+    re.compile(r"^\.nasa-text-[a-z0-9_]+\.json$"),
+    re.compile(r"^nasa-[0-9a-f]{32}-(?:portrait|landscape|square)-\d+x\d+\.jpg\.part$"),
 )
 _SECONDS_PER_DAY = 24 * 60 * 60
 
