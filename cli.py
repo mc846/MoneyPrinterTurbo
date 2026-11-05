@@ -498,6 +498,17 @@ Batch manifests:
         default=None,
         help="FFmpeg worker thread count, at least 1 (default: 2)",
     )
+    video_group.add_argument(
+        "--final-render-engine",
+        choices=("moviepy", "ffmpeg"),
+        default=None,
+        help=(
+            "how the final video is composed: moviepy draws every frame in Python, ffmpeg "
+            "overlays the subtitles as images and falls back to moviepy for unsupported "
+            "content or errors; for this run only, overrides [app].final_render_engine in "
+            "memory and never writes config.toml (default: the config.toml value)"
+        ),
+    )
 
     audio_group = parser.add_argument_group("voiceover and background music")
     audio_group.add_argument(
@@ -1669,6 +1680,15 @@ def _prepare_cli_materials(
         material.url = prepared_path
 
 
+def apply_render_overrides(args: argparse.Namespace) -> None:
+    """--final-render-engine 只改本进程的 config.app，不写回 config.toml。"""
+    if getattr(args, "final_render_engine", None) is None:
+        return
+    from app.config import config
+
+    config.app["final_render_engine"] = args.final_render_engine
+
+
 def prepare_cli_files(params: VideoParams, stop_at: str) -> None:
     """Validate and prepare files for one trusted local CLI task."""
     local_videos_dir, resolved_materials = _validate_cli_files(params, stop_at)
@@ -1765,6 +1785,7 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     import app.config  # noqa: F401 -- 初始化配置及进程日志设置。
     from app.utils.logging_utils import configure_terminal_logger, get_logging_options
+    apply_render_overrides(args)
 
     # 配置模块默认把终端日志发往 stdout。CLI 的 stdout 是机器可读 JSON，
     # 必须在素材预处理等步骤开始前切到 stderr，帮助和参数错误仍保持延迟导入。
