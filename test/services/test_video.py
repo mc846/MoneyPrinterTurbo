@@ -638,8 +638,11 @@ class TestVideoService(unittest.TestCase):
                 patch.object(vd, "CompositeVideoClip", FakeCompositeClip),
             ):
                 output = vd.render_image_zoom_video(image_path, clip_duration=5)
+                # The complete clip is reused; only a new duration renders again.
+                self.assertEqual(vd.render_image_zoom_video(image_path, clip_duration=5), output)
+                self.assertEqual(writes, 1)
                 with self.assertRaisesRegex(RuntimeError, "render interrupted"):
-                    vd.render_image_zoom_video(image_path, clip_duration=5)
+                    vd.render_image_zoom_video(image_path, clip_duration=6)
 
             self.assertEqual(Path(output).read_bytes(), b"complete")
             self.assertEqual(

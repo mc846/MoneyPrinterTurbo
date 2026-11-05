@@ -2,6 +2,7 @@ import itertools
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 import io
+import json
 import math
 import os
 import random
@@ -24,6 +25,7 @@ from moviepy import (
     CompositeVideoClip,
     ImageClip,
     TextClip,
+    VideoClip,
     VideoFileClip,
     afx,
 )
@@ -127,6 +129,18 @@ _BT709_VIDEO_FILTER = (
     "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"
 )
 _BT709_FFMPEG_PARAMS = ["-vf", _BT709_VIDEO_FILTER]
+# 图片片段按“源图像素 + 渲染参数”命名，已发布的片段在后续任务里直接复用。
+# 渲染方式、编码参数或命名规则改变时把版本号加一，旧版本的片段不再被复用。
+_IMAGE_CLIP_RENDER_VERSION = 2
+# 放大模式每秒放大 3%。
+_IMAGE_ZOOM_RATE_PER_SECOND = 0.03
+_IMAGE_CLIP_FPS = 30
+# 即 MoviePy 写 .mp4 时的默认编码设置；显式写出，让命名和实际编码使用同一份参数。
+_IMAGE_CLIP_ENCODING = {
+    "codec": "libx264",
+    "preset": "medium",
+    "ffmpeg_params": _BT709_FFMPEG_PARAMS,
+}
 
 
 def _get_subtitle_spring_scale(time_seconds: float, duration_seconds: float) -> float:
@@ -2072,8 +2086,140 @@ def generate_video(
         return bgm_mix_succeeded
 
 
+def _image_zoom_factor(time_seconds: float, motion: ImageMotion) -> float:
+    """图片片段在指定时间点相对第一帧的放大倍数。"""
+    if motion != ImageMotion.zoom:
+        return 1.0
+    return 1 + _IMAGE_ZOOM_RATE_PER_SECOND * time_seconds
+
+
+def _image_clip_settings_identity(
+    clip_duration, motion: ImageMotion, output_size, fit_mode: VideoFitMode
+) -> str:
+    """把影响片段内容的全部渲染参数归一成文件名里的 16 位摘要。"""
+    settings = {
+        "version": _IMAGE_CLIP_RENDER_VERSION,
+        "duration": clip_duration,
+        "motion": motion.value,
+        "zoom_rate": _IMAGE_ZOOM_RATE_PER_SECOND,
+        "output_size": list(output_size) if output_size else None,
+        "fit_mode": VideoFitMode(fit_mode).value if output_size else None,
+        "fps": _IMAGE_CLIP_FPS,
+        "encoding": _IMAGE_CLIP_ENCODING,
+    }
+    encoded = json.dumps(settings, sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def _rendered_clip_exists(video_file: str) -> bool:
+    # 片段只通过 os.replace 整体发布，存在且非空即为完整文件；
+    # 写到一半的临时文件使用 .image-zoom- 前缀，不会被当作已渲染片段。
+    try:
+        return os.path.getsize(video_file) > 0
+    except OSError:
+        return False
+
+
+def _target_size_layout(
+    source_width: int,
+    source_height: int,
+    target_width: int,
+    target_height: int,
+    fit_mode: VideoFitMode,
+) -> tuple[tuple[float, float, float, float], tuple[int, int]]:
+    """
+    返回直接按成片尺寸渲染时参与缩放的源图区域 (left, top, width, height)
+    和它在画面中的尺寸。
+
+    与先按原尺寸渲染、再由 _fit_clip_to_canvas 适配画布的结果一致：cover 取与
+    成片同比例的居中区域铺满画面；contain 保留整张图片，按比例缩小后居中放在
+    黑色画布上（尺寸取整方式与 _fit_clip_to_canvas 相同）。
+    """
+    if (
+        VideoFitMode(fit_mode) == VideoFitMode.contain
+        and source_width * target_height != source_height * target_width
+    ):
+        scale = min(target_width / source_width, target_height / source_height)
+        band = (
+            max(1, min(target_width, int(source_width * scale))),
+            max(1, min(target_height, int(source_height * scale))),
+        )
+        return (0.0, 0.0, float(source_width), float(source_height)), band
+    if source_width * target_height > source_height * target_width:
+        region_width = source_height * target_width / target_height
+        region_height = float(source_height)
+    else:
+        region_width = float(source_width)
+        region_height = source_width * target_height / target_width
+    region = (
+        (source_width - region_width) / 2,
+        (source_height - region_height) / 2,
+        region_width,
+        region_height,
+    )
+    return region, (target_width, target_height)
+
+
+def _target_size_image_clip(
+    source_frame,
+    source_mask,
+    clip_duration,
+    motion: ImageMotion,
+    output_size,
+    fit_mode: VideoFitMode,
+):
+    """
+    按成片尺寸生成图片片段：每一帧从源图取当前放大倍数下的居中区域，一次缩放到
+    输出尺寸。放大所需的余量来自源图，输出画面不再先放大、再在合成阶段缩小。
+    """
+    target_width, target_height = output_size
+    pixels = source_frame
+    if source_mask is not None:
+        # 与 CompositeVideoClip 在黑色背景上合成透明像素的结果一致。
+        pixels = pixels * source_mask[..., np.newaxis]
+    source = Image.fromarray(np.asarray(pixels).astype("uint8")).convert("RGB")
+    region, band = _target_size_layout(
+        source.width, source.height, target_width, target_height, fit_mode
+    )
+    left, top, region_width, region_height = region
+    max_zoom = _image_zoom_factor(clip_duration, motion)
+    needed = (math.ceil(band[0] * max_zoom), math.ceil(band[1] * max_zoom))
+    if region_width > needed[0] and region_height > needed[1]:
+        # 源图远大于成片时先整体缩小一次，逐帧只处理放大到最大倍数时需要的像素。
+        source = source.resize(
+            needed,
+            Image.LANCZOS,
+            box=(left, top, left + region_width, top + region_height),
+        )
+        left, top = 0.0, 0.0
+        region_width, region_height = float(needed[0]), float(needed[1])
+    offset = ((target_width - band[0]) // 2, (target_height - band[1]) // 2)
+
+    def frame_at(time_seconds):
+        zoom = _image_zoom_factor(time_seconds, motion)
+        width, height = region_width / zoom, region_height / zoom
+        x = left + (region_width - width) / 2
+        y = top + (region_height - height) / 2
+        frame = source.resize(
+            band, Image.LANCZOS, box=(x, y, x + width, y + height)
+        )
+        if band != (target_width, target_height):
+            canvas = Image.new("RGB", (target_width, target_height))
+            canvas.paste(frame, offset)
+            frame = canvas
+        return np.asarray(frame)
+
+    if motion != ImageMotion.zoom:
+        return ImageClip(frame_at(0)).with_duration(clip_duration)
+    return VideoClip(frame_function=frame_at, duration=clip_duration)
+
+
 def render_image_zoom_video(
-    image_path: str, clip_duration: int = 5, image_motion: ImageMotion = ImageMotion.zoom
+    image_path: str,
+    clip_duration: int = 5,
+    image_motion: ImageMotion = ImageMotion.zoom,
+    output_size: tuple[int, int] | None = None,
+    fit_mode: VideoFitMode = VideoFitMode.cover,
 ) -> str:
     """
     将单张图片渲染为静止或缓慢放大的 mp4 片段，返回输出文件路径。
@@ -2081,38 +2227,55 @@ def render_image_zoom_video(
     local 素材预处理和 OpenAI 兼容文生图素材共用这段"图片 → 片段"渲染
     逻辑：默认保留每秒约 3% 的动态放大，静止模式只固定播放时长。
     此设置与片段转场独立。渲染异常由调用方按各自素材源的失败约定处理。
+
+    output_size 为空时按图片原尺寸渲染，由 combine_videos 适配画布；给出成片
+    尺寸时直接渲染成该尺寸，fit_mode 与 combine_videos 的画面适配方式相同。
+    片段与源图放在同一目录，文件名由源图像素和全部渲染参数决定；同名片段
+    已经存在时直接复用，不再重新编码。
     """
     motion = ImageMotion(image_motion)
     clip, _ = _open_image_clip_with_fallback(image_path)
     clip = clip.with_duration(clip_duration).with_position("center")
     temp_path = ""
     try:
-        # 只有放大模式改变画面尺寸，静止模式保留原始构图及透明背景处理。
-        image_clip = (
-            clip.resized(lambda t: 1 + (clip_duration * 0.03) * (t / clip.duration))
-            if motion == ImageMotion.zoom
-            else clip
+        # The identity covers the decoded pixels that are actually rendered, so
+        # an image replaced while another task renders it gets a new name.
+        source_digest = hashlib.sha256(os.fsencode(os.path.abspath(image_path)))
+        source_frame = clip.get_frame(0)
+        source_mask = clip.mask.get_frame(0) if clip.mask is not None else None
+        source_digest.update(str(source_frame.shape).encode())
+        source_digest.update(source_frame.tobytes())
+        if source_mask is not None:
+            source_digest.update(source_mask.tobytes())
+        settings_identity = _image_clip_settings_identity(
+            clip_duration, motion, output_size, fit_mode
         )
+        video_file = os.path.join(
+            os.path.dirname(image_path),
+            f"{source_digest.hexdigest()}.{motion.value}-{settings_identity}.mp4",
+        )
+        if _rendered_clip_exists(video_file):
+            logger.info(f"image clip already exists: {video_file}")
+            return video_file
 
-        # Optionally, create a composite video clip containing the zoomed clip.
-        # This is useful if you want to add other elements to the video.
-        final_clip = CompositeVideoClip([image_clip], bg_color=(0, 0, 0))
-        try:
-            # The duration changes the rendered content, so it must be part of
-            # the output identity. Different tasks may render the same image
-            # concurrently; only publish a complete MP4 after MoviePy closes it.
-            source_digest = hashlib.sha256(os.fsencode(os.path.abspath(image_path)))
-            source_frame = clip.get_frame(0)
-            source_digest.update(str(source_frame.shape).encode())
-            source_digest.update(source_frame.tobytes())
-            if clip.mask is not None:
-                source_digest.update(clip.mask.get_frame(0).tobytes())
-            source_identity = source_digest.hexdigest()
-            duration_identity = hashlib.sha256(str(clip_duration).encode()).hexdigest()[:16]
-            video_file = os.path.join(
-                os.path.dirname(image_path),
-                f"{source_identity}.{motion.value}-{duration_identity}.mp4",
+        if output_size:
+            final_clip = _target_size_image_clip(
+                source_frame, source_mask, clip_duration, motion, output_size, fit_mode
             )
+        else:
+            # 只有放大模式改变画面尺寸，静止模式保留原始构图及透明背景处理。
+            image_clip = (
+                clip.resized(
+                    lambda t: 1
+                    + (clip_duration * _IMAGE_ZOOM_RATE_PER_SECOND) * (t / clip.duration)
+                )
+                if motion == ImageMotion.zoom
+                else clip
+            )
+            final_clip = CompositeVideoClip([image_clip], bg_color=(0, 0, 0))
+        try:
+            # Different tasks may render the same image concurrently; only
+            # publish a complete MP4 after MoviePy closes it.
             descriptor, temp_path = tempfile.mkstemp(
                 prefix=".image-zoom-",
                 suffix=".mp4",
@@ -2120,11 +2283,18 @@ def render_image_zoom_video(
             )
             os.close(descriptor)
             final_clip.write_videofile(
-                temp_path, fps=30, logger=None, ffmpeg_params=_BT709_FFMPEG_PARAMS
+                temp_path, fps=_IMAGE_CLIP_FPS, logger=None, **_IMAGE_CLIP_ENCODING
             )
         finally:
             close_clip(final_clip)
-        os.replace(temp_path, video_file)
+        try:
+            os.replace(temp_path, video_file)
+        except PermissionError:
+            # Windows 不能替换正被读取的文件。另一个任务刚发布了同名片段时
+            # 内容相同，直接复用；临时文件由 finally 删除。
+            if not _rendered_clip_exists(video_file):
+                raise
+            return video_file
         temp_path = ""
         return video_file
     finally:
@@ -2134,7 +2304,11 @@ def render_image_zoom_video(
 
 
 def preprocess_video(
-    materials: List[MaterialInfo], clip_duration=4, image_motion: ImageMotion = ImageMotion.zoom
+    materials: List[MaterialInfo],
+    clip_duration=4,
+    image_motion: ImageMotion = ImageMotion.zoom,
+    video_aspect: VideoAspect | None = None,
+    video_fit_mode: VideoFitMode = VideoFitMode.cover,
 ):
     # WebUI 在某些二次生成场景下可能传入空素材列表，这里直接返回空结果，避免抛出 NoneType 异常。
     if not materials:
@@ -2204,8 +2378,21 @@ def preprocess_video(
                 # 探测尺寸时已经打开过一次素材，这里先释放探测句柄，再渲染
                 # 用于导出的图片片段。
                 close_clip(clip)
+                # 给出成片比例时直接渲染成成片尺寸，合成阶段不再缩放这一片段；
+                # 画面适配方式与 combine_videos 对本地素材使用的一致。
+                target_options = (
+                    {
+                        "output_size": VideoAspect(video_aspect).to_resolution(),
+                        "fit_mode": VideoFitMode(video_fit_mode),
+                    }
+                    if video_aspect
+                    else {}
+                )
                 video_file = render_image_zoom_video(
-                    material_source_path, clip_duration, image_motion=image_motion
+                    material_source_path,
+                    clip_duration,
+                    image_motion=image_motion,
+                    **target_options,
                 )
                 material.url = video_file
                 logger.success(f"image processed: {video_file}")

@@ -781,6 +781,8 @@ def get_video_materials(
             materials=params.video_materials,
             clip_duration=params.video_clip_duration,
             image_motion=params.image_motion,
+            video_aspect=params.video_aspect,
+            video_fit_mode=params.video_fit_mode,
         )
         if not materials:
             _mark_task_failed(
