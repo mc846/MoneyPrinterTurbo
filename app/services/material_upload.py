@@ -1,12 +1,17 @@
+import json
+import math
 import os
+import shutil
 import subprocess
 import tempfile
 import warnings
+from functools import lru_cache
 from pathlib import Path
 from typing import BinaryIO, Literal
 from uuid import uuid4
 
 from loguru import logger
+from moviepy.video.io.ffmpeg_reader import ffmpeg_parse_infos
 from PIL import Image, UnidentifiedImageError
 
 from app.utils import utils
@@ -227,6 +232,58 @@ def _validate_video(
         raise MaterialUploadError(
             "uploaded file must contain a completely decodable video stream"
         )
+
+
+@lru_cache(maxsize=4)
+def _ffprobe_binary(ffmpeg_binary: str) -> str:
+    """Return the ffprobe next to the configured FFmpeg, else the one on PATH, else ""."""
+    directory, name = os.path.split(ffmpeg_binary)
+    index = name.lower().find("ffmpeg")
+    if index >= 0:
+        sibling = os.path.join(directory, f"{name[:index]}ffprobe{name[index + 6:]}")
+        if os.path.isfile(sibling):
+            return sibling
+    return shutil.which("ffprobe") or ""
+
+
+def _frame_rate(value) -> float:
+    """Parse an ffprobe rate such as "30000/1001"; "0/0" and missing values are 0."""
+    try:
+        numerator, _, denominator = str(value or "").partition("/")
+        rate = float(numerator) / float(denominator or 1)
+    except (ValueError, ZeroDivisionError):
+        return 0.0
+    return rate if math.isfinite(rate) else 0.0
+
+
+def _probe_video_metadata(video_path: str) -> tuple[float, float]:
+    """
+    Return the duration and frame rate of the first video stream without decoding it.
+
+    ffprobe is used when it is available. imageio-ffmpeg ships only ffmpeg, so the
+    fallback is MoviePy's ffmpeg_parse_infos: the parser VideoFileClip reads its
+    duration and fps from, without the frame reader VideoFileClip also starts.
+    Failures raise; callers decide what an unavailable probe means.
+    """
+    ffprobe = _ffprobe_binary(utils.get_ffmpeg_binary())
+    if ffprobe:
+        result = subprocess.run(
+            [
+                ffprobe, "-v", "error", "-select_streams", "V:0",
+                "-show_entries", "stream=avg_frame_rate,r_frame_rate,duration:format=duration",
+                "-of", "json", video_path,
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=MATERIAL_VALIDATION_TIMEOUT_SECONDS, check=True,
+        )
+        data = json.loads(result.stdout or "{}")
+        stream = (data.get("streams") or [{}])[0]
+        fps = _frame_rate(stream.get("avg_frame_rate")) or _frame_rate(stream.get("r_frame_rate"))
+        duration = stream.get("duration") or (data.get("format") or {}).get("duration")
+        return float(duration or 0), fps
+    infos = ffmpeg_parse_infos(video_path)
+    # The same defaults as MoviePy's FFMPEG_VideoReader.
+    return float(infos.get("video_duration", 0.0)), float(infos.get("video_fps", 1.0))
 
 
 def _stage_material_upload(
