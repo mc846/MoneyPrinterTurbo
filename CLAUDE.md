@@ -156,7 +156,7 @@ mpt batch .\konular.csv --preset presets\uzay.toml                            # 
 - `video.mp4`: görevin `final-1.mp4`'üne sabit bağlantı (başka sürücüdeyse kopya).
 - `paylasim.md`:
   - İçerik: YouTube Shorts (başlık ≤100 karakter, açıklama, 3 etiket), TikTok (açıklama + 5 hashtag) ve Instagram Reels (açıklama + 8 hashtag). Açıklamalar, hashtag ve kredi satırları dahil 2200 karakteri aşmaz.
-  - Yeni bir Türkçe istemle üretilir (`batch_package.SOCIAL_PROMPT`, aynı LLM yolu: `llm._generate_response`). `auto_upload`'un `llm.generate_social_metadata`'sı kullanılmadı: tek başlık + açıklama + hashtag üretiyor, platform ayrımı yok.
+  - Yeni bir Türkçe istemle, üç platform tek çağrıda üretilir (`batch_package.SOCIAL_PROMPT`, aynı LLM yolu: `llm._generate_response`; temizlik `llm._clamp_text` ve `llm._normalize_hashtags` ile, sınırlar `llm.SOCIAL_PLATFORMS`'taki değerlerle aynı). `auto_upload`'un kullandığı `llm.generate_social_metadata` (`build_social_metadata_prompt`) yeniden kullanılmadı. Platform başına ayrı çağrı istiyor; `auto_upload` onu tek platform için çağırıp aynı metni bütün platformlara gönderiyor. İstemi "catchy hook" ve "call to action" istiyor; bilgiyi kuruma atfetme ve onay ima etme yasağı içinde yok.
   - Kredi satırlarını kod ekler: NASA görseli kullanıldıysa "Görüntüler: NASA ve ortakları (images.nasa.gov)" (`nasa.social_attribution`), Pixabay klibi kullanıldıysa "Ek görüntüler: Pixabay (pixabay.com)".
   - İstem bilgiyi kuruma atfetmeyi ve onay imasını yasaklar. Yanıtta "NASA'ya göre", "NASA açıkladı", "NASA sunar" gibi bir ifade varsa metin bir kez yeniden istenir. LLM yine sonuç vermezse konudan ve metnin ilk cümlesinden yedek metin yazılır ve "elle düzenleyin" notu eklenir.
 - `kapak.jpg` (1080×1920, altyazısız):
