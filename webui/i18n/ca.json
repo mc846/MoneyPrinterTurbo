@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "Falta el fitxer d'entrada: {path}",
     "batch.resume.missing_preset": "Falta el fitxer de plantilla: {path}",
     "batch.resume.changed_input": "El fitxer d'entrada ha canviat després d'iniciar el lot: {path}",
-    "batch.resume.changed_preset": "La plantilla ha canviat després d'iniciar el lot: {path}"
+    "batch.resume.changed_preset": "La plantilla ha canviat després d'iniciar el lot: {path}",
+    "batch.error.exited": "El procés del lot ha acabat abans d'hora: {line}"
   }
 }

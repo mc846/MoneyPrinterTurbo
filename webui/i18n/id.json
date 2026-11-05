@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "Berkas masukan tidak ada: {path}",
     "batch.resume.missing_preset": "Berkas preset tidak ada: {path}",
     "batch.resume.changed_input": "Berkas masukan berubah setelah batch dimulai: {path}",
-    "batch.resume.changed_preset": "Preset berubah setelah batch dimulai: {path}"
+    "batch.resume.changed_preset": "Preset berubah setelah batch dimulai: {path}",
+    "batch.error.exited": "Proses batch berakhir lebih awal: {line}"
   }
 }

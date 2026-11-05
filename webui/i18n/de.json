@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "Die Eingabedatei fehlt: {path}",
     "batch.resume.missing_preset": "Die Vorlagendatei fehlt: {path}",
     "batch.resume.changed_input": "Die Eingabedatei wurde nach dem Start geändert: {path}",
-    "batch.resume.changed_preset": "Die Vorlage wurde nach dem Start geändert: {path}"
+    "batch.resume.changed_preset": "Die Vorlage wurde nach dem Start geändert: {path}",
+    "batch.error.exited": "Der Stapelprozess wurde vorzeitig beendet: {line}"
   }
 }

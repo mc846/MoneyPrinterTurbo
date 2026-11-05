@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "Le fichier d'entrée est introuvable : {path}",
     "batch.resume.missing_preset": "Le fichier de préréglage est introuvable : {path}",
     "batch.resume.changed_input": "Le fichier d'entrée a changé après le lancement du lot : {path}",
-    "batch.resume.changed_preset": "Le préréglage a changé après le lancement du lot : {path}"
+    "batch.resume.changed_preset": "Le préréglage a changé après le lancement du lot : {path}",
+    "batch.error.exited": "Le processus du lot s'est arrêté prématurément : {line}"
   }
 }

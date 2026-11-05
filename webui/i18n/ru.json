@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "Нет входного файла: {path}",
     "batch.resume.missing_preset": "Нет файла пресета: {path}",
     "batch.resume.changed_input": "Входной файл изменился после запуска пакета: {path}",
-    "batch.resume.changed_preset": "Пресет изменился после запуска пакета: {path}"
+    "batch.resume.changed_preset": "Пресет изменился после запуска пакета: {path}",
+    "batch.error.exited": "Процесс пакета завершился раньше времени: {line}"
   }
 }

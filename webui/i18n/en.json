@@ -880,6 +880,7 @@
     "batch.resume.missing_input": "The input file is missing: {path}",
     "batch.resume.missing_preset": "The preset file is missing: {path}",
     "batch.resume.changed_input": "The input file changed after the batch started: {path}",
-    "batch.resume.changed_preset": "The preset changed after the batch started: {path}"
+    "batch.resume.changed_preset": "The preset changed after the batch started: {path}",
+    "batch.error.exited": "The batch process ended early: {line}"
   }
 }

@@ -156,6 +156,40 @@ def test_batch_process_accepts_the_lock_written_for_it_and_refuses_others(tmp_pa
     assert not br.lock_path().exists()
 
 
+def test_lock_written_for_the_launcher_is_accepted_by_its_interpreter(tmp_path, monkeypatch):
+    """Windows'ta .venv\\Scripts\\python.exe başlatıcıdır: WebUI kilide onun PID'ini yazar."""
+    Processes(monkeypatch, os.getppid(), os.getpid())
+    write_lock(pid=os.getppid())
+    assert br.acquire_lock(tmp_path)["pid"] == os.getppid()
+    br.release_lock()
+    assert not br.lock_path().exists()
+
+
+def test_real_child_process_accepts_the_lock_written_with_its_popen_pid(tmp_path, batches):
+    """WebUI'nin akışı: Popen, kilide Popen PID'i, sonra alt süreçteki batch.py kilidi alır."""
+    go = tmp_path / "go"
+    code = (
+        "import json, sys, time\n"
+        "from pathlib import Path\n"
+        "from app.services import batch_production as bp, batch_runner as br\n"
+        f"bp.batches_dir = lambda: Path({str(batches)!r})\n"
+        f"while not Path({str(go)!r}).exists(): time.sleep(0.05)\n"
+        "try:\n"
+        f"    print(json.dumps(br.acquire_lock(Path({str(tmp_path)!r}))))\n"
+        "    br.release_lock()\n"
+        "except br.BatchBusy as exc:\n"
+        "    print('busy', exc)\n"
+    )
+    child = subprocess.Popen([sys.executable, "-c", code], cwd=str(paths.SOURCE_ROOT), stdout=subprocess.PIPE,
+                             text=True, encoding="utf-8", errors="replace",
+                             env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+    write_lock(pid=child.pid, created=br.process_start_time(child.pid))
+    go.write_text("", encoding="utf-8")
+    output, _ = child.communicate(timeout=120)
+    assert json.loads(output.strip().splitlines()[-1])["pid"] == child.pid, output
+    assert not br.lock_path().exists()
+
+
 def test_batch_process_replaces_a_stale_lock(tmp_path, monkeypatch):
     Processes(monkeypatch, 99)
     write_lock(pid=FAKE_PID)

@@ -257,16 +257,31 @@ def _replace_rows(rows: list[dict]) -> None:
     st.session_state["batch_editor_version"] += 1
 
 
+def _last_error_line(batch_dir: Path) -> str:
+    lines = batch_runner.log_tail(batch_dir)
+    errors = [line for line in lines if re.search(r"\| (ERROR|CRITICAL)\s*\|", line)]
+    return short_log_line((errors or lines or [""])[-1])
+
+
+def ended_message(batch_dir: Path, tr) -> tuple[str, str]:
+    """Süreç bitince sonucu klasörden okur: bitti, yarım kaldı ya da hiç başlayamadı (son hata satırıyla)."""
+    try:
+        state = bp.BatchState.load(batch_dir)
+    except (OSError, ValueError, TypeError):
+        return "error", tr("batch.error.exited").format(line=_last_error_line(batch_dir) or batch_dir.name)
+    if state.finished:
+        return "success", tr("batch.finished").format(name=batch_dir.name)
+    return "warning", tr("batch.stop.done")
+
+
 @st.fragment(run_every=REFRESH_SECONDS)
 def _render_running(tr) -> None:
     lock = batch_runner.current_lock()
     if not lock:
-        name = st.session_state.pop("batch_running_name", "")
-        _flash("success", tr("batch.finished").format(name=name))
-        st.rerun(scope="app")
+        st.rerun(scope="app")  # render_batch_page sonucu gösterir
         return
     batch_dir = Path(lock.get("batch_dir") or "")
-    st.session_state["batch_running_name"] = batch_dir.name
+    st.session_state["batch_running_dir"] = str(batch_dir)
     with st.container(border=True):
         st.markdown(f"**{tr('batch.running.header').format(name=batch_dir.name)}**")
         try:
@@ -289,6 +304,7 @@ def _render_running(tr) -> None:
         if st.button(tr("batch.stop"), key="batch_stop", icon=":material/stop_circle:"):
             with st.spinner(tr("batch.stop.stopping")):
                 outcome = batch_runner.stop_batch()
+            st.session_state.pop("batch_running_dir", None)
             if outcome == "terminated":
                 _flash("warning", tr("batch.stop.forced"))
             else:
@@ -384,6 +400,7 @@ def _render_editor(tr, running: bool) -> None:
             logger.exception(f"toplu üretim başlatılamadı: {exc}")
             st.error(tr("batch.error.start").format(error=exc))
             return
+        st.session_state["batch_running_dir"] = str(batch_dir)  # süreç hemen düşerse hata yine görünür
         _flash("success", tr("batch.start.started").format(name=batch_dir.name))
         st.rerun(scope="app")
 
@@ -433,6 +450,7 @@ def _render_history(tr, running: bool) -> None:
                 except batch_runner.BatchBusy as exc:
                     st.error(tr("batch.error.busy").format(name=Path(exc.lock.get("batch_dir") or "").name))
                     continue
+                st.session_state["batch_running_dir"] = str(folder)
                 _flash("success", tr("batch.history.resumed").format(name=folder.name))
                 st.rerun(scope="app")
 
@@ -445,6 +463,10 @@ def render_batch_page(tr) -> None:
     if flash:
         getattr(st, flash[0])(flash[1])
     running = batch_runner.current_lock() is not None
+    previous = None if running else st.session_state.pop("batch_running_dir", None)
+    if previous:  # bu oturumun izlediği toplu iş bitti
+        kind, message = ended_message(Path(previous), tr)
+        getattr(st, kind)(message)
     if running:
         _render_running(tr)
     _render_editor(tr, running)

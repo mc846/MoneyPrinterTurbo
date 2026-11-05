@@ -625,6 +625,7 @@
     "batch.resume.missing_input": "Manca il file di input: {path}",
     "batch.resume.missing_preset": "Manca il file del preset: {path}",
     "batch.resume.changed_input": "Il file di input è cambiato dopo l'avvio della serie: {path}",
-    "batch.resume.changed_preset": "Il preset è cambiato dopo l'avvio della serie: {path}"
+    "batch.resume.changed_preset": "Il preset è cambiato dopo l'avvio della serie: {path}",
+    "batch.error.exited": "Il processo della serie è terminato in anticipo: {line}"
   }
 }

@@ -231,6 +231,52 @@ def test_running_batch_shows_status_progress_log_and_stops(batches, monkeypatch)
     assert not app.button(key="batch_start").disabled
 
 
+def ended_after_running(batches, monkeypatch, prepare):
+    """Önce çalışırken çizilir, sonra kilit kalkar: bölüm sonucu klasörden okur."""
+    folder = batches / "20261105-100000_webui"
+    folder.mkdir()
+    prepare(folder)
+    locks = [{"pid": 1, "batch_dir": str(folder)}]
+    monkeypatch.setattr(br, "current_lock", lambda: locks[0])
+    monkeypatch.setattr(br, "batch_status", lambda directory, lock=None, now=None: running_status(folder))
+    app = page()
+    locks[0] = None
+    return run(app)
+
+
+def test_batch_that_could_not_start_shows_the_last_error_line(batches, monkeypatch):
+    def prepare(folder):
+        (folder / bp.LOG_FILE).write_text(
+            "2026-11-05 20:33:06.746 | INFO     | app.config.config:load_config:571 - load config\n"
+            '2026-11-05 20:33:07 | ERROR | "./app/services/batch_production.py:631": main - başka bir toplu '
+            "üretim çalışıyor\n", encoding="utf-8")
+
+    app = ended_after_running(batches, monkeypatch, prepare)
+    assert messages(app.error) == ["The batch process ended early: 20:33:07 ERROR   başka bir toplu üretim çalışıyor"]
+
+
+@pytest.mark.parametrize("finished, kind, text", [
+    ("2026-11-05T11:00:00", "success", "The batch ended: 20261105-100000_webui"),
+    ("", "warning", "The batch stopped. You can resume it from History."),
+])
+def test_batch_end_is_reported_from_its_state(batches, monkeypatch, finished, kind, text):
+    def prepare(folder):
+        _, state = make_state(folder)
+        state.finished = finished
+        state.save(folder)
+
+    app = ended_after_running(batches, monkeypatch, prepare)
+    assert text in messages(getattr(app, kind))
+
+
+def make_state(folder):
+    source = folder / "konular.csv"
+    source.write_text("konu\nA\n", encoding="utf-8")
+    state = bp.new_state(source, bp.load_preset(ROOT / "presets/uzay.toml"), bp.read_inputs(source))
+    state.save(folder)
+    return source, state
+
+
 def test_forced_stop_is_reported(batches, monkeypatch):
     folder = batches / "x"
     locks = [{"pid": 1, "batch_dir": str(folder)}]
