@@ -8,7 +8,8 @@ MoneyPrinterTurbo, bir konu ya da anahtar kelimeden kendiliğinden kısa video �
 - `main.py`: FastAPI uygulamasını (`app.asgi:app`) uvicorn ile `listen_host:listen_port` adresinde başlatır.
 - `webui/Main.py`: Streamlit WebUI (tek dosya, ~9,5 bin satır). API'yi kullanmaz, görevi aynı süreçte `app/services/webui_task.py` → `task.start` üzerinden çalıştırır. Metinler `tr("key")` ile `webui/i18n/*.json` dosyalarından gelir.
 - `cli.py`: tarayıcısız üretim yolu, `run_cli` → `build_video_params` → `task.start`. `--stop-at` şu aşamalardan biri olabilir: script, terms, audio, subtitle, materials, video. `--batch-file` JSON ya da JSONL alır. `--video-source` verilmezse `[app].video_source` kullanılır, o da yoksa `pexels`.
-- `app/launcher.py`: pip ile kurulan `mpt` komutunun girişi (`mpt webui`, `mpt cli`).
+- `app/launcher.py`: pip ile kurulan `mpt` komutunun girişi (`mpt webui`, `mpt cli`, `mpt batch`).
+- `batch.py`: toplu üretim (kişisel iş akışı; `app/services/batch_production.py` ve `batch_package.py`), bkz. "Toplu üretim" bölümü.
 
 **API katmanı**
 - `app/asgi.py`: uygulama kurulumu, CORS (`CORS_ALLOWED_ORIGINS`), `app.api_key` doğrulaması, görev dosyalarının korunması.
@@ -60,6 +61,7 @@ uv run python main.py                                  # API: http://127.0.0.1:8
 uv run python cli.py --video-subject "Konu"            # CLI ile video
 uv run python cli.py --help
 uv run python cli.py --batch-file .\tasks.json --stop-at video
+uv run python batch.py .\konular.csv --preset presets\uzay.toml   # toplu üretim + yükleme paketleri + rapor.html
 uv run python -X utf8 -m pytest -q test                # bütün testler
 uv run python -X utf8 -m pytest -q test/services/test_video.py::TestVideoService
 $env:MPT_RUN_SLOW_TESTS="1"; uv run python -X utf8 -m pytest -q test/services/test_ffmpeg_final_render.py   # ffmpeg son render'ın tam stil matrisi (~2,5 dk)
@@ -85,13 +87,13 @@ Yerel çalıştırma ve Docker aynı portları kullanır: WebUI 8501, API 8080 (
 ## Test baz durumu
 
 04.11.2026, Windows 11, Python 3.11.18. Redis yok, API anahtarı yok, PATH'te ffmpeg yok. `pytest -q test` 12–23 dakika sürer.
-**3909 geçti, 3 kaldı, 244 atlandı** (05.11, hızlandırma çalışmasının sonunda; ayrıca 13 844 alt test geçti; düzeltmelerin, kırpma, etiket uygunluğu, görsel arama terimi, doğruluk kuralı, eşit aralıklı terim seçimi, NASA kaynağı, noktalama normalleştirmesi, CLI sağlayıcı bayraklarının, yedek kaynağın, yüz kenarı kuralının, metin filtresinin, üretim süresi hızlandırmalarının ve ffmpeg son render'ının 810 yeni testi dahil; atlananlara `MPT_RUN_SLOW_TESTS=1` ile açılan 96 matris testi eklendi). NASA testleri ağa çıkmaz; `test/resources/nasa/` altındaki kayıtlı API yanıtlarını kullanır. Yüz ve metin testleri çizilmiş bir yüz, çizilmiş yazı ve yapay bir yıldız alanı üretir (gerçek kişi fotoğrafı yok); `face` extra'sı kurulu değilse OpenCV isteyen 7'si atlanır. CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
+**3991 geçti, 3 kaldı, 244 atlandı** (05.11, toplu üretimden sonra, `main` a9620a2, 13 dk 27 sn; ayrıca 13 844 alt test geçti; düzeltmelerin, kırpma, etiket uygunluğu, görsel arama terimi, doğruluk kuralı, eşit aralıklı terim seçimi, NASA kaynağı, noktalama normalleştirmesi, CLI sağlayıcı bayraklarının, yedek kaynağın, yüz kenarı kuralının, metin filtresinin, üretim süresi hızlandırmalarının, ffmpeg son render'ının ve toplu üretimin 892 yeni testi dahil; atlananlara `MPT_RUN_SLOW_TESTS=1` ile açılan 96 matris testi eklendi). NASA testleri ağa çıkmaz; `test/resources/nasa/` altındaki kayıtlı API yanıtlarını kullanır. Yüz ve metin testleri çizilmiş bir yüz, çizilmiş yazı ve yapay bir yıldız alanı üretir (gerçek kişi fotoğrafı yok); `face` extra'sı kurulu değilse OpenCV isteyen 7'si atlanır. CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
 
 Kalan 4 testin hiçbiri bir özelliğin bozulduğunu göstermiyor; nedenleri Windows ya da ortam:
 - `test_image_sanitize_identity.py::test_long_source_name_renders_without_exceeding_filesystem_name_limit`: tam yol 260 karakteri aşıyor ve `LongPathsEnabled=0` (MAX_PATH sınırı).
 - `test_material.py::TestMaterialTlsVerification::test_metadata_probe_failure_preserves_existing_cache`: test yolun `\` ile kurulmasını bekliyor, kod `/` kullanıyor.
 - `test_utils_ffmpeg_check.py::TestGetFfmpegBinaryEnvExpansion::test_normalizes_home_path_in_os_environ`: test `HOME`'u değiştiriyor, oysa Windows'ta `expanduser` `USERPROFILE`'ı okur.
-- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 3732–3733 geçti, 3–4 kaldı arasında değişir (04.11'deki iki tam turun birinde kaldı, tek başına geçti).
+- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 3990–3991 geçti, 3–4 kaldı arasında değişir (04.11'deki iki tam turun birinde kaldı, tek başına geçti).
 - `test_webui_startup.py::TestWebuiStartup::test_external_directory_prefers_project_app_package` tam turun yükü altında bazen alt süreç zaman aşımına (60 sn) takılıyor; tek başına 9–14 sn'de geçiyor.
 
 Atlananların dağılımı: 96 ffmpeg son render'ın tam stil matrisi (`MPT_RUN_SLOW_TESTS=1` ile çalışır; varsayılan turda her boyutu kapsayan 12 çekirdek durum çalışıyor), 91 native ffmpeg/ffprobe ister, 38 Redis ister (`MPT_TEST_REDIS_HOST`), 8 Kokoro test sunucusu ister, 7 canlı sağlayıcı ister (`MPT_RUN_INTEGRATION_TESTS=1`), 3 `twelvelabs` extra'sı kurulu olmadığı için, 1 Windows'ta geçersiz bir yol yüzünden atlanıyor.
@@ -115,7 +117,101 @@ Testler `test/conftest.py` fixture'ı sayesinde izole çalışır; gerçek `conf
   - Son adım (05.11) mevcut iki dalın devamı olarak, yeni dal açılmadan: `perf/image-clip-reuse`'a 1bd0f29 (yakınlaştırma klipleri B karesiz, `_IMAGE_CLIP_RENDER_VERSION = 3`), `perf/ffmpeg-concat-normalize`'a 37a002c (video boyutundaki bütün klibi olduğu gibi kullanma). İkisi birbirinden bağımsız; atlama kuralı kazancını B karesiz yakınlaştırma klipleriyle verir.
   - `fix/script-order-even-spread`, `feat/visual-search-terms`'in üzerinde ve içine `fix/script-order-dedup` merge edilmiş. Gerekçe: `_download_videos_by_script_order`'ın gövdesini yalnız dedup dalı değiştirdi; korunması gereken yerel yön ve uygunluk sıralaması ise yığından geliyor. Upstream'de hem yığından hem `fix/script-order-dedup`'tan sonra birleşmeli.
   - `feat/nasa-source`, `fix/script-order-even-spread`'in üzerinde (dolayısıyla bütün yığına ve dedup dalına bağlı). Üçüncü turda içine `feat/script-accuracy-rules` merge edildi (bdf6412): NASA'nın metin kuralı doğruluk kurallarıyla aynı listede numaralanıyor, bu yüzden upstream'de doğruluk kuralları dalından da sonra birleşmeli. Kırpma kuralını, `MATERIAL_TAG_SOURCES` uygunluk sıralamasını ve sıra koruma kipindeki eşit aralığı kullanır. Upstream'de even-spread'den sonra birleşmeli. İkinci commit'i (filtreler ve yüz kontrolü) `pyproject.toml`'a isteğe bağlı `face` extra'sını, `uv.lock`'a yalnız `opencv-python-headless` girdisini (25 satır, elle) ve 227 KB'lık ikili bir model dosyası ekler. Yerel uv 0.13 `uv add`/`uv lock` ile kilidin tamamını yeni biçimde (revision 5, `upload-time`) yeniden yazıyor; bu yüzden kilit elle düzenlendi ve `uv lock --check` ile doğrulandı. Upstream merge'de `uv.lock` çakışırsa çakışmayı çözüp `uv lock --check` çalıştır.
+- `feat/batch-production` (05.11, `main` 03afbb9'dan): toplu üretim. Kişisel iş akışı; upstream'e PR hedeflenmiyor. Commit'ler 4382fb0 (özellik), d85818b (Ctrl+Break), 9cd46d0 (e2e sonrası: süre/kelime uyarı, reçete talimatı); main merge'leri 59821d1, f512d22, a9620a2.
 - **Test kuralı:** `test/conftest.py` içermeyen bir dalda test çalıştırma; önce `ls test/conftest.py` ile bak. Böyle bir dalın değişiklikleri `main`'de olduğu için testleri orada çalıştır. conftest yoksa testler gerçek `config.toml`'u okur ya da bozar ve `storage/tasks`'a yazar.
+
+## Toplu üretim (batch.py)
+
+Kişisel iş akışı (upstream'e PR hedeflenmiyor). Yayınlama yok: her video için elle yüklemeye hazır bir paket ve toplu bir kalite raporu üretir. Kod `app/services/batch_production.py` (girdi, reçete, durum, çalıştırıcı) ve `app/services/batch_package.py` (paket, kalite, rapor); testler `test/services/test_batch_production.py` ve `test_batch_package.py` (sahte görev ve sahte LLM, video üretmez).
+
+```powershell
+uv run python batch.py .\konular.csv --preset presets\uzay.toml              # storage\batches\<tarih-saat>_<girdi>\
+uv run python batch.py .\konular.txt --preset presets\uzay.toml --output D:\paket\uzay
+uv run python batch.py .\konular.csv --preset presets\uzay.toml --yeni       # önceki koşu varken baştan, yeni klasörde
+mpt batch .\konular.csv --preset presets\uzay.toml                            # pip kurulumunda
+```
+
+Çıkış kodu: 0 hepsi bitti, 1 başarısız konu kaldı, 2 girdi ya da reçete hatası, 130 Ctrl+C / Ctrl+Break ile durdu.
+
+**Girdi**
+- `.csv`: sütunlar `konu`, `talimat` (isteğe bağlı; reçetenin talimatının sonuna eklenir), `ses` (isteğe bağlı; reçetedeki sesin yerine geçer). UTF-8 ya da UTF-8-BOM. Ayırıcı (`,` ya da `;`) ilk satırdan anlaşılır. Başlık yoksa sütunlar bu sırayla okunur; bilinmeyen başlık hata verir (`subject`, `instruction`, `voice` da kabul edilir). Boş satırlar, konusu boş satırlar ve `#` ile başlayan satırlar atlanır.
+- `.txt`: satır başına bir konu; boş satırlar ve `#` ile başlayanlar atlanır.
+
+**Reçete** (`presets/*.toml`, örnek `presets/uzay.toml`). Dört bölümü var. Bilinmeyen bölüm, anahtar ya da geçersiz değer üretim başlamadan hata verir; yakın bir ad varsa önerilir.
+- `[video]`: CLI bayraklarının alt çizgili adları (`--video-source-fallback` → `video_source_fallback`); değerler `cli.parse_args`'tan geçer, yani seçenek listeleri ve tipler CLI'daki gibi denetlenir. `true`/`false` → `--x` / `--no-x`; liste virgülle birleşir. Konu başına değişen anahtarlar yasak: `video_subject`, `video_script`, `video_terms`, `video_anchors`, `video_script_prompt`, `task_id`, `batch_file`, `stop_at`, `video_count`, `video_materials`, `custom_audio_file`. Reçetede olmayan ayarlar `config.toml`'dan gelir.
+- `[app]`: yalnız bu süreçte `config.app`'e yazılır, `config.toml` değişmez: `material_concurrency`, `video_clip_concurrency`, `nasa_face_filter`, `video_source_fallback_min_relevance`, `video_source_fallback_min_candidates`, `video_codec`.
+- `[script]`: `prompt` (metin talimatı; yer tutucular `{kelime_min}`, `{kelime_max}`, `{konu}`) ve `target_words = [90, 100]`. Talimat göreve `--video-script-prompt` olarak gider.
+- `[quality]`: `target_duration = [35, 60]` (saniye) ve `audit = true` (doğruluk denetimi).
+- `uzay.toml` uzay reçetesidir: `claude_code`, tr-TR, doğruluk kuralları, NASA + Pixabay yedeği (eşik 0,5 / 1), 9:16 kırpma, `rank`, sıra koruma, `visual` terimler, yapay zeka dışlaması kapalı, atıf katmanı, metin ve yüz filtresi, EmelNeural, STHeitiMedium, kontur 3, klip 5 sn, ffmpeg son render, eşzamanlılık 3. Talimat: en az 90, en çok 100 kelime ("90'ın altına inme"); merak uyandıran açılış; tek bir somut ve gerçek örnek; yalnız konunun adı bir takma adsa (ör. "zombi yıldız") bunu söyle, başka hiçbir şeye takma ad deme. İlk sürüm ("Yaklaşık 90-100 kelime"; "konu bir takma ad ya da benzetme içeriyorsa…") e2e'de 86 ve 88 kelime verdi ve Satürn metnine "halkaların kaybolması aslında bir takma ad" cümlesini soktu. Yeni sürüm 4 konuda 90, 94, 98 ve 103 kelime verdi; takma ad yalnız Zombi'de geçti.
+
+**Çalışma**
+- Konular sırayla, CLI'ın tek görev yoluyla üretilir (`batch_production.run_video_task`: `parse_args` → NASA/render/LLM override'ları → `build_video_params` → `prepare_cli_files` → `task.start`). Her deneme ayrı bir görevdir (`storage/tasks/<uuid>/`).
+- Durum klasördeki `state.json`'da: konu başına `pending`/`running`/`done`/`failed`, deneme ve başarısızlık sayısı, hata ve aşama, süre, kalite özeti.
+- Aynı komut, aynı girdi (içeriğin sha256'sı) ve aynı reçeteyle başlatılmış en son klasörü bulur ve kaldığı yerden sürer: biten konular atlanır, yarıda kalan (`running`) baştan üretilir. Girdi ya da reçete değiştiyse yeni klasör açılır; `--output` başka bir girdinin klasörünü gösterirse hata verir.
+- Başarısız konu günlüğe yazılıp atlanır ve turun sonunda bir kez daha denenir. Aynı komut yeniden verilirse yine denenir.
+- Ctrl+C (Windows'ta Ctrl+Break de) temiz durdurur: o konu `pending`'e döner, `state.json` ve rapor yazılır.
+- Klasördeki `batch.log` bütün çalıştırmaların günlüğüdür. Her konunun görev günlüğü ayrıca belleğe alınır ve teknik kontrollerde kullanılır.
+
+**Çıktı:** `storage/batches/<YYYYMMDD-HHMMSS>_<girdi-slug>/` içinde `state.json`, `batch.log`, `rapor.html` ve her konu için `<sıra>-<konu-slug>/`. Slug'da Türkçe harfler ASCII'ye çevrilir (`02-saturn-un-halkalari-neden-kayboluyor`). Konu klasöründekiler:
+- `video.mp4`: görevin `final-1.mp4`'üne sabit bağlantı (başka sürücüdeyse kopya).
+- `paylasim.md`:
+  - İçerik: YouTube Shorts (başlık ≤100 karakter, açıklama, 3 etiket), TikTok (açıklama + 5 hashtag) ve Instagram Reels (açıklama + 8 hashtag). Açıklamalar, hashtag ve kredi satırları dahil 2200 karakteri aşmaz.
+  - Yeni bir Türkçe istemle üretilir (`batch_package.SOCIAL_PROMPT`, aynı LLM yolu: `llm._generate_response`). `auto_upload`'un `llm.generate_social_metadata`'sı kullanılmadı: tek başlık + açıklama + hashtag üretiyor, platform ayrımı yok.
+  - Kredi satırlarını kod ekler: NASA görseli kullanıldıysa "Görüntüler: NASA ve ortakları (images.nasa.gov)" (`nasa.social_attribution`), Pixabay klibi kullanıldıysa "Ek görüntüler: Pixabay (pixabay.com)".
+  - İstem bilgiyi kuruma atfetmeyi ve onay imasını yasaklar. Yanıtta "NASA'ya göre", "NASA açıkladı", "NASA sunar" gibi bir ifade varsa metin bir kez yeniden istenir. LLM yine sonuç vermezse konudan ve metnin ilk cümlesinden yedek metin yazılır ve "elle düzenleyin" notu eklenir.
+- `kapak.jpg` (1080×1920, altyazısız):
+  - Kullanılan kliplerin kaynak dosyalarından seçilir. Asıl kaynağın (NASA) klipleri önce gelir; yedek kaynak yalnız asıl kaynaktan aday yoksa seçilir, çünkü yedek NASA'nın karşılayamadığı terimlerde devreye girer ve çoğunlukla CGI getirir.
+  - NASA klibinde ilk kare (hazırlanmış 9:16 kırpımın tamamı), video klibinde orta kare 9:16'ya kırpılır.
+  - Puan = log(1 + Laplace varyansı) × parlaklığın standart sapması; ortalama parlaklık 25'in altında ya da 235'in üstündeyse ×0,3.
+  - Kaynak dosya bulunamazsa son videonun orta karesi kullanılır (altyazılı).
+  - Sınır: kural keskin ve kontrastlı kareyi sever, bu yüzden kompozit/grafik NASA görsellerini seçebilir. E2e'de Nötron kapağı PIA05736 oldu (iki panelli Spitzer kompoziti, köşede "IRAC" yazısı). Metin filtresi ~small önizlemede bu yazıyı kaçırdı; `nasa.crop_text_lines` 1080×1920 kapakta da bulmuyor (kısa sözcük), bu yüzden kapağa yazı denetimi eklenmedi. Kapak her kartta göründüğü için yüklemeden önce bakılmalı.
+- `credits.txt` (görevde varsa), `script.txt`, `kareler.jpg` (son videodan 5 kare: süre beşe bölünür, her parçanın ortası; üstte saniye) ve `kalite.json`.
+
+**Kalite** (`kalite.json`, `batch_package.build_package`)
+- Doğruluk denetimi: metni yazan istemden bağımsız, şüpheci bir denetçi (`AUDIT_PROMPT`; talimat İngilizce, gerekçeler Türkçe). İddia başına D (doğru ve kesin), B (basitleştirilmiş, kesin değil ya da doğrulanamıyor; emin değilse B), Y (yanıltıcı), X (yanlış) ve kısa bir gerekçe, JSON olarak. Yanıt okunamazsa bir kez yeniden istenir; yine olmazsa "yapılamadı".
+- Teknik kontroller:
+  - video süresi ve kelime sayısı, reçetenin hedefine göre;
+  - altyazı yazı tipinde glifi olmayan karakterler (`video._subtitle_font_supports_sample`);
+  - NASA ya da izinli ortak dışı kredi (`nasa.free_use_credit`);
+  - görev günlüğünden boş ve yedeğe geçen terimler;
+  - filtre elemeleri: metaveride kişi, yazı, telif, kredi, çözünürlük; önizlemede yazı; yüz.
+- Önbellekten gelen NASA aramaları günlüğe yazılmaz. Bu yüzden elemeler yalnız yeni aramalarda sayılır; önbellekten gelen arama sayısı `onbellekten_gelen_aramalar`'da.
+- **Kontrol gerekli** sayılan durumlar: en az bir Y ya da X; denetim yapılamadı; glifsiz karakter; kredi sorunu; paket hazırlanamadı.
+- **Uyarı** (`uyarilar`; kartta turuncu satır, tek başına kontrol gerektirmez): süre ya da kelime sayısı hedef dışı. LLM kelime sayısını birkaç kelime şaşırıyor; ilk e2e'de bunlar kontrol gerekli sayılınca 3 videonun 2'si yalnız 86 ve 88 kelime yüzünden işaretlendi.
+
+**rapor.html**
+- Tek dosya, çevrimdışı açılır; görseller ve bağlantılar göreli yolla. Her konudan sonra yeniden yazılır.
+- Üstte özet: toplam, başarılı, başarısız, kontrol gerekli, bekleyen, toplam süre (bütün çalıştırmalar).
+- Kartların sırası: başarısız, kontrol gerekli, hazır, bekleyen.
+- Videolu kartta: konu, üretim süresi, deneme, görev kimliği, klasör ve video bağlantısı, kontrol nedenleri, uyarılar, metin, işaretli iddialar ve gerekçeleri, D/B/Y/X sayımı, teknik tablo, kapak, kareler; açılır bölümlerde bütün iddialar ve paylaşım metni.
+- Başarısız kartta hata ve aşama.
+
+**Uçtan uca (05.11, `main` f512d22, `claude_code`, uzay reçetesinin ilk sürümü)**
+- Girdi: 4 satırlık CSV (UTF-8-BOM, `;`): Nötron yıldızları; Satürn'ün halkaları neden kayboluyor? (talimatlı); Zombi yıldızlar; Kara delikler (ses `tr-TR-YokNeural-Female`, bilerek geçersiz).
+- Kesinti ve devam: 2. konu bitip 3. başladıktan 10 sn sonra Ctrl+Break gönderildi. Süreç 2 sn içinde 130 ile çıktı, Zombi `pending`'e döndü. Aynı komut 2 biteni atlayıp Zombi'den sürdü.
+- Hatalı satır: ses aşamasında düştü ("failed to synthesize audio…"), turun sonunda bir kez daha denendi, yine düştü (2 deneme, 44 sn). Raporda en üstte, kırmızı "başarısız" rozeti, hata ve aşamayla göründü. Çıkış kodu 1.
+- Süreler: toplam 741 sn (12 dk 21 sn). Nötron 288 sn, Satürn 238 sn, Zombi 160 sn (kesilen ilk deneme hariç), hatalı satır 44 sn. Paket (paylaşım metni + kapak + kareler + denetim) 55 / 47 / 40 sn; bunun çoğu iki LLM çağrısı.
+- Videolar: 46,4 / 47,2 / 46,3 sn; 91 / 88 / 86 kelime; glifsiz karakter, kredi sorunu ve boş terim yok. Yedeğe geçen terim 4 / 6 / 1.
+- Denetçi ve kendi değerlendirmem:
+  - Nötron 5 D / 2 B. Kendi değerlendirmem: 6 D / 1 B, Y ve X yok. Denetçi çay kaşığı (milyar ton) ve 20 km çap için B dedi; ikisi de yaygın ve büyüklük olarak doğru yuvarlamalar.
+  - Satürn 4 D / 3 B / 1 Y. Y: "halka düzlemi tam olarak bize dönük hale gelir"; kayboluş anında düzlemin kenarı bize döner, bu yüzden ben de Y diyorum. Ayrıştığımız yerler:
+    - "Mart 2025'te yine böyle bir geçiş yaşandı" cümlesine denetçi B dedi, ben D diyorum (geçiş 23 Mart 2025'te oldu).
+    - "Halkaların kaybolması aslında bir takma ad" cümlesine denetçi D dedi, ben B diyorum: kayboluş bir takma ad değil. Bu cümleye reçete talimatı yol açtı; talimat bu yüzden düzeltildi.
+  - Zombi 1 D / 5 B, Y ve X yok. Kendi değerlendirmem: 3 D / 3 B, Y ve X yok. Denetçi yorum cümlelerinde ("astronomlar … olarak yorumluyor", "zombi yıldız diyoruz") da B verdi.
+  - Özet: denetçi benden daha temkinli (daha çok B), ama Y/X'te ayrışmadık. Tek Y'yi ikimiz de aynı cümlede bulduk.
+- İlk kuralla 2 video (Satürn Y + 88 kelime, Zombi 86 kelime) kontrol gerekli oldu; yeni kuralla yalnız Satürn (Y), Zombi uyarılı. `rapor-ilk.html` ilk raporu saklıyor.
+- Görsel notları:
+  - Satürn'de 6 terim Pixabay'e geçti. "thin line" terimi bir kadının çizgi çizimini, "orbit animation" CGI yörünge getirdi.
+  - Nötron'da "lighthouse beam" Pixabay cam küre CGI'ı getirdi.
+  - Kapak notu yukarıda.
+
+**Nasıl yapılır**
+1. `konular.csv` yaz (ilk satır `konu;talimat;ses`) ya da satır başına bir konuyla `konular.txt`.
+2. `uv run python batch.py .\konular.csv --preset presets\uzay.toml` çalıştır. Claude Code içinden çalıştırıyorsan önce `CLAUDECODE` ve `CLAUDE_*` ortam değişkenlerini temizle (`claude_code` sağlayıcısı).
+3. Durdurmak için Ctrl+C; devam etmek için aynı komut. Başarısız konuları yeniden denemek için de aynı komut.
+4. `storage\batches\<klasör>\rapor.html`'i aç. Önce başarısız ve kontrol gerekli kartlara bak: işaretli iddiaları gerekçeleriyle oku. Metin düzeltilecekse konuyu `talimat` sütunuyla yeni bir girdide yeniden üret.
+5. Yüklemek için her konu klasöründen `video.mp4`'ü al, başlık, açıklama ve hashtag'leri `paylasim.md`'den kopyala, kapak olarak `kapak.jpg`'yi kullan.
+6. Yeni reçete için `presets\uzay.toml`'u kopyala; anahtar adlarını `uv run python cli.py --help`'teki bayraklardan al.
 
 ## Planlanan iyileştirmeler
 
