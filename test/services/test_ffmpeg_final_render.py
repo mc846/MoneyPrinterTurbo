@@ -41,8 +41,10 @@ def inputs(tmp_path_factory):
         _run("-y", "-f", "lavfi", "-i", f"testsrc2=s={width}x{height}:r=30", "-t", "2",
              "-vf", video._BT709_VIDEO_FILTER, "-c:v", "libx264", "-pix_fmt", "yuv420p", str(base))
         bases[aspect] = base
-    voice, bgm = root / "voice.wav", root / "bgm.wav"
+    voice, bgm, long_voice = root / "voice.wav", root / "bgm.wav", root / "long-voice.wav"
     _run("-y", "-f", "lavfi", "-i", "sine=f=440:d=1.9", "-ar", "44100", str(voice))
+    # 比视频长：MoviePy 写出完整音频（成片里音频比视频长），ffmpeg 路径不能截掉音频的结尾。
+    _run("-y", "-f", "lavfi", "-i", "sine=f=330:d=2.3", "-ar", "44100", str(long_voice))
     # 比成片短，随机/自定义背景音乐会被循环铺满，再淡出。
     _run("-y", "-f", "lavfi", "-i", "sine=f=220:d=0.7", "-ar", "44100", str(bgm))
     subtitles = root / "subtitles.srt"
@@ -54,10 +56,12 @@ def inputs(tmp_path_factory):
     # 最后一条字幕比原视频长：原视频结束后 MoviePy 的画面是黑底加字幕。
     overrun = root / "overrun.srt"
     overrun.write_text("1\n00:00:01,500 --> 00:00:02,400\nAfter the end\n\n", encoding="utf-8")
-    return {"root": root, "bases": bases, "voice": voice, "bgm": bgm, "subtitles": subtitles, "overrun": overrun}
+    return {"root": root, "bases": bases, "voice": voice, "long_voice": long_voice, "bgm": bgm,
+            "subtitles": subtitles, "overrun": overrun}
 
 
-def _render(inputs, engine, name, aspect=VideoAspect.portrait, subtitles="subtitles", bgm=True, **overrides):
+def _render(inputs, engine, name, aspect=VideoAspect.portrait, subtitles="subtitles", bgm=True, voice="voice",
+            **overrides):
     options = dict(video_subject="test", video_aspect=aspect.value, font_size=18, stroke_width=1,
                    bgm_type="random" if bgm else "", bgm_volume=0.3)
     options.update(overrides)
@@ -67,7 +71,7 @@ def _render(inputs, engine, name, aspect=VideoAspect.portrait, subtitles="subtit
         patch.object(VideoAspect, "to_resolution", lambda self: SIZES[VideoAspect(self)]),
         patch.object(video, "get_bgm_file", return_value=str(inputs["bgm"])),
     ):
-        video.generate_video(str(inputs["bases"][aspect]), str(inputs["voice"]), str(inputs[subtitles]),
+        video.generate_video(str(inputs["bases"][aspect]), str(inputs[voice]), str(inputs[subtitles]),
                              str(target), VideoParams(**options))
     return target
 
@@ -133,6 +137,8 @@ CORE_CASES = [
     ("landscape", {"aspect": VideoAspect.landscape, "text_background_color": "#000000"}),
     ("square", {"aspect": VideoAspect.square, "stroke_width": 3}),
     ("subtitle-after-video-end", {"subtitles": "overrun"}),
+    ("voice-longer-than-video", {"voice": "long_voice"}),
+    ("voice-longer-no-bgm", {"voice": "long_voice", "bgm": False}),
 ]
 
 
