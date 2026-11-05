@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from app import paths
+from app.config import config
 from app.services import batch_production as bp
 from app.services import batch_runner as br
 
@@ -21,11 +22,14 @@ FAKE_START = 133_000_000_000_000_000
 
 @pytest.fixture(autouse=True)
 def batches(tmp_path, monkeypatch):
+    """Her test kendi storage/batches'ını kullanır; run_batch reçetenin [app] bölümünü config.app'e
+    yazdığı için config.app sonra geri alınır (yoksa sonraki testler eşzamanlılığı 3 görür)."""
     folder = tmp_path / "batches"
     folder.mkdir()
     monkeypatch.setattr(bp, "batches_dir", lambda: folder)
     br._children.clear()
-    return folder
+    with patch.dict(config.app, {}):
+        yield folder
 
 
 class Processes:
