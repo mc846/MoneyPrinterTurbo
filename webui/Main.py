@@ -6582,6 +6582,24 @@ def _render_video_settings(panel, params):
             )
             _set_runtime_config("ui", "video_count", params.video_count)
 
+            # 成片合成方式。ffmpeg 遇到不支持的内容或出错时自动改用 MoviePy。
+            final_render_engines = ["moviepy", "ffmpeg"]
+            final_render_engine_labels = {
+                "moviepy": tr("Final Render Engine MoviePy"),
+                "ffmpeg": tr("Final Render Engine FFmpeg"),
+            }
+            selected_final_render_engine = stable_selectbox(
+                tr("Final Render Engine"),
+                options=final_render_engines,
+                default_value=_saved_ui_choice(
+                    "final_render_engine", final_render_engines, "moviepy", config.app
+                ),
+                key="final_render_engine_select",
+                format_func=lambda value: final_render_engine_labels[value],
+                help=tr("Final Render Engine Help"),
+            )
+            _set_runtime_config("app", "final_render_engine", selected_final_render_engine)
+
             video_codec_options = [
                 (tr("Default Video Encoder"), DEFAULT_VIDEO_CODEC_OPTION),
                 ("libx264 (CPU)", "libx264"),

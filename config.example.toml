@@ -734,6 +734,14 @@ subtitle_provider = "edge"
 # "h264_mf", "h264_videotoolbox".
 # video_codec = "libx264"
 
+# How the final video is composed. "moviepy" (default) draws every frame in
+# Python. "ffmpeg" draws the subtitles and other static overlays once as
+# transparent images, overlays them with FFmpeg on the same frames and keeps
+# MoviePy's audio mix unchanged: the same picture and sound, several times faster.
+# Subtitle animations and other content that changes over time use MoviePy, and
+# any FFmpeg error falls back to MoviePy. CLI: --final-render-engine.
+# final_render_engine = "moviepy"
+
 # -----------------------------------------------------------------------------
 # Storage and Task Runtime / 存储与任务运行
 # -----------------------------------------------------------------------------
