@@ -124,7 +124,7 @@ def save_draft(rows: list[dict], preset: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name + ".tmp")
     temp.write_text(json.dumps({"rows": normalize_rows(rows), "preset": preset}, ensure_ascii=False), encoding="utf-8")
-    os.replace(temp, path)
+    bp.replace_file(temp, path)
 
 
 # ---------------------------------------------------------------- reçete ve sesler
@@ -271,6 +271,9 @@ def ended_message(batch_dir: Path, tr) -> tuple[str, str]:
         return "error", tr("batch.error.exited").format(line=_last_error_line(batch_dir) or batch_dir.name)
     if state.finished:
         return "success", tr("batch.finished").format(name=batch_dir.name)
+    crashed = batch_runner.crash_line(batch_dir)
+    if crashed:
+        return "error", tr("batch.error.exited").format(line=crashed)
     return "warning", tr("batch.stop.done")
 
 

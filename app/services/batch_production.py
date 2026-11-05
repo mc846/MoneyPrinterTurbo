@@ -356,13 +356,33 @@ class BatchState:
         payload = json.dumps(asdict(self), ensure_ascii=False, indent=1)
         temp = directory / f".{STATE_FILE}.tmp"
         temp.write_text(payload, encoding="utf-8")
-        os.replace(temp, directory / STATE_FILE)
+        replace_file(temp, directory / STATE_FILE)
 
     @classmethod
     def load(cls, directory: Path) -> "BatchState":
         data = json.loads((directory / STATE_FILE).read_text(encoding="utf-8"))
         items = [ItemState(**item) for item in data.pop("items")]
         return cls(items=items, **data)
+
+
+REPLACE_ATTEMPTS = 50
+REPLACE_DELAY_SECONDS = 0.1
+
+
+def replace_file(source: Path, target: Path) -> None:
+    """
+    os.replace, Windows'ta kısa aralıklarla yeniden denenerek. Hedef başka bir süreçte okunmak için
+    açıkken (WebUI state.json'ı birkaç saniyede bir okur) Windows değiştirmeyi "Erişim engellendi"
+    ile reddeder; okuma milisaniyeler sürdüğü için birkaç deneme yeter.
+    """
+    for attempt in range(REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(REPLACE_DELAY_SECONDS)
 
 
 def _file_sha256(path: Path) -> str:

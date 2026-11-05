@@ -385,7 +385,7 @@ class BatchStatus:
         return not self.finished and not self.running
 
 
-def log_tail(batch_dir: Path) -> list[str]:
+def log_tail(batch_dir: Path, timestamped: bool = True) -> list[str]:
     try:
         with open(batch_dir / bp.LOG_FILE, "rb") as handle:
             handle.seek(0, os.SEEK_END)
@@ -397,8 +397,20 @@ def log_tail(batch_dir: Path) -> list[str]:
     lines = data.decode("utf-8", errors="replace").replace("\r", "\n").split("\n")
     if size > LOG_TAIL_BYTES:
         lines = lines[1:]  # ilk satır yarım olabilir
-    # İlerleme çubukları gibi zaman damgasız satırlar atlanır.
+    if not timestamped:
+        return [line for line in lines if line.strip()]
+    # İlerleme çubukları ve Traceback gibi zaman damgasız satırlar atlanır.
     return [line for line in lines if re.match(r"\d{4}-\d{2}-\d{2} ", line)]
+
+
+def crash_line(batch_dir: Path) -> str:
+    """Günlükte son çalıştırmanın başlangıcından sonra Traceback varsa istisnanın son satırı."""
+    lines = log_tail(batch_dir, timestamped=False)
+    starts = [index for index, line in enumerate(lines) if "toplu üretim: " in line and " konu, " in line]
+    tail = lines[starts[-1]:] if starts else lines
+    if not any(line.startswith("Traceback") for line in tail):
+        return ""
+    return tail[-1].strip()
 
 
 def current_stage(log_lines: list[str], index: int) -> str:

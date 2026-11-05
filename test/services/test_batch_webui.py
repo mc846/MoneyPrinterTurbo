@@ -269,6 +269,18 @@ def test_batch_end_is_reported_from_its_state(batches, monkeypatch, finished, ki
     assert text in messages(getattr(app, kind))
 
 
+def test_crashed_batch_shows_the_exception(batches, monkeypatch):
+    def prepare(folder):
+        make_state(folder)
+        (folder / bp.LOG_FILE).write_text(
+            "2026-11-05 20:39:35 | INFO | x: _run_in_folder - toplu üretim: 2 konu, 0 tanesi daha önce bitti\n"
+            "Traceback (most recent call last):\n  File \"batch.py\", line 9, in <module>\n"
+            "PermissionError: [WinError 5] Erişim engellendi\n", encoding="utf-8")
+
+    app = ended_after_running(batches, monkeypatch, prepare)
+    assert messages(app.error) == ["The batch process ended early: PermissionError: [WinError 5] Erişim engellendi"]
+
+
 def make_state(folder):
     source = folder / "konular.csv"
     source.write_text("konu\nA\n", encoding="utf-8")
