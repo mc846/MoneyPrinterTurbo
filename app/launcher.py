@@ -45,11 +45,18 @@ def main(argv: list[str] | None = None) -> int:
 
         force_utf8_console()
         return cli.run_cli(argv[1:])
+    if argv and argv[0] == "batch":
+        from app.services import batch_production
+        from app.utils.logging_utils import force_utf8_console
+
+        force_utf8_console()
+        return batch_production.main(argv[1:], prog="mpt batch")
 
     parser = argparse.ArgumentParser(prog="mpt", description="MoneyPrinterTurbo")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("cli", help="generate videos (mpt cli --help)")
+    commands.add_parser("batch", help="produce a batch of videos from a .csv/.txt (mpt batch --help)")
     webui = commands.add_parser("webui", help="start the WebUI")
     webui.add_argument("--host", default="127.0.0.1", help="listen address")
     webui.add_argument("--port", type=_port_number, help="listen port (default: first free port from 8501)")
