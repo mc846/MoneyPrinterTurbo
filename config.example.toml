@@ -595,13 +595,14 @@ subtitle_provider = "edge"
 
 # Concurrent keyword searches and downloads for stock footage (Pexels, Pixabay
 # and Coverr only). Default: 1 (serial). Higher values may be faster but can
-# trigger provider rate limits. Use 1, 2, 4, 6 or 8: the code caps values at 8,
-# and the WebUI resets anything else to 1 when it shows this setting.
+# trigger provider rate limits. The WebUI offers 1, 2, 3, 4, 6 and 8 and shows
+# any other positive integer as it is; the code caps values at 8.
 # material_concurrency = 1
 
 # How many clips are cropped, speed-adjusted and encoded at once. Default: 1
-# (serial). Higher values may be faster but use more CPU and memory. Use 1, 2,
-# 4, 6 or 8: the code caps values at 8, and the WebUI resets anything else to 1.
+# (serial). Higher values may be faster but use more CPU and memory. The WebUI
+# offers 1, 2, 3, 4, 6 and 8 and shows any other positive integer as it is; the
+# code caps values at 8.
 # video_clip_concurrency = 1
 
 # Leave unset to follow the app default (libx264). Hardware encoders are optional;
