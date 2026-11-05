@@ -2,6 +2,8 @@
 
 import json
 import signal
+import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -357,6 +359,47 @@ def test_launcher_dispatches_batch():
     with patch.object(bp, "main", return_value=0) as main, patch("app.utils.logging_utils.force_utf8_console"):
         assert launcher.main(["batch", "k.txt", "--preset", "presets/uzay.toml"]) == 0
     main.assert_called_once_with(["k.txt", "--preset", "presets/uzay.toml"], prog="mpt batch")
+
+
+def test_state_save_retries_while_another_process_reads_the_file(tmp_path, monkeypatch):
+    real_replace = bp.os.replace
+    calls = []
+
+    def busy_twice(source, target):
+        calls.append(target)
+        if len(calls) <= 2:
+            raise PermissionError(5, "Erişim engellendi")
+        real_replace(source, target)
+
+    monkeypatch.setattr(bp.os, "replace", busy_twice)
+    monkeypatch.setattr(bp, "REPLACE_DELAY_SECONDS", 0)
+    state = bp.new_state(write(tmp_path / "k.txt", "A\n"), bp.load_preset(PRESET), [bp.BatchInput("A")])
+    state.save(tmp_path)
+    assert len(calls) == 3 and bp.BatchState.load(tmp_path).items[0].subject == "A"
+
+
+def test_state_save_gives_up_after_the_last_attempt(tmp_path, monkeypatch):
+    monkeypatch.setattr(bp.os, "replace", lambda source, target: (_ for _ in ()).throw(PermissionError(5, "x")))
+    monkeypatch.setattr(bp, "REPLACE_DELAY_SECONDS", 0)
+    monkeypatch.setattr(bp, "REPLACE_ATTEMPTS", 3)
+    with pytest.raises(PermissionError):
+        bp.replace_file(write(tmp_path / "a", "1"), tmp_path / "b")
+
+
+@pytest.mark.skipif(not sys.platform.startswith("win"), reason="paylaşım ihlali yalnız Windows'ta")
+def test_state_save_succeeds_while_the_webui_holds_state_json_open(tmp_path):
+    """WebUI state.json'ı birkaç saniyede bir okur; o an açık olan dosyanın yerine yazmak Windows'ta reddedilir."""
+    state = bp.new_state(write(tmp_path / "k.txt", "A\n"), bp.load_preset(PRESET), [bp.BatchInput("A")])
+    state.save(tmp_path)
+    reader = open(tmp_path / bp.STATE_FILE, encoding="utf-8")
+    timer = threading.Timer(0.4, reader.close)
+    timer.start()
+    try:
+        state.items[0].status = "running"
+        state.save(tmp_path)
+    finally:
+        timer.join()
+    assert bp.BatchState.load(tmp_path).items[0].status == "running"
 
 
 def test_state_file_is_readable_json(tmp_path):

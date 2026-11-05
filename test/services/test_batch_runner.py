@@ -375,6 +375,20 @@ def test_current_stage_follows_only_the_subjects_own_lines():
     assert br.current_stage(lines, 3) == ""
 
 
+def test_crash_line_reports_a_traceback_of_the_last_run_only(tmp_path):
+    folder = tmp_path / "batch"
+    folder.mkdir()
+    start = "2026-11-05 20:39:35 | INFO | x: _run_in_folder - toplu üretim: 2 konu, 0 tanesi daha önce bitti, klasör x"
+    crash = ["Traceback (most recent call last):", '  File "batch.py", line 9, in <module>',
+             "PermissionError: [WinError 5] Erişim engellendi: 'state.json'"]
+    (folder / bp.LOG_FILE).write_text("\n".join([start, *crash]) + "\n", encoding="utf-8")
+    assert br.crash_line(folder) == "PermissionError: [WinError 5] Erişim engellendi: 'state.json'"
+    # Devam ettirilen çalıştırmada eski Traceback sayılmaz.
+    (folder / bp.LOG_FILE).write_text("\n".join([start, *crash, start, "2026-11-05 20:41:00 | INFO | x: y - z"]),
+                                      encoding="utf-8")
+    assert br.crash_line(folder) == ""
+
+
 def test_list_batches_newest_first_and_skips_unreadable(batches, monkeypatch):
     Processes(monkeypatch)
     for name, created in (("eski", "2026-11-01T10:00:00"), ("yeni", "2026-11-05T10:00:00")):
