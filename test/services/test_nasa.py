@@ -568,6 +568,81 @@ def test_image_with_a_face_is_skipped_after_cropping(tmp_path):
     assert count_faces.call_args.args[0].endswith("-portrait-1242x2208.jpg")
 
 
+def _landscape_with_face(path, face_left, size=(4000, 2250)):
+    """横图上画一张脸，face_left 是脸的椭圆左边缘的横坐标；9:16 裁剪区域是 x 1367..2632。"""
+    _drawn_face(path.with_name("tile.jpg"), size=(440, 440))
+    tile = Image.open(path.with_name("tile.jpg"))
+    image = Image.new("RGB", size, (40, 40, 40))
+    image.paste(tile, (face_left - 80, (size[1] - 440) // 2))
+    image.save(path, "JPEG", quality=90)
+    return str(path)
+
+
+def _screen(tmp_path, source):
+    item = MaterialInfo(provider="nasa", url="https://x/x~orig.jpg", duration=5, source_info={"asset_id": "KSC1"})
+    with patch.object(nasa, "_download_image", return_value=source):
+        return nasa.screen_image(item, str(tmp_path), video_aspect=PORTRAIT, clip_duration=5)
+
+
+def test_face_cut_by_the_crop_edge_is_found_on_the_original(tmp_path):
+    pytest.importorskip("cv2")
+    # 脸宽约 280 px，只有左边约 100 px 落在裁剪区域内（右边缘 x=2632）
+    source = _landscape_with_face(tmp_path / "nasa-edge.jpg", face_left=2532)
+    prepared = nasa.prepare_image(source, PORTRAIT, 5)
+
+    assert nasa.count_faces(prepared) == 0
+    assert nasa.count_edge_faces(source, PORTRAIT) == 1
+    with patch.object(nasa.logger, "info") as info:
+        assert _screen(tmp_path, source) is False
+    assert any("faces at the crop edge=1" in str(call.args[0]) for call in info.call_args_list)
+
+
+def test_face_outside_the_crop_is_not_a_reason_to_skip(tmp_path):
+    pytest.importorskip("cv2")
+    source = _landscape_with_face(tmp_path / "nasa-outside.jpg", face_left=300)
+
+    assert nasa.count_edge_faces(source, PORTRAIT) == 0
+    assert _screen(tmp_path, source) is True
+
+
+def test_star_field_has_no_edge_faces(tmp_path):
+    pytest.importorskip("cv2")
+    source = _star_field(tmp_path / "nasa-stars.jpg", size=(4000, 2250))
+
+    assert nasa.count_edge_faces(source, PORTRAIT) == 0
+    assert _screen(tmp_path, source) is True
+
+
+def test_edge_face_check_without_opencv_keeps_the_image(tmp_path, monkeypatch):
+    monkeypatch.setattr(nasa, "_face_detector_state", {})
+    monkeypatch.setitem(sys.modules, "cv2", None)
+    source = _landscape_with_face(tmp_path / "nasa-edge.jpg", face_left=2532)
+
+    with patch.object(nasa.logger, "warning") as warning:
+        assert nasa.count_edge_faces(source, PORTRAIT) is None
+        assert _screen(tmp_path, source) is True
+    assert warning.call_count == 1 and "uv sync --extra face" in warning.call_args.args[0]
+
+
+def test_edge_check_runs_only_when_the_crop_has_no_face(tmp_path):
+    source = _image(tmp_path / "nasa-x.jpg", (2160, 3840))
+    with (
+        patch.object(nasa, "count_faces", return_value=1),
+        patch.object(nasa, "count_edge_faces") as edge,
+    ):
+        assert _screen(tmp_path, source) is False
+    edge.assert_not_called()
+    with (
+        patch.object(nasa, "count_faces", return_value=0),
+        patch.object(nasa, "count_edge_faces", return_value=0) as edge,
+    ):
+        assert _screen(tmp_path, source) is True
+    assert edge.call_args.args == (source, PORTRAIT)
+    with patch.dict(config.app, {"nasa_face_filter": False}), patch.object(nasa, "count_edge_faces") as edge:
+        assert _screen(tmp_path, source) is True
+    edge.assert_not_called()
+
+
 def test_screen_image_rejects_images_that_cannot_be_prepared(tmp_path):
     item = MaterialInfo(provider="nasa", url="https://x/x~orig.jpg", duration=5)
     with patch.object(nasa, "_download_image", return_value=""):
