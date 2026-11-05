@@ -39,10 +39,11 @@ video_source_fallback_min_candidates = 1
 [script]
 target_words = [90, 100]
 prompt = """
-Yaklaşık {kelime_min}-{kelime_max} kelime yaz. Merak uyandıran bir soru veya şaşırtıcı bir gerçekle \
-başla. Konuyu tek bir somut, gerçek örnekle anlat: adı bilinen bir gök cismi, bir gözlem ya da bir \
-ölçüm. Konu bir takma ad ya da benzetme içeriyorsa bunu söyle ve gerçekte neyi kastettiğini açıkla. \
-Akıcı, sade ve heyecanlı bir dil kullan.
+En az {kelime_min}, en çok {kelime_max} kelime yaz; {kelime_min} kelimenin altına inme. Merak \
+uyandıran bir soru veya şaşırtıcı bir gerçekle başla. Konuyu tek bir somut, gerçek örnekle anlat: adı \
+bilinen bir gök cismi, bir gözlem ya da bir ölçüm. Yalnız konunun adı bilimsel bir terim değil de bir \
+takma adsa (ör. "zombi yıldız"), takma ad olduğunu söyle ve gerçekte neyi kastettiğini açıkla; başka \
+hiçbir şeye takma ad deme. Akıcı, sade ve heyecanlı bir dil kullan.
 """
 
 # Kalite kontrolü: süre hedefi (saniye) ve bağımsız doğruluk denetimi.
