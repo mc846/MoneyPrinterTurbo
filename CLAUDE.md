@@ -78,7 +78,15 @@ uv run ruff check app cli.py main.py webui test docs/skill   # CI'daki lint
 - ffmpeg, `imageio-ffmpeg` paketinden gelir (`.venv\Lib\site-packages\imageio_ffmpeg\binaries\`); PATH'te ffmpeg yok. Başka bir ffmpeg kullanmak için `[app] ffmpeg_path` ya da `IMAGEIO_FFMPEG_EXE` ver. ffprobe olmadığı için `video_project.py` çalışmaz.
 - `config.toml` gitignore'da ve API anahtarları orada durur. Yeni ya da değişen her ayar `config.example.toml`'a da işlenmeli.
 - **Uçtan uca test kuralı:** `config.toml`'daki LLM sağlayıcısına güvenme; kullanıcı onu WebUI'dan değiştirir (04.11'den beri `ollama` / `gpt-oss:120b-cloud`). Sağlayıcıyı her CLI koşusunda `--llm-provider` (gerekirse `--llm-model`) ile ver, ör. `--llm-provider claude_code`. Bayraklar yalnız o süreçte geçerli, `config.toml`'a yazılmaz. Claude Code içinden `claude_code` sağlayıcısını kullanırken `CLAUDECODE` ve `CLAUDE_*` ortam değişkenlerini temizle.
-- Açık kalan WebUI süreci ayarları bellekte tutar ve ana sayfa her yeniden çalıştığında `config.toml`'a yazar. Kod güncellendikten sonra yeniden başlatılmazsa eski seçenek listeleriyle yazabilir. 05.11'de `config.toml` 19:40:47 ve 20:04:17'de değişti: render motoru `moviepy`, eşzamanlılık 1, ses `af-ZA-AdriNeural-Female`, yazı tipi `BeVietnamPro-Bold.ttf`. O sırada çalışan tek süreç, 04.11 15:42'den beri açık WebUI'ydı; dosyaya dokunulmadı, WebUI yeniden başlatıldı.
+- **Eski WebUI süreci config yazabilir.** Açık kalan WebUI süreci ayarları bellekte tutar ve ana sayfa her yeniden çalıştığında `config.toml`'a yazar. Kod güncellendikten sonra yeniden başlatılmazsa eski seçenek listeleriyle yazabilir. 05.11'de `config.toml` 19:40:47 ve 20:04:17'de değişti: render motoru `moviepy`, eşzamanlılık 1, ses `af-ZA-AdriNeural-Female`, yazı tipi `BeVietnamPro-Bold.ttf`; ayrıca `subtitle_enabled = false`, `voice_rate = 0.8`, `subtitle_position = "top"`, `font_size = 30`. O sırada çalışan tek süreç, 04.11 15:42'den beri açık WebUI'ydı. **`config.toml`'u elle ya da betikle düzeltmeden önce WebUI'yı durdur, sonra yeniden başlat:** açık bir WebUI belleğindeki eski değerleri ilk yeniden çalıştırmada geri yazar.
+- **config.toml düzeltmesi (05.11 21:36, kullanıcı onaylı):**
+  - Yedek: `storage/config-yedek/config.toml.20261105-2136.bak`.
+  - Uzay reçetesine göre yazılan anahtarlar:
+    - `[app]`: `video_source_fallback = "pixabay"`, `video_source_fallback_min_relevance = 0.5`, `video_source_fallback_min_candidates = 1`, `crop_materials_to_aspect = true`, `material_tag_relevance = "rank"`, `match_materials_to_script = true`, `video_terms_style = "visual"`, `script_accuracy_rules = true`, `nasa_credit_overlay = true`, `nasa_face_filter = true`, `nasa_text_filter = true`, `final_render_engine = "ffmpeg"`, `material_concurrency = 3`, `video_clip_concurrency = 3`.
+    - `[ui]`: `voice_name = "tr-TR-EmelNeural-Female"`, `font_name = "STHeitiMedium.ttc"`, `stroke_width = 3.0`, `video_clip_duration = 5`, `video_language = "tr-TR"`.
+    - `llm_provider`, `video_source` ve `exclude_ai_generated_materials` zaten doğruydu.
+  - Yazım biçimi: WebUI'nin kodlayıcısıyla (`_ConfigTomlEncoder`, metin kipinde CRLF) yazıldı; WebUI'nin `save_config`'i aynı içeriği üretir ve dosyayı değiştirmez. Değişmedi: `listen_host`, API anahtarları ve geri kalan her anahtar (anlamsal fark doğrulandı).
+  - Onaylı listede olmayan `subtitle_enabled`, `voice_rate`, `subtitle_position` ve `font_size` değerlerine dokunulmadı. Reçete bunları kendisi sabitliyor (bkz. Toplu üretim > Reçete); tek video için WebUI'dan düzeltilmeleri gerekebilir.
 - `listen_host` yerelde `127.0.0.1`. Docker'daki API container'ı (`main.py`) aynı `config.toml`'u okur ve container içinde `0.0.0.0` dinlemesi gerekir; değer `127.0.0.1` kalırsa host'tan erişilemez. WebUI container'ı etkilenmez, çünkü adresini komut satırından (`--server.address=0.0.0.0`) alır. Bu değer için henüz ortam değişkeni yok; ileride eklenecek.
 
 ## Portlar
@@ -88,13 +96,13 @@ Yerel çalıştırma ve Docker aynı portları kullanır: WebUI 8501, API 8080 (
 ## Test baz durumu
 
 04.11.2026, Windows 11, Python 3.11.18. Redis yok, API anahtarı yok, PATH'te ffmpeg yok. `pytest -q test` 12–23 dakika sürer.
-**4066 geçti, 3 kaldı, 244 atlandı** (05.11, WebUI toplu üretiminden sonra, `main` 04cd0fe, 13 dk 41 sn; ayrıca 15 764 alt test geçti; düzeltmelerin, kırpma, etiket uygunluğu, görsel arama terimi, doğruluk kuralı, eşit aralıklı terim seçimi, NASA kaynağı, noktalama normalleştirmesi, CLI sağlayıcı bayraklarının, yedek kaynağın, yüz kenarı kuralının, metin filtresinin, üretim süresi hızlandırmalarının, ffmpeg son render'ının, toplu üretimin ve WebUI toplu üretiminin 967 yeni testi dahil; atlananlara `MPT_RUN_SLOW_TESTS=1` ile açılan 96 matris testi eklendi). NASA testleri ağa çıkmaz; `test/resources/nasa/` altındaki kayıtlı API yanıtlarını kullanır. Yüz ve metin testleri çizilmiş bir yüz, çizilmiş yazı ve yapay bir yıldız alanı üretir (gerçek kişi fotoğrafı yok); `face` extra'sı kurulu değilse OpenCV isteyen 7'si atlanır. CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
+**4124 geçti, 3 kaldı, 244 atlandı** (05.11, toplu üretim altyazılarından sonra, `main` 35895be, 13 dk 46 sn; ayrıca 15 908 alt test geçti; düzeltmelerin, kırpma, etiket uygunluğu, görsel arama terimi, doğruluk kuralı, eşit aralıklı terim seçimi, NASA kaynağı, noktalama normalleştirmesi, CLI sağlayıcı bayraklarının, yedek kaynağın, yüz kenarı kuralının, metin filtresinin, üretim süresi hızlandırmalarının, ffmpeg son render'ının, toplu üretimin, WebUI toplu üretiminin ve toplu üretim altyazılarının 1025 yeni testi dahil; atlananlara `MPT_RUN_SLOW_TESTS=1` ile açılan 96 matris testi eklendi). NASA testleri ağa çıkmaz; `test/resources/nasa/` altındaki kayıtlı API yanıtlarını kullanır. Yüz ve metin testleri çizilmiş bir yüz, çizilmiş yazı ve yapay bir yıldız alanı üretir (gerçek kişi fotoğrafı yok); `face` extra'sı kurulu değilse OpenCV isteyen 7'si atlanır. CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
 
 Kalan 4 testin hiçbiri bir özelliğin bozulduğunu göstermiyor; nedenleri Windows ya da ortam:
 - `test_image_sanitize_identity.py::test_long_source_name_renders_without_exceeding_filesystem_name_limit`: tam yol 260 karakteri aşıyor ve `LongPathsEnabled=0` (MAX_PATH sınırı).
 - `test_material.py::TestMaterialTlsVerification::test_metadata_probe_failure_preserves_existing_cache`: test yolun `\` ile kurulmasını bekliyor, kod `/` kullanıyor.
 - `test_utils_ffmpeg_check.py::TestGetFfmpegBinaryEnvExpansion::test_normalizes_home_path_in_os_environ`: test `HOME`'u değiştiriyor, oysa Windows'ta `expanduser` `USERPROFILE`'ı okur.
-- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 4065–4066 geçti, 3–4 kaldı arasında değişir (04.11'deki iki tam turun birinde kaldı, tek başına geçti).
+- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 4123–4124 geçti, 3–4 kaldı arasında değişir (04.11'deki iki tam turun birinde kaldı, tek başına geçti).
 - `test_webui_startup.py::TestWebuiStartup::test_external_directory_prefers_project_app_package` tam turun yükü altında bazen alt süreç zaman aşımına (60 sn) takılıyor; tek başına 9–14 sn'de geçiyor.
 
 Atlananların dağılımı: 96 ffmpeg son render'ın tam stil matrisi (`MPT_RUN_SLOW_TESTS=1` ile çalışır; varsayılan turda her boyutu kapsayan 12 çekirdek durum çalışıyor), 91 native ffmpeg/ffprobe ister, 38 Redis ister (`MPT_TEST_REDIS_HOST`), 8 Kokoro test sunucusu ister, 7 canlı sağlayıcı ister (`MPT_RUN_INTEGRATION_TESTS=1`), 3 `twelvelabs` extra'sı kurulu olmadığı için, 1 Windows'ta geçersiz bir yol yüzünden atlanıyor.
@@ -119,6 +127,7 @@ Testler `test/conftest.py` fixture'ı sayesinde izole çalışır; gerçek `conf
   - `fix/script-order-even-spread`, `feat/visual-search-terms`'in üzerinde ve içine `fix/script-order-dedup` merge edilmiş. Gerekçe: `_download_videos_by_script_order`'ın gövdesini yalnız dedup dalı değiştirdi; korunması gereken yerel yön ve uygunluk sıralaması ise yığından geliyor. Upstream'de hem yığından hem `fix/script-order-dedup`'tan sonra birleşmeli.
   - `feat/nasa-source`, `fix/script-order-even-spread`'in üzerinde (dolayısıyla bütün yığına ve dedup dalına bağlı). Üçüncü turda içine `feat/script-accuracy-rules` merge edildi (bdf6412): NASA'nın metin kuralı doğruluk kurallarıyla aynı listede numaralanıyor, bu yüzden upstream'de doğruluk kuralları dalından da sonra birleşmeli. Kırpma kuralını, `MATERIAL_TAG_SOURCES` uygunluk sıralamasını ve sıra koruma kipindeki eşit aralığı kullanır. Upstream'de even-spread'den sonra birleşmeli. İkinci commit'i (filtreler ve yüz kontrolü) `pyproject.toml`'a isteğe bağlı `face` extra'sını, `uv.lock`'a yalnız `opencv-python-headless` girdisini (25 satır, elle) ve 227 KB'lık ikili bir model dosyası ekler. Yerel uv 0.13 `uv add`/`uv lock` ile kilidin tamamını yeni biçimde (revision 5, `upload-time`) yeniden yazıyor; bu yüzden kilit elle düzenlendi ve `uv lock --check` ile doğrulandı. Upstream merge'de `uv.lock` çakışırsa çakışmayı çözüp `uv lock --check` çalıştır.
 - `feat/batch-production` (05.11, `main` 03afbb9'dan): toplu üretim. Kişisel iş akışı; upstream'e PR hedeflenmiyor. Commit'ler 4382fb0 (özellik), d85818b (Ctrl+Break), 9cd46d0 (e2e sonrası: süre/kelime uyarı, reçete talimatı); main merge'leri 59821d1, f512d22, a9620a2.
+- `feat/batch-subtitles` (05.11, `feat/batch-webui`'nin üzerinden): pakete `.srt` altyazılar ve çeviriler. Commit 8070a72; main merge 35895be.
 - `feat/batch-webui` (05.11, `feat/batch-production`'ın üzerinden): WebUI'dan toplu üretim. Commit'ler b144039 (özellik), 9d6b80a (test yalıtımı), 1d657c7 (venv başlatıcısı kilidi, erken çıkış mesajı), 2e4185f (`state.json` değiştirme yeniden denemesi); main merge'leri e9d6ff5, 5739466, 469bf67, 04cd0fe.
 - **Test kuralı:** `test/conftest.py` içermeyen bir dalda test çalıştırma; önce `ls test/conftest.py` ile bak. Böyle bir dalın değişiklikleri `main`'de olduğu için testleri orada çalıştır. conftest yoksa testler gerçek `config.toml`'u okur ya da bozar ve `storage/tasks`'a yazar.
 
@@ -144,6 +153,8 @@ mpt batch .\konular.csv --preset presets\uzay.toml                            # 
 - `[app]`: yalnız bu süreçte `config.app`'e yazılır, `config.toml` değişmez: `material_concurrency`, `video_clip_concurrency`, `nasa_face_filter`, `video_source_fallback_min_relevance`, `video_source_fallback_min_candidates`, `video_codec`.
 - `[script]`: `prompt` (metin talimatı; yer tutucular `{kelime_min}`, `{kelime_max}`, `{konu}`) ve `target_words = [90, 100]`. Talimat göreve `--video-script-prompt` olarak gider.
 - `[quality]`: `target_duration = [35, 60]` (saniye) ve `audit = true` (doğruluk denetimi).
+- `[package]`: `subtitle_translations = ["en"]` (BCP-47 kodları; boş liste = çeviri yok). `batch.py --altyazi-cevirileri en,de` (boş değer = yok) yalnız o toplu iş için reçetedekinin yerine geçer ve `state.json`'a yazılır; devam ettirilen çalıştırma aynı dilleri kullanır.
+- **Altyazı görünümü reçetede sabit** (`subtitle_enabled = true`, `subtitle_position = "bottom"`, `font_size = 60`, beyaz yazı + siyah kontur, `voice_rate = 1.0`). CLI reçetede olmayan bu değerleri `config.toml`'un `[ui]` bölümünden alır; 05.11'de eski bir WebUI orada altyazıyı kapatıp sesi 0,8'e, yazı boyutunu 30'a çektiği için o günkü WebUI e2e videoları (`20261105-204332_webui`, `20261105-210031_webui`) altyazısız ve yavaş seslendirmeyle üretildi. Altyazı kapalıysa görevde `subtitle.srt` da olmaz.
 - `uzay.toml` uzay reçetesidir: `claude_code`, tr-TR, doğruluk kuralları, NASA + Pixabay yedeği (eşik 0,5 / 1), 9:16 kırpma, `rank`, sıra koruma, `visual` terimler, yapay zeka dışlaması kapalı, atıf katmanı, metin ve yüz filtresi, EmelNeural, STHeitiMedium, kontur 3, klip 5 sn, ffmpeg son render, eşzamanlılık 3. Talimat: en az 90, en çok 100 kelime ("90'ın altına inme"); merak uyandıran açılış; tek bir somut ve gerçek örnek; yalnız konunun adı bir takma adsa (ör. "zombi yıldız") bunu söyle, başka hiçbir şeye takma ad deme. İlk sürüm ("Yaklaşık 90-100 kelime"; "konu bir takma ad ya da benzetme içeriyorsa…") e2e'de 86 ve 88 kelime verdi ve Satürn metnine "halkaların kaybolması aslında bir takma ad" cümlesini soktu. Yeni sürüm 4 konuda 90, 94, 98 ve 103 kelime verdi; takma ad yalnız Zombi'de geçti.
 
 **Çalışma**
@@ -168,6 +179,35 @@ mpt batch .\konular.csv --preset presets\uzay.toml                            # 
   - Kaynak dosya bulunamazsa son videonun orta karesi kullanılır (altyazılı).
   - Sınır: kural keskin ve kontrastlı kareyi sever, bu yüzden kompozit/grafik NASA görsellerini seçebilir. E2e'de Nötron kapağı PIA05736 oldu (iki panelli Spitzer kompoziti, köşede "IRAC" yazısı). Metin filtresi ~small önizlemede bu yazıyı kaçırdı; `nasa.crop_text_lines` 1080×1920 kapakta da bulmuyor (kısa sözcük), bu yüzden kapağa yazı denetimi eklenmedi. Kapak her kartta göründüğü için yüklemeden önce bakılmalı.
 - `credits.txt` (görevde varsa), `script.txt`, `kareler.jpg` (son videodan 5 kare: süre beşe bölünür, her parçanın ortası; üstte saniye) ve `kalite.json`.
+- `altyazi.tr.srt` ve her çeviri dili için `altyazi.<dil>.srt` (`app/services/batch_subtitles.py`). `paylasim.md`'nin YouTube bölümünde "Altyazı dosyaları: altyazi.tr.srt, altyazi.en.srt (YouTube Studio > Altyazılar > Dosya yükle)" notu.
+
+**Altyazı dosyaları** (`batch_subtitles.write_subtitles`)
+- Kaynak: görevin `subtitle.srt`'si. Pipeline cümleleri bölerken sınırdaki noktalamayı atıyor ("olabilir?" → "olabilir"). Altyazılar seslendirilen metne (`utils.normalize_script_for_subtitle_matching(script)`) kelime kelime hizalanır ve kelimeler metindeki halleriyle (noktalama dahil) yazılır. Hizalanamazsa (ör. whisper altyazısı) metin olduğu gibi kalır ve uyarı yazılır.
+- YouTube uyumluluğu: UTF-8 (BOM'suz), CRLF, sıra numaraları 1'den ardışık, `SS:DD:ss,mmm`, bitiş > başlangıç. Çakışan bitiş sonraki başlangıca çekilir, son bitiş video süresini aşmaz, boş altyazı atılır, süresi kalmayanın metni öncekine eklenir.
+- Okunabilirlik: satır ≤ 42 karakter, altyazı ≤ 2 satır. 42'yi aşan altyazı en dengeli iki satıra bölünür; noktalamadan sonra bölmek yeğlenir. İki satıra sığmayan altyazı kelime sınırından parçalara bölünür. Parça sayısı açgözlü bölmenin gerektirdiği kadardır, uzunluklar dinamik programlamayla dengelenir ve noktalamayla biten parça ödüllenir. Süre karakter sayısıyla orantılı paylaştırılır. 42 karakteri aşan tek kelime tireyle bölünür. Videoya gömülü altyazı değişmez.
+- `validate_srt` bütün kuralları denetler; bulduğu her sorun `kalite.json`'da ve uyarılarda görünür.
+- Çeviri:
+  - Kaynak altyazıların metni tek LLM çağrısında, sırayla JSON dizisi olarak çevrilir (`TRANSLATION_PROMPT`).
+  - İstemin kuralları: doğal ve akıcı ama anlamı koruyan; bilimsel terimlerin yerleşik karşılıkları; özel adlar korunur; kuruma bilgi atfetme ve onay iması yasak; altyazı başına en çok 84 karakter; yalnız JSON. Bağlam olarak metnin tamamı da verilir.
+  - Dizi uzunluğu tutmazsa bir kez yeniden istenir. Yine tutmazsa 6'lık parçalar çevrilir; bir parça da tutmazsa onun satırları tek tek çevrilir.
+  - Zamanlamalar kaynak dosyayla birebir aynıdır. İki satıra sığmayan bir çeviri kendi zaman dilimi içinde bölünür ve uyarı yazılır.
+  - Hafif kalite kontrolü (uyarı): boş çeviri; çevrilmemiş görünen satır (Türkçeye özgü ğ ı İ ş harfleri ya da kaynakla aynı metin; Almanca ö/ü uyarı vermez); en az 20 karakterlik kaynakta uzunluk oranı 0,5–2,0 dışı.
+- `kalite.json` → `altyazi`: dosyalar, kaynak dil için `kaynak_altyazi`/`altyazi`/`bolunen`/`noktalama_geri_geldi`/`sorunlar`, her çeviri için `yontem` (tek çağrı / yeniden deneme / parça parça), `cagri`, `uyarilar`, `sorunlar`. Rapor kartında `.srt` bağlantıları ve "Altyazı dosyaları" satırı var.
+- Uçtan uca (05.11, `main` 35895be, CLI, uzay reçetesi, İngilizce açık; `storage/batches/20261105-220755_altyazi-iki`; config.toml özeti baştan sona aynı):
+  - Konular: "Kara deliklerin içinde zaman durur mu?" (208 sn) ve "Mars'ta neden su yok?" (214 sn); toplam 424 sn.
+  - Altyazılar: 13 → 16 ve 16 → 17 (3 ve 1 bölme); noktalama ikisinde de geri geldi. İki çeviri de tek çağrıda geldi; doğrulayıcı sorunu ve çeviri uyarısı yok.
+  - Bağımsız ayrıştırıcı: ffmpeg'in srt okuyucusu dört dosyayı da hatasız ASS'ye çevirdi, Dialogue sayıları aynı.
+  - Yumuşak altyazı: geçici mp4'e mov_text olarak eklendi (akışlar `tur`, `eng`). Gömülü akışlardan iki dilde çıkarılan karelerde yumuşak altyazı, videoya gömülü Türkçe altyazıyla aynı anda aynı cümleyi gösteriyor.
+  - Ses uyumu, görevin müziksiz `audio.mp3`'ünde silencedetect ile ölçüldü:
+    - her altyazının süresinin en az %87'si (ortalama %93–96) konuşmayla örtüşüyor;
+    - konuşmanın %97–98'i altyazıyla kapsanıyor;
+    - duraklamadan sonra başlayan altyazılar konuşma başlangıcına ortalama 0,11–0,12 sn, en fazla 0,18 sn uzakta.
+  - Çeviri değerlendirmesi:
+    - Anlam kaybı yok; terimler yerinde (event horizon, redshifted, relativity, solar wind, rover); sayılar İngilizce biçimde ("7,700 kilometers per second").
+    - Satır satır çeviri zorunluluğu birkaç yerde sözdizimini zorluyor. "was circled in sixteen years by the star S2" edilgen ve ağır; "froze into soil and poles" sıkıştırılmış.
+    - Bir altyazının içeriği komşusuna kayabiliyor ("buharlaştı" İngilizcede sonraki satırda). Zamanlama aynı kaldığı için okunuşu bozmuyor.
+    - "hidrojenin ağır biçimi" "hydrogen's heavy form" olarak kaldı; yerleşik terim "deuterium" olurdu. İstem yerleşik terimi istiyor ama kaynak da terimi kullanmamıştı.
+    - Bir önceki denemede (Satürn) çevirmen yanıltıcı Türkçe "bize dönük"ü "edge-on" yaparak anlamı düzeltti. Doğru ama kaynağa sadık değil; denetçi o cümleyi zaten Y işaretliyor.
 
 **Kalite** (`kalite.json`, `batch_package.build_package`)
 - Doğruluk denetimi: metni yazan istemden bağımsız, şüpheci bir denetçi (`AUDIT_PROMPT`; talimat İngilizce, gerekçeler Türkçe). İddia başına D (doğru ve kesin), B (basitleştirilmiş, kesin değil ya da doğrulanamıyor; emin değilse B), Y (yanıltıcı), X (yanlış) ve kısa bir gerekçe, JSON olarak. Yanıt okunamazsa bir kez yeniden istenir; yine olmazsa "yapılamadı".
@@ -179,7 +219,7 @@ mpt batch .\konular.csv --preset presets\uzay.toml                            # 
   - filtre elemeleri: metaveride kişi, yazı, telif, kredi, çözünürlük; önizlemede yazı; yüz.
 - Önbellekten gelen NASA aramaları günlüğe yazılmaz. Bu yüzden elemeler yalnız yeni aramalarda sayılır; önbellekten gelen arama sayısı `onbellekten_gelen_aramalar`'da.
 - **Kontrol gerekli** sayılan durumlar: en az bir Y ya da X; denetim yapılamadı; glifsiz karakter; kredi sorunu; paket hazırlanamadı.
-- **Uyarı** (`uyarilar`; kartta turuncu satır, tek başına kontrol gerektirmez): süre ya da kelime sayısı hedef dışı. LLM kelime sayısını birkaç kelime şaşırıyor; ilk e2e'de bunlar kontrol gerekli sayılınca 3 videonun 2'si yalnız 86 ve 88 kelime yüzünden işaretlendi.
+- **Uyarı** (`uyarilar`; kartta turuncu satır, tek başına kontrol gerektirmez): süre ya da kelime sayısı hedef dışı; altyazı uyarıları (hizalanamayan metin, doğrulayıcı sorunu, çeviri uyarıları). LLM kelime sayısını birkaç kelime şaşırıyor; ilk e2e'de bunlar kontrol gerekli sayılınca 3 videonun 2'si yalnız 86 ve 88 kelime yüzünden işaretlendi.
 
 **rapor.html**
 - Tek dosya, çevrimdışı açılır; görseller ve bağlantılar göreli yolla. Her konudan sonra yeniden yazılır.
@@ -236,7 +276,10 @@ Dal `feat/batch-webui` (`feat/batch-production` üzerinden). Kod `webui/batch_pa
 - Süreç bitince sonuç klasörden okunur: bitti, yarım kaldı ("Geçmiş'ten devam ettirin") ya da hiç başlayamadı (batch.log'un son hata satırıyla).
 - Geçmiş: `storage/batches` altındaki son 10 toplu iş (tarih, konu sayısı, bitti/başarısız/kontrol gerekli, tamamlandı/yarım/çalışıyor). "Raporu aç" (varsayılan tarayıcıda `rapor.html`), "Klasörü aç" ve yarım kalanlarda "Devam ettir". Raporu ve klasörü yalnız yerel erişimde açar: masaüstü olan sistem, Streamlit `server.address` (yoksa `listen_host`) döngü adresi ve istemci döngü adresinden. Değilse yolu gösterir.
 - Tek video sayfası, bir toplu iş çalışırken Video Oluştur düğmesinin üstünde uyarı gösterir (CPU çakışması); düğme çalışmaya devam eder.
-- 80 metin (`batch.*`) 14 dilde.
+- Çeviri dilleri için çoklu seçim (`batch_subtitles.LANGUAGES`, videonun dili hariç; reçetedeki değerle başlar). Seçim `start_batch(..., translations=…)` ile `--altyazi-cevirileri` olarak gider; reçete dosyasına ve `config.toml`'a yazılmaz. Reçete özetinde "Çeviri altyazıları" satırı var.
+- Tablonun boş hücreleri "None" yerine boş görünür: sütunların varsayılanı `""`, ses seçeneklerinde `""`. "Boş = reçetedeki ses" ipucu sütun başlığında ve tablonun altında (`batch.col.voice_hint`).
+- Geçmiş kartında video başına `.srt` dosyaları ("Altyazı dosyaları" açılır bölümü).
+- 86 metin (`batch.*`) 14 dilde.
 
 **Çalıştırıcı** (`batch_runner`)
 - `start_batch`: `[python, -X, utf8, batch.py, <girdi>, --preset, <reçete>, --output, <klasör>, --gunluk-stderr]`; kabuk yok, `stdin` boş, stdout/stderr klasördeki `batch.log`'a (ekleme kipinde), Windows'ta `CREATE_NEW_PROCESS_GROUP` (POSIX'te yeni oturum). pip kurulumunda `-m app.services.batch_production`. `--gunluk-stderr` batch.py'nin aynı dosyaya ikinci kez yazmasını önler.
@@ -266,7 +309,10 @@ Dal `feat/batch-webui` (`feat/batch-production` üzerinden). Kod `webui/batch_pa
   3. Betik eski bir klasörü izledi.
   İki gerçek hata düzeltildi ve testlendi; üçüncü denemenin toplu işi (`20261105-204332_webui`) WebUI 3 sn'de bir okurken baştan sona çöküşsüz bitti.
 
-**Sıradaki:** arayüzde sonuç inceleme. Geçmiş'teki bir toplu işin videolarını oynatma, kapağı ve kareleri görme, işaretli iddiaları gerekçeleriyle okuma, paylaşım metnini platform başına kopyalanabilir alanlarda gösterme. Bugün bunlar için `rapor.html` açılıyor.
+**Sıradaki**
+- (a) Altyazı görünümü düzenleyicisi: yazı tipi, boyut, renk, kontur ve konum için canlı önizleme (örnek karede); Türkçe glif kontrolü (ğ ı İ ş ç ö ü ve noktalama, `video._subtitle_font_supports_sample`); sonucu yeni bir reçete olarak kaydetme (`presets/*.toml`). Bugün altyazı görünümü `uzay.toml`'da elle sabitleniyor.
+- (b) İki aşamalı toplu iş: önce bütün konular için metin ve terimleri üret ve denetle (`--stop-at terms` + doğruluk denetimi); arayüzde metni düzelt ya da onayla; sonra yalnız onaylananları render et (`--video-script` / `--video-terms` ile). İşaretli iddialar render'dan önce düzeltilebilir, boşa render olmaz.
+- (c) Arayüzde sonuç inceleme: Geçmiş'teki bir toplu işin videolarını oynatma, kapağı ve kareleri görme, işaretli iddiaları gerekçeleriyle okuma, paylaşım metnini ve `.srt`'leri platform başına kopyalanabilir alanlarda gösterme. Bugün bunlar için `rapor.html` açılıyor.
 
 ## Planlanan iyileştirmeler
 
