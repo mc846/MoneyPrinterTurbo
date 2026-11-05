@@ -337,6 +337,7 @@ class ItemState:
     failed_stage: str = ""
     seconds: float = 0.0
     quality: dict = field(default_factory=dict)
+    started: str = ""  # son denemenin başlangıcı (çalışırken geçen süre için)
 
 
 @dataclass
@@ -386,7 +387,7 @@ def find_previous_batch(input_path: Path, preset: Preset) -> Path | None:
     return max(candidates)[1] if candidates else None
 
 
-def _new_batch_dir(input_path: Path) -> Path:
+def new_batch_dir(input_path: Path) -> Path:
     """storage/batches/<tarih-saat>_<girdi adı>; aynı saniyede ikinci bir klasör -2, -3… alır."""
     name = f"{datetime.now():%Y%m%d-%H%M%S}_{slugify(input_path.stem)}"
     candidate, number = batches_dir() / name, 1
@@ -456,6 +457,7 @@ def _process(item: ItemState, state: BatchState, preset: Preset, batch_dir: Path
     item.status, item.error, item.failed_stage = "running", "", ""
     item.attempts += 1
     item.task_id = str(uuid.uuid4())
+    item.started = datetime.now().isoformat(timespec="seconds")
     state.save(batch_dir)
     started = time.monotonic()
     logger.info(f"toplu üretim [{item.index}/{len(state.items)}] başladı: {item.subject}")
@@ -476,6 +478,7 @@ def _process(item: ItemState, state: BatchState, preset: Preset, batch_dir: Path
         return
     finally:
         logger.remove(handler)
+    logger.info(f"toplu üretim [{item.index}] paket hazırlanıyor")  # batch_runner bu satırı aşama olarak okur
     try:
         item.quality = packager(item=item, result=result, preset=preset,
                                 folder=batch_dir / item.folder, log_lines=captured)
@@ -499,10 +502,14 @@ def run_batch(
     task_runner: Callable | None = None,
     packager: Callable | None = None,
     reporter: Callable | None = None,
+    hold_lock: bool = False,
+    log_file: bool = True,
 ) -> int:
     """
     Toplu üretimi çalıştırır; tamamı bittiyse 0, başarısız konu kaldıysa 1, Ctrl+C ile
     durdurulduysa 130 döner. task_runner/packager/reporter testlerde sahte fonksiyonla değişir.
+    hold_lock: süreç boyunca batch_runner kilidini tutar (batch.py). log_file=False iken günlük
+    klasördeki batch.log'a ayrıca yazılmaz (WebUI stderr'i zaten oraya yönlendirir).
     """
     from app.services import batch_package
 
@@ -517,8 +524,21 @@ def run_batch(
         batch_dir = Path(output)
     else:
         previous = None if new else find_previous_batch(input_path, preset)
-        batch_dir = previous or _new_batch_dir(input_path)
+        batch_dir = previous or new_batch_dir(input_path)
     batch_dir.mkdir(parents=True, exist_ok=True)
+    if not hold_lock:
+        return _run_in_folder(batch_dir, input_path, preset, items, task_runner, packager, reporter, log_file)
+    from app.services import batch_runner
+
+    batch_runner.acquire_lock(batch_dir)  # başka bir toplu üretim çalışıyorsa BatchBusy
+    try:
+        return _run_in_folder(batch_dir, input_path, preset, items, task_runner, packager, reporter, log_file)
+    finally:
+        batch_runner.release_lock()
+
+
+def _run_in_folder(batch_dir: Path, input_path: Path, preset: Preset, items: list[BatchInput],
+                   task_runner: Callable, packager: Callable, reporter: Callable, log_file: bool) -> int:
     if (batch_dir / STATE_FILE).exists():
         state = BatchState.load(batch_dir)
         if state.input_sha256 != _file_sha256(input_path) or state.preset_sha256 != preset.sha256:
@@ -535,7 +555,7 @@ def run_batch(
     state.finished = ""
     state.save(batch_dir)
 
-    log_handler = logger.add(str(batch_dir / LOG_FILE), level="INFO", encoding="utf-8")
+    log_handler = logger.add(str(batch_dir / LOG_FILE), level="INFO", encoding="utf-8") if log_file else None
     apply_app_overrides(preset)
     started = time.monotonic()
     done = sum(item.status == "done" for item in state.items)
@@ -566,7 +586,8 @@ def run_batch(
         try:
             reporter(state, batch_dir)
         finally:
-            logger.remove(log_handler)
+            if log_handler is not None:
+                logger.remove(log_handler)
     failed = [item for item in state.items if item.status == "failed"]
     logger.info(
         f"toplu üretim bitti: {sum(i.status == 'done' for i in state.items)} başarılı, {len(failed)} başarısız, "
@@ -588,6 +609,8 @@ def main(argv: list[str] | None = None, prog: str = "batch.py") -> int:
     parser.add_argument("--output", help="çıktı klasörü (varsayılan storage/batches/<tarih-saat>_<girdi>)")
     parser.add_argument("--yeni", action="store_true",
                         help="aynı girdi ve reçeteyle önceki bir toplu üretim olsa da yeni klasörde baştan başla")
+    # WebUI (batch_runner) stdout/stderr'i batch.log'a yönlendirir; günlük ikinci kez yazılmaz.
+    parser.add_argument("--gunluk-stderr", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     import app.config  # noqa: F401 -- yapılandırma ve günlük ayarları
     from app.utils.logging_utils import configure_terminal_logger, get_logging_options
@@ -596,11 +619,24 @@ def main(argv: list[str] | None = None, prog: str = "batch.py") -> int:
     # Windows'ta Ctrl+Break (CTRL_BREAK_EVENT) da Ctrl+C gibi KeyboardInterrupt olur ve temiz durdurur.
     has_break = hasattr(signal, "SIGBREAK")
     previous_break = signal.signal(signal.SIGBREAK, signal.default_int_handler) if has_break else None
+    from app.services.batch_runner import BatchBusy
+
     try:
-        return run_batch(args.input, args.preset, output=args.output, new=args.yeni)
+        return run_batch(args.input, args.preset, output=args.output, new=args.yeni, hold_lock=True,
+                         log_file=not args.gunluk_stderr)
     except (BatchInputError, PresetError) as exc:
         logger.error(str(exc))
         return 2
+    except BatchBusy as exc:
+        logger.error(str(exc))
+        return 3
     finally:
         if has_break:
             signal.signal(signal.SIGBREAK, previous_break or signal.SIG_DFL)
+
+
+if __name__ == "__main__":  # pip kurulumunda batch_runner `python -m app.services.batch_production` kullanır
+    from app.utils.logging_utils import force_utf8_console
+
+    force_utf8_console()
+    raise SystemExit(main())
