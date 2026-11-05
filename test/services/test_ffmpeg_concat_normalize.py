@@ -129,10 +129,11 @@ def test_transitions_and_speed_changes_keep_the_moviepy_path(tmp_path, small_can
     assert output.stat().st_size > 0
 
 
-def test_clips_at_the_video_size_keep_the_moviepy_path(tmp_path, small_canvas):
+def test_clips_at_the_video_size_that_cannot_be_used_as_they_are_are_cut_with_ffmpeg(tmp_path, small_canvas):
+    # x264 默认带 B 帧，不能原样复制拼接：按成片尺寸用 ffmpeg 取段重新编码（不缩放）。
     source = _source(tmp_path / "exact.mp4", "180x320", 30)
     _, spy = _combine(tmp_path, "exact", [source], 1.5, video_concat_mode=VideoConcatMode.sequential)
-    spy.assert_not_called()
+    assert spy.call_count == 1
 
 
 def test_failed_ffmpeg_normalization_falls_back_to_moviepy(tmp_path, small_canvas):
@@ -224,17 +225,118 @@ def test_failed_stream_copy_falls_back_to_re_encoding(tmp_path):
 
 
 def test_combined_video_from_mixed_paths_is_stream_copied(tmp_path, small_canvas):
-    """MoviePy（原尺寸片段）和 ffmpeg（需要缩放的片段）写出的临时片段 SPS/PPS 相同，可以直接复制拼接。"""
+    """MoviePy 和 ffmpeg 写出的临时片段 SPS/PPS 相同，可以直接复制拼接。"""
     exact = _source(tmp_path / "exact.mp4", "180x320", 30, seconds=2)
     wide = _source(tmp_path / "wide.mp4", "640x360", 25, seconds=2)
     messages = []
     handler = logger.add(lambda message: messages.append(str(message)), level="INFO")
+    real = video._normalize_clip_with_ffmpeg
+
+    def only_the_wide_clip(item, *args):
+        if item.file_path == str(exact):
+            raise RuntimeError("use MoviePy for this clip")
+        return real(item, *args)
+
     try:
-        output, spy = _combine(tmp_path, "mixed", [exact, wide], 3.5, video_concat_mode=VideoConcatMode.sequential)
+        with patch.object(video, "_normalize_clip_with_ffmpeg", side_effect=only_the_wide_clip):
+            output, _ = _combine(tmp_path, "mixed", [exact, wide], 3.5, video_concat_mode=VideoConcatMode.sequential)
     finally:
         logger.remove(handler)
-    assert spy.call_count == 1
+    assert any("ffmpeg clip normalization failed, using MoviePy" in m for m in messages)
     assert any("concatenated 2 clips by stream copy" in m for m in messages)
     with VideoFileClip(str(output), audio=False) as clip:
         assert list(clip.size) == list(TARGET)
         assert clip.duration == pytest.approx(3.5, abs=0.05)
+
+
+# ---------------------------------------------------------------- 原样使用成片尺寸的整段素材
+
+def _as_is_clip(tmp_path, name, seconds=2.0, size="180x320", audio=False):
+    """与临时片段相同编码（x264 无 B 帧、BT.709、30 fps）的成片尺寸素材，例如按成片尺寸渲染的图片片段。"""
+    raw = _source(tmp_path / f"{name}-raw.mp4", size, 30, seconds=seconds)
+    width, height = (int(part) for part in size.split("x"))
+    target = tmp_path / f"{name}.mp4"
+    item = video.SubClippedVideoClip(file_path=str(raw), start_time=0, end_time=seconds, width=width, height=height)
+    video._normalize_clip_with_ffmpeg(item, (width, height), VideoFitMode.cover, str(target))
+    if audio:
+        with_audio = tmp_path / f"{name}-audio.mp4"
+        _run("-y", "-i", str(target), "-f", "lavfi", "-i", "sine=d=1", "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+             "-shortest", str(with_audio))
+        return with_audio
+    return target
+
+
+def _combine_logged(tmp_path, name, sources, seconds, **options):
+    messages = []
+    handler = logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        output, spy = _combine(tmp_path, name, sources, seconds, **options)
+    finally:
+        logger.remove(handler)
+    return output, spy, messages
+
+
+def test_whole_clip_at_the_video_size_goes_into_the_concat_as_it_is(tmp_path, small_canvas):
+    clip = _as_is_clip(tmp_path, "zoom", seconds=2.0)
+    published = clip.read_bytes()
+    output, spy, messages = _combine_logged(tmp_path, "as-is", [clip], 1.5, video_concat_mode=VideoConcatMode.sequential)
+    spy.assert_not_called()
+    assert any("clip 1 used as it is" in m for m in messages)
+    assert any("by stream copy" in m for m in messages)
+    # 素材缓存里的文件原样保留，不会被当作临时片段删除。
+    assert clip.read_bytes() == published
+    # 与重新编码的路径同样长：取到音频时长（1.5 秒 → 45 帧），起点为 0。
+    with patch.object(video, "_clip_usable_as_is", return_value=False):
+        reencoded, _, _ = _combine_logged(tmp_path, "re-encoded", [clip], 1.5, video_concat_mode=VideoConcatMode.sequential)
+    packets, reference = _video_packets(output), _video_packets(reencoded)
+    assert len(packets) == len(reference) == 45
+    assert packets[0][2].strip() == reference[0][2].strip() == "0"
+    assert min(_frame_ssim(output, reencoded, tmp_path)) >= 0.98
+
+
+def test_mixed_as_is_and_normalized_clips_are_stream_copied(tmp_path, small_canvas):
+    as_is = _as_is_clip(tmp_path, "zoom", seconds=2.0)
+    wide = _source(tmp_path / "wide.mp4", "640x360", 25, seconds=2)
+    output, spy, messages = _combine_logged(tmp_path, "mixed-as-is", [as_is, wide], 3.5,
+                                            video_concat_mode=VideoConcatMode.sequential)
+    assert spy.call_count == 1 and any("used as it is" in m for m in messages)
+    assert any("concatenated 2 clips by stream copy" in m for m in messages)
+    assert len(_video_packets(output)) == 105
+    assert as_is.exists()
+
+
+@pytest.mark.parametrize("case", ["part", "audio", "b-frames", "transition", "speed"])
+def test_clips_that_are_not_used_as_they_are(tmp_path, small_canvas, case):
+    options = {"video_concat_mode": VideoConcatMode.sequential}
+    if case == "part":
+        # 4 秒的素材在 2 秒一段的随机模式里被分成两段：只取一部分时必须重新编码。
+        sources, options = [_as_is_clip(tmp_path, "long", seconds=4.0)], {"video_concat_mode": VideoConcatMode.random}
+    elif case == "audio":
+        sources = [_as_is_clip(tmp_path, "voiced", audio=True)]
+    elif case == "b-frames":
+        sources = [_source(tmp_path / "bframes.mp4", "180x320", 30, seconds=2)]
+    else:
+        sources = [_as_is_clip(tmp_path, "zoom")]
+        options.update({"video_transition_mode": VideoTransitionMode.fade_in} if case == "transition"
+                       else {"clip_speed": 1.5})
+    output, spy, messages = _combine_logged(tmp_path, case, sources, 1.5, **options)
+    assert not any("used as it is" in m for m in messages)
+    if case in ("transition", "speed"):
+        spy.assert_not_called()
+    else:
+        assert spy.called
+    assert output.stat().st_size > 0 and all(source.exists() for source in sources)
+
+
+def test_as_is_clips_are_re_encoded_when_the_list_cannot_be_copied(tmp_path, small_canvas):
+    """其它片段的码流参数不同（例如硬件编码器写出）时，原样使用的素材也按原来的方式重新写出。"""
+    clip = _as_is_clip(tmp_path, "zoom", seconds=2.0)
+    published = clip.read_bytes()
+    with patch.object(video, "_clips_allow_stream_copy", return_value=False):
+        output, spy, messages = _combine_logged(tmp_path, "no-copy", [clip], 1.5,
+                                                video_concat_mode=VideoConcatMode.sequential)
+    assert any("re-encoding 1 clips used as they are" in m for m in messages)
+    assert spy.call_count == 1
+    assert len(_video_packets(output)) == 45
+    assert clip.read_bytes() == published
+    assert not list(tmp_path.glob("temp-clip-*"))
