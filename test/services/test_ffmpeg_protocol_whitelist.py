@@ -162,6 +162,8 @@ def test_local_dash_manifest_cannot_open_urls(tmp_path, name):
     assert f"Protocol 'http' {REJECTED}" in result.stderr
 
 
+# MoviePy's FFMPEG_AudioReader.__del__ touches attributes a failed __init__ never set.
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 def test_moviepy_readers_reject_a_playlist(hls, monkeypatch):
     commands = []
     original = ffmpeg_inputs.restrict_ffmpeg_inputs
