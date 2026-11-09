@@ -76,6 +76,9 @@ from app.utils.logging_utils import (
 from app.utils import utils
 from app.utils.request_logging import trace_http_call
 
+# Once per process, not per rerun: which ffmpeg the WebUI will use.
+utils.log_ffmpeg_version()
+
 st.set_page_config(
     page_title="MoneyPrinterTurbo",
     page_icon="🤖",
