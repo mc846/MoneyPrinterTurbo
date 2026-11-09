@@ -928,6 +928,9 @@ def concat_video_clips_with_ffmpeg(
     def build_command(codec: str) -> list[str]:
         command = [
             utils.get_ffmpeg_binary(),
+            # Otherwise FFmpeg reads keys from the console it inherits: "q"
+            # ends the video early and "c" waits for Enter.
+            "-nostdin",
             "-y",
             "-f",
             "concat",
@@ -2645,6 +2648,11 @@ def _image_clip_settings_identity(
         "fps": _IMAGE_CLIP_FPS,
         "encoding": _IMAGE_CLIP_ENCODING,
     }
+    if not output_size and motion == ImageMotion.zoom:
+        # v1.3.10 bu yolu tamsayı boyutlu, titreyen yakınlaştırmadan alt piksel afin dönüşüme
+        # (_smooth_zoom_clip) geçirdi: eski önbellek kullanılmasın. Yalnız bu yolun kimliği
+        # değişir; hedef boyutlu klipler (NASA) zaten alt piksel kırpar ve önbellekleri geçerli kalır.
+        settings["zoom"] = "smooth"
     encoded = json.dumps(settings, sort_keys=True).encode()
     return hashlib.sha256(encoded).hexdigest()[:16]
 
@@ -2752,6 +2760,53 @@ def _target_size_image_clip(
     return VideoClip(frame_function=frame_at, duration=clip_duration)
 
 
+def _smooth_zoom_clip(clip, zoom_amount: float):
+    """
+    以亚像素精度生成缓慢放大的片段，画布尺寸保持不变。
+
+    旧实现 `clip.resized(lambda t: ...)` 每帧把图片缩放到整数尺寸，再按整数
+    偏移居中裁切。放大速度很慢时（每秒约 3%），相邻帧的尺寸要么不变、要么
+    跳 1px，中心偏移也随取整来回摆动，成片里表现为画面抖动/顿挫，放大到
+    1080x1920 后更明显。
+
+    这里固定输出尺寸，每帧以图片中心为原点做仿射变换（BICUBIC 插值），
+    缩放比例随时间连续变化。构图与旧实现一致：从原图开始，以中心为基准
+    放大并裁掉超出画布的部分。带透明通道的图片同样处理遮罩。
+    """
+    base = Image.fromarray(np.asarray(clip.get_frame(0)).astype("uint8"))
+    width, height = base.size
+    center_x, center_y = width / 2.0, height / 2.0
+    duration = clip.duration or 1.0
+    mask_base = None
+    if clip.mask is not None:
+        mask_frame = np.asarray(clip.mask.get_frame(0)) * 255
+        mask_base = Image.fromarray(mask_frame.clip(0, 255).astype("uint8"))
+
+    def warp(image, t, resample):
+        progress = min(max(t, 0.0), duration) / duration
+        scale = 1.0 + zoom_amount * progress
+        # 输出像素 (x, y) 取自原图 (cx + (x - cx) / s, cy + (y - cy) / s)。
+        coefficients = (
+            1 / scale, 0, center_x - center_x / scale,
+            0, 1 / scale, center_y - center_y / scale,
+        )
+        return image.transform(
+            (width, height), Image.AFFINE, coefficients, resample=resample
+        )
+
+    zoomed = VideoClip(
+        lambda t: np.asarray(warp(base, t, Image.BICUBIC)), duration=clip.duration
+    )
+    if mask_base is not None:
+        mask = VideoClip(
+            lambda t: np.asarray(warp(mask_base, t, Image.BILINEAR)) / 255.0,
+            is_mask=True,
+            duration=clip.duration,
+        )
+        zoomed = zoomed.with_mask(mask)
+    return zoomed.with_position("center")
+
+
 def render_image_zoom_video(
     image_path: str,
     clip_duration: int = 5,
@@ -2801,12 +2856,10 @@ def render_image_zoom_video(
                 source_frame, source_mask, clip_duration, motion, output_size, fit_mode
             )
         else:
-            # 只有放大模式改变画面尺寸，静止模式保留原始构图及透明背景处理。
+            # 放大模式以亚像素精度逐帧放大（v1.3.10 的 _smooth_zoom_clip），静止模式
+            # 保留原始构图及透明背景处理。
             image_clip = (
-                clip.resized(
-                    lambda t: 1
-                    + (clip_duration * _IMAGE_ZOOM_RATE_PER_SECOND) * (t / clip.duration)
-                )
+                _smooth_zoom_clip(clip, clip_duration * _IMAGE_ZOOM_RATE_PER_SECOND)
                 if motion == ImageMotion.zoom
                 else clip
             )
