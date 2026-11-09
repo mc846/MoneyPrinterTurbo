@@ -31,6 +31,10 @@ VIEW_BATCH = "batch"
 REFRESH_SECONDS = 3
 DRAFT_FILE = ".taslak.json"
 COLUMNS = ("konu", "talimat", "ses")
+# Tablodaki "ses seçilmedi" değeri. Streamlit'in SelectboxColumn'u "" değerini (seçeneklerde olsa da,
+# format_func etiketi verilse de) boş değer sayıp gri "None" çizer; TextColumn çizmez. Tek boşluk boş
+# görünür; normalize_rows hücreleri kırptığı için taslağa, CSV'ye ve doğrulamaya yine "" gider.
+EMPTY_VOICE = " "
 DEFAULT_PRESET = "uzay.toml"
 HISTORY_LIMIT = 10
 LOG_LINES = 12
@@ -378,20 +382,21 @@ def _render_editor(tr, running: bool) -> None:
     if st.button(tr("batch.list.clear"), key="batch_clear", icon=":material/delete_sweep:"):
         _replace_rows([])
 
-    base = pd.DataFrame(st.session_state["batch_rows"], columns=list(COLUMNS))
+    base = pd.DataFrame([{**row, "ses": row["ses"] or EMPTY_VOICE} for row in st.session_state["batch_rows"]],
+                        columns=list(COLUMNS))
     edited = st.data_editor(
         base,
         key=f"batch_editor_{st.session_state['batch_editor_version']}",
         num_rows="dynamic",
         hide_index=True,
         width="stretch",
-        # Yeni satırların boş hücreleri "None" yerine boş görünsün: varsayılan "" ve sesin "" seçeneği
-        # (boş = reçetedeki ses; ipucu başlıkta ve tablonun altında).
+        # Boş hücreler "None" yerine boş görünsün: metin sütunlarında varsayılan "", seste EMPTY_VOICE
+        # (taslaktan yüklenen satırlarda da; boş = reçetedeki ses, ipucu başlıkta ve tablonun altında).
         column_config={
             "konu": st.column_config.TextColumn(tr("batch.col.subject"), width="large", default=""),
             "talimat": st.column_config.TextColumn(tr("batch.col.instruction"), width="large", default=""),
-            "ses": st.column_config.SelectboxColumn(tr("batch.col.voice"), options=["", *voices], default="",
-                                                    help=tr("batch.col.voice_help")),
+            "ses": st.column_config.SelectboxColumn(tr("batch.col.voice"), options=[EMPTY_VOICE, *voices],
+                                                    default=EMPTY_VOICE, help=tr("batch.col.voice_help")),
         },
     )
     rows = normalize_rows(edited.to_dict("records"))
