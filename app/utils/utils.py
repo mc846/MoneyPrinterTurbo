@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from functools import lru_cache
 from pathlib import Path
 import threading
@@ -228,8 +229,15 @@ def ffmpeg_version_line(binary: str, timeout: int = 10) -> str:
     return first_line[0].split(" Copyright", 1)[0].strip()
 
 
-_ffmpeg_version_logged = False
-_ffmpeg_version_lock = threading.Lock()
+# Kept on the sys module, not in this module's globals: Streamlit's source watcher
+# re-imports app modules when a source file changes (also on spurious Windows file
+# events, see the note in webui/Main.py), which would reset a module global and log
+# again in the same process. setdefault on a dict is atomic.
+_FFMPEG_VERSION_LOG_STATE = "_moneyprinterturbo_ffmpeg_version_log"
+
+
+def _ffmpeg_version_log_state() -> dict:
+    return sys.__dict__.setdefault(_FFMPEG_VERSION_LOG_STATE, {"lock": threading.Lock(), "logged": False})
 
 
 def log_ffmpeg_version() -> None:
@@ -241,11 +249,11 @@ def log_ffmpeg_version() -> None:
     or the one bundled with imageio-ffmpeg is in use. A missing or broken
     binary is only reported here; check_ffmpeg_ready() still guards each task.
     """
-    global _ffmpeg_version_logged
-    with _ffmpeg_version_lock:
-        if _ffmpeg_version_logged:
+    state = _ffmpeg_version_log_state()
+    with state["lock"]:
+        if state["logged"]:
             return
-        _ffmpeg_version_logged = True
+        state["logged"] = True
     binary = get_ffmpeg_binary()
     source = _ffmpeg_binary_source(binary)
     try:

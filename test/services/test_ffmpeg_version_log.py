@@ -1,7 +1,10 @@
 """Startup log of the ffmpeg in use: path, where it came from and its version line, once per process."""
 
+import importlib.util
 import runpy
 import subprocess
+import sys
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,8 +25,8 @@ VERSION_OUTPUT = (
 
 @pytest.fixture
 def records(monkeypatch):
-    """Collect log messages and reset the once-per-process flag."""
-    monkeypatch.setattr(utils, "_ffmpeg_version_logged", False)
+    """Collect log messages and reset the once-per-process state."""
+    monkeypatch.setitem(sys.__dict__, utils._FFMPEG_VERSION_LOG_STATE, {"lock": threading.Lock(), "logged": False})
     messages = []
     sink = logger.add(lambda message: messages.append(message.record), level="DEBUG")
     yield messages
@@ -57,6 +60,22 @@ def test_logs_path_source_and_version_line_once(records, monkeypatch, tmp_path):
             "ffmpeg version 9.0.2-essentials_build-www.gyan.dev",
         )
     ]
+
+
+def test_a_reimported_module_does_not_log_again(records, monkeypatch, tmp_path):
+    """Streamlit's source watcher re-imports app modules; the process still logs once."""
+    monkeypatch.setenv("IMAGEIO_FFMPEG_EXE", str(tmp_path / "ffmpeg.exe"))
+    spec = importlib.util.spec_from_file_location("reimported_utils", utils.__file__)
+    reimported = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reimported)
+    with (
+        patch.dict(config.app, {"ffmpeg_path": ""}),
+        patch.object(subprocess, "run", side_effect=_version_run) as run,
+    ):
+        utils.log_ffmpeg_version()
+        reimported.log_ffmpeg_version()
+    assert run.call_count == 1
+    assert len(_ffmpeg_lines(records)) == 1
 
 
 def test_names_app_ffmpeg_path_when_config_set_the_variable(records, monkeypatch, tmp_path):
