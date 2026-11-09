@@ -478,8 +478,12 @@ def _place_video(source: Path, target: Path) -> str:
         return "kopya"
 
 
-def build_package(item, result: dict, preset, folder: Path, log_lines: list[str], ask=_ask) -> dict:
-    """Bir videonun yükleme paketini ve kalite dosyasını yazar; durum için kısa bir özet döner."""
+def build_package(item, result: dict, preset, folder: Path, log_lines: list[str], ask=_ask,
+                  review: dict | None = None) -> dict:
+    """
+    Bir videonun yükleme paketini ve kalite dosyasını yazar; durum için kısa bir özet döner. review (iki aşamalı
+    akış, batch_review.approved_copy): metin yeniden denetlenmez, onaylanan metnin son denetimi kullanılır.
+    """
     folder.mkdir(parents=True, exist_ok=True)
     final_video = Path(result["videos"][0])
     task_dir = Path(utils.task_dir(item.task_id))
@@ -508,10 +512,15 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
         cover.save(folder / "kapak.jpg", "JPEG", quality=90)
     moments = contact_sheet(final_video, folder / "kareler.jpg")
 
-    audit = audit_script(item.subject, script, ask=ask) if preset.audit else {
-        "durum": "kapalı", "iddialar": [], "sayim": {}, "isaretli": []}
+    if review is not None:
+        audit = review.get("audit") or {"durum": "kapalı", "iddialar": [], "sayim": {}, "isaretli": []}
+    elif preset.audit:
+        audit = audit_script(item.subject, script, ask=ask)
+    else:
+        audit = {"durum": "kapalı", "iddialar": [], "sayim": {}, "isaretli": []}
     checks = technical_checks(task_dir, final_video, script, params, terms, material_sources, log_lines, preset)
-    reasons = review_reasons(audit, checks) if preset.audit else review_reasons({"durum": "tamam"}, checks)
+    audited = audit.get("durum") != "kapalı"
+    reasons = review_reasons(audit, checks) if audited else review_reasons({"durum": "tamam"}, checks)
     warnings = check_warnings(checks) + subtitles["uyarilar"]
     quality = {
         "konu": item.subject,
@@ -528,6 +537,12 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
         "paylasim": texts,
         "terimler": terms,
     }
+    if review is not None:
+        quality["inceleme"] = {key: review.get(key) for key in (
+            "approved_at", "approved_despite_flags", "script_edited", "terms_edited", "regenerations")}
+        if review.get("approved_despite_flags"):
+            reasons.append("Y/X ile yine de onaylandı")
+            quality["kontrol_gerekli"] = True
     (folder / "kalite.json").write_text(json.dumps(quality, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"kontrol_gerekli": quality["kontrol_gerekli"], "nedenler": reasons, "uyarilar": warnings,
             "sure_sn": checks["sure_sn"], "kelime": checks["kelime"], "sayim": audit.get("sayim", {}),
@@ -595,10 +610,12 @@ def _item_card(batch_dir: Path, item) -> str:
     esc = html.escape
     # kalite.json yoksa (paket yazılamadıysa) state.json'daki kısa özet kullanılır.
     quality = (_load_quality(batch_dir, item) or item.quality) if item.status == "done" else {}
+    waiting_labels = {"awaiting_review": "onay bekliyor", "approved": "onaylandı", "skipped": "atlandı",
+                      "preparing": "hazırlanıyor", "rendering": "render ediliyor"}
     if item.status == "failed":
         badge = '<span class="badge bad">başarısız</span>'
     elif item.status != "done":
-        badge = '<span class="badge">bekliyor</span>'
+        badge = f'<span class="badge">{waiting_labels.get(item.status, "bekliyor")}</span>'
     elif quality.get("kontrol_gerekli"):
         badge = '<span class="badge warn">kontrol gerekli</span>'
     else:
@@ -618,6 +635,9 @@ def _item_card(batch_dir: Path, item) -> str:
     if item.status == "failed":
         stage = f" (aşama: {esc(item.failed_stage)})" if item.failed_stage else ""
         parts.append(f"<p><b>Hata{stage}:</b> {esc(item.error)}</p></section>")
+        return "".join(parts)
+    if item.status == "skipped":
+        parts.append("<p>Bu konu atlandı; videosu üretilmeyecek.</p></section>")
         return "".join(parts)
     if item.status != "done":
         parts.append("<p>Bu konu henüz üretilmedi.</p></section>")
@@ -676,7 +696,7 @@ def _priority(item) -> tuple:
         return (0, item.index)
     if item.status == "done":
         return (1 if item.quality.get("kontrol_gerekli") else 2, item.index)
-    return (3, item.index)
+    return (4 if item.status == "skipped" else 3, item.index)
 
 
 def write_report(state, batch_dir: Path) -> Path:
@@ -684,10 +704,11 @@ def write_report(state, batch_dir: Path) -> Path:
     done = [i for i in items if i.status == "done"]
     failed = [i for i in items if i.status == "failed"]
     review = [i for i in done if i.quality.get("kontrol_gerekli")]
+    skipped = [i for i in items if i.status == "skipped"]
     minutes, seconds = divmod(int(state.run_seconds), 60)
     stats = [("Toplam", len(items)), ("Başarılı", len(done)), ("Başarısız", len(failed)),
-             ("Kontrol gerekli", len(review)), ("Bekleyen", len(items) - len(done) - len(failed)),
-             ("Toplam süre", f"{minutes} dk {seconds} sn")]
+             ("Kontrol gerekli", len(review)), ("Bekleyen", len(items) - len(done) - len(failed) - len(skipped)),
+             *([("Atlanan", len(skipped))] if skipped else []), ("Toplam süre", f"{minutes} dk {seconds} sn")]
     status = "tamamlandı" if state.finished else "sürüyor ya da durduruldu"
     cards = "".join(_item_card(batch_dir, item) for item in sorted(items, key=_priority))
     document = f"""<!doctype html>

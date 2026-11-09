@@ -59,3 +59,17 @@ def no_nasa_preview_downloads(monkeypatch):
     from app.config import config as app_config
 
     monkeypatch.setitem(app_config.app, "nasa_text_filter", False)
+
+
+@pytest.fixture(autouse=True)
+def no_real_batch_review_llm(monkeypatch):
+    """presets/uzay.toml is a two-step batch preset: a test that runs it without review=False or a fake
+    preparer would prepare scripts with the real LLM (claude_code). Fail fast instead; tests that need
+    the services replace them themselves (their monkeypatch runs after this one)."""
+    from app.services import batch_review
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("a test reached the real batch review LLM; pass review=False or fake services")
+
+    monkeypatch.setattr(batch_review, "prepare_item", refuse)
+    monkeypatch.setattr(batch_review, "PipelineServices", refuse)

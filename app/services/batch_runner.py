@@ -41,13 +41,16 @@ _WINDOWS = sys.platform.startswith("win")
 _STILL_ACTIVE = 259
 _ITEM_STARTED = re.compile(r"toplu üretim \[(\d+)/\d+\] başladı")
 _ITEM_PACKAGE = re.compile(r"toplu üretim \[(\d+)\] paket hazırlanıyor")
+_ITEM_AUDIT = re.compile(r"toplu üretim \[(\d+)\] denetleniyor")
 _PHASE = re.compile(r"generation activity: phase=(\w+)")
 # 任务日志里的阶段 → 显示用阶段（WebUI 用 batch.stage.<阶段> 翻译）。
 STAGES = {
     "preparing": "preparing", "script": "script", "terms": "terms", "audio": "audio", "subtitle": "subtitle",
     "materials": "materials", "downloading": "materials", "verifying": "materials", "rendering": "rendering",
-    "package": "package",
+    "package": "package", "audit": "audit",
 }
+# İki aşamalı akışta bir konunun hazırlığı (metin + terimler + denetim) için ilk tahmin (sn).
+DEFAULT_PREPARE_SECONDS = 60.0
 
 
 class BatchBusy(RuntimeError):
@@ -214,46 +217,68 @@ def release_lock(pid: int | None = None) -> None:
 
 # ---------------------------------------------------------------- başlatma
 
+def _entry() -> list[str]:
+    if paths.is_source_checkout():
+        return [sys.executable, "-X", "utf8", str(paths.SOURCE_ROOT / "batch.py")]
+    return [sys.executable, "-X", "utf8", "-m", "app.services.batch_production"]
+
+
 def batch_command(input_path: Path, preset_path: Path, batch_dir: Path,
-                  translations: list[str] | tuple[str, ...] | None = None) -> list[str]:
+                  translations: list[str] | tuple[str, ...] | None = None, review: bool | None = None) -> list[str]:
     """
     Sabit argümanlı komut; günlük çağıranın açtığı batch.log'a stderr üzerinden gider. translations
     verilirse (boş liste = çeviri yok) reçetedeki çeviri dillerinin yerine geçer; state.json'a yazılır.
+    review verilirse reçetedeki review_before_render yerine (--inceleme / --inceleme-yok) geçer.
     """
-    if paths.is_source_checkout():
-        entry = [str(paths.SOURCE_ROOT / "batch.py")]
-    else:
-        entry = ["-m", "app.services.batch_production"]
-    command = [sys.executable, "-X", "utf8", *entry, str(Path(input_path).resolve()), "--preset",
+    command = [*_entry(), str(Path(input_path).resolve()), "--preset",
                str(Path(preset_path).resolve()), "--output", str(Path(batch_dir).resolve()), "--gunluk-stderr"]
     if translations is not None:
         command += ["--altyazi-cevirileri", ",".join(translations)]
+    if review is not None:
+        command.append("--inceleme" if review else "--inceleme-yok")
     return command
+
+
+def render_command(batch_dir: Path) -> list[str]:
+    """İki aşamalı toplu işin render aşaması: yalnız onaylı konular."""
+    return [*_entry(), "render", str(Path(batch_dir).resolve()), "--gunluk-stderr"]
 
 
 _children: dict[int, subprocess.Popen] = {}
 
 
+def _process_options() -> dict:
+    if _WINDOWS:
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _working_directory() -> str:
+    return str(paths.SOURCE_ROOT if paths.is_source_checkout() else paths.runtime_root())
+
+
 def start_batch(input_path: Path, preset_path: Path, batch_dir: Path,
-                translations: list[str] | tuple[str, ...] | None = None) -> int:
+                translations: list[str] | tuple[str, ...] | None = None, review: bool | None = None) -> int:
     """batch.py'yi ayrı süreçte başlatır ve kilidi onun PID'iyle yazar; çalışan varsa BatchBusy."""
+    return _start(batch_command(input_path, preset_path, batch_dir, translations, review), batch_dir)
+
+
+def start_render(batch_dir: Path) -> int:
+    """İki aşamalı toplu işte onaylıların render'ını ayrı süreçte başlatır (aynı kilit ve günlük)."""
+    return _start(render_command(batch_dir), batch_dir)
+
+
+def _start(command: list[str], batch_dir: Path) -> int:
     lock = current_lock()
     if lock:
         raise BatchBusy(lock)
     batch_dir = Path(batch_dir)
     batch_dir.mkdir(parents=True, exist_ok=True)
-    command = batch_command(input_path, preset_path, batch_dir, translations)
-    options = {}
-    if _WINDOWS:
-        options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    else:
-        options["start_new_session"] = True
     environment = dict(os.environ, PYTHONIOENCODING="utf-8")
     with open(batch_dir / bp.LOG_FILE, "a", encoding="utf-8") as log:
         process = subprocess.Popen(
             command, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-            cwd=str(paths.SOURCE_ROOT if paths.is_source_checkout() else paths.runtime_root()),
-            env=environment, **options,
+            cwd=_working_directory(), env=environment, **_process_options(),
         )
     _children[process.pid] = process
     if not _write_lock(_lock_record(process.pid, batch_dir, command)):
@@ -264,6 +289,44 @@ def start_batch(input_path: Path, preset_path: Path, batch_dir: Path,
             raise BatchBusy(existing)
     logger.info(f"toplu üretim başlatıldı: pid={process.pid}, {batch_dir}")
     return process.pid
+
+
+def review_action_command(batch_dir: Path, index: int, action: str, arguments: list[str] | None = None) -> list[str]:
+    """WebUI'nın LLM gerektiren onay işlemi: aynı onay komutu (batch_review.cli_main), ayrı süreçte."""
+    return [*_entry(), action, str(Path(batch_dir).resolve()), str(index), *(arguments or [])]
+
+
+def start_review_action(batch_dir: Path, folder: Path, index: int, action: str,
+                        arguments: list[str] | None = None) -> int:
+    """
+    Onay komutunu alt süreçte başlatır (reçetenin LLM ayarları WebUI'nın config.app'ine değil, o sürece yazılır)
+    ve konunun işlem kilidini alt sürecin PID'iyle yazar. Çıktı konu klasöründeki inceleme.log'a gider; sonuç
+    review.json'un last_action alanında. Kilit zaten varsa ReviewBusy.
+    """
+    from app.services import batch_review
+
+    marker = batch_review.busy(folder)
+    if marker:
+        raise batch_review.ReviewBusy(marker)
+    command = review_action_command(batch_dir, index, action, arguments)
+    environment = dict(os.environ, PYTHONIOENCODING="utf-8")
+    with open(Path(folder) / batch_review.ACTION_LOG, "a", encoding="utf-8") as log:
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                   cwd=_working_directory(), env=environment, **_process_options())
+    _children[process.pid] = process
+    batch_review.mark_busy(folder, action, process.pid)  # alt süreç önce davrandıysa kendi kilidi zaten var
+    logger.info(f"onay işlemi başlatıldı: {action} {Path(folder).name}, pid={process.pid}")
+    return process.pid
+
+
+def _review_resume_phase(state: bp.BatchState) -> str:
+    """İki aşamalı toplu işte "Devam ettir": hazırlık yarımsa hazırlık, render yarıda kaldıysa render."""
+    if any(not item.prepared and item.status != bp.SKIPPED for item in state.items):
+        return "prepare"
+    if any(item.status in (bp.APPROVED, bp.RENDERING) or (item.status == bp.FAILED and item.prepared)
+           for item in state.items):
+        return "render"
+    raise ResumeError("awaiting_review")
 
 
 def resume_batch(batch_dir: Path) -> int:
@@ -281,6 +344,8 @@ def resume_batch(batch_dir: Path) -> int:
         raise ResumeError("changed_input", str(input_path))
     if bp._file_sha256(preset_path) != state.preset_sha256:
         raise ResumeError("changed_preset", str(preset_path))
+    if state.review_before_render and _review_resume_phase(state) == "render":
+        return start_render(batch_dir)
     return start_batch(input_path, preset_path, batch_dir)
 
 
@@ -367,7 +432,9 @@ def stop_batch(timeout: float = STOP_TIMEOUT_SECONDS) -> str:
 class ItemStatus:
     index: int
     subject: str
-    status: str  # pending | running | done | review | failed
+    # pending | running | done | review | failed; iki aşamalı akışta ayrıca preparing | awaiting_review |
+    # approved | rendering | skipped (batch_review.effective_status)
+    status: str
     stage: str = ""
     seconds: float = 0.0
     attempts: int = 0
@@ -385,13 +452,21 @@ class BatchStatus:
     elapsed: float = 0.0
     remaining: float | None = None
     log_tail: list[str] = field(default_factory=list)
+    review: bool = False  # iki aşamalı akış
 
     def count(self, status: str) -> int:
         return sum(item.status == status for item in self.items)
 
     @property
+    def awaiting_review(self) -> bool:
+        """Hazırlık bitti, konular onay ya da render bekliyor (devam ettirilecek iş değil, incelenecek iş)."""
+        return (self.review and not self.finished and not self.running
+                and not any(item.status in ("pending", "failed") for item in self.items)
+                and any(item.status in ("awaiting_review", "approved") for item in self.items))
+
+    @property
     def unfinished(self) -> bool:
-        return not self.finished and not self.running
+        return not self.finished and not self.running and not self.awaiting_review
 
 
 def log_tail(batch_dir: Path, timestamped: bool = True) -> list[str]:
@@ -434,6 +509,8 @@ def current_stage(log_lines: list[str], index: int) -> str:
             continue
         elif (match := _ITEM_PACKAGE.search(line)) and int(match[1]) == index:
             stage = "package"
+        elif (match := _ITEM_AUDIT.search(line)) and int(match[1]) == index:
+            stage = "audit"
         elif match := _PHASE.search(line):
             stage = STAGES.get(match[1], stage)
     return stage
@@ -454,12 +531,25 @@ def batch_status(batch_dir: Path, lock: dict | None = None, now: datetime | None
     lock = current_lock() if lock is None else lock
     running = bool(lock) and Path(lock.get("batch_dir") or "").resolve() == batch_dir.resolve()
     log_lines = log_tail(batch_dir) if running else []
+    review_mode = bool(state.review_before_render)
+    live_statuses = ("running", "preparing", "rendering")
     items = []
     current_extra = 0.0
     for item in state.items:
         note = item.error if item.status == "failed" else "; ".join(item.quality.get("nedenler", []))
         seconds = item.seconds
-        if item.status == "done":
+        if review_mode:
+            from app.services import batch_review
+
+            review = batch_review.load_review(batch_dir / item.folder) if item.prepared else None
+            status = batch_review.effective_status(item, review, running)
+            seconds = item.prepare_seconds + item.seconds
+            if status == "awaiting_review" and review is not None:
+                note = batch_review.describe_audit(review.get("audit"))
+            if status in live_statuses:
+                current_extra = _seconds_since(item.started, now)
+                seconds += current_extra
+        elif item.status == "done":
             status = "review" if item.quality.get("kontrol_gerekli") else "done"
         elif item.status == "failed":
             status = "failed"
@@ -470,19 +560,26 @@ def batch_status(batch_dir: Path, lock: dict | None = None, now: datetime | None
         else:
             status = "pending"  # süreç öldüyse yarıda kalan konu devam ettirilince baştan üretilir
         items.append(ItemStatus(item.index, item.subject, status, current_stage(log_lines, item.index)
-                                if status == "running" else "", round(seconds, 1), item.attempts, note, item.folder))
+                                if status in live_statuses else "", round(seconds, 1),
+                                item.attempts + item.prepare_attempts, note, item.folder))
     elapsed = state.run_seconds
     if running:
         elapsed += _seconds_since(lock.get("started", ""), now)
     remaining = None
     if running:
-        finished = [item.seconds for item in state.items if item.status in ("done", "failed") and item.seconds]
-        average = sum(finished) / len(finished) if finished else DEFAULT_ITEM_SECONDS
-        waiting = sum(item.status == "pending" for item in items)
-        current = max(0.0, average - current_extra) if any(item.status == "running" for item in items) else 0.0
+        preparing = review_mode and not any(item.status in (bp.APPROVED, bp.RENDERING) for item in state.items)
+        if preparing:
+            finished = [item.prepare_seconds for item in state.items if item.prepared and item.prepare_seconds]
+            average = sum(finished) / len(finished) if finished else DEFAULT_PREPARE_SECONDS
+            waiting = sum(item.status == "pending" for item in items)
+        else:
+            finished = [item.seconds for item in state.items if item.status in ("done", "failed") and item.seconds]
+            average = sum(finished) / len(finished) if finished else DEFAULT_ITEM_SECONDS
+            waiting = sum(item.status == ("approved" if review_mode else "pending") for item in items)
+        current = max(0.0, average - current_extra) if any(item.status in live_statuses for item in items) else 0.0
         remaining = round(average * waiting + current, 0)
     return BatchStatus(batch_dir, state.created, state.finished, running, items, round(elapsed, 1), remaining,
-                       log_lines[-40:])
+                       log_lines[-40:], review_mode)
 
 
 def list_batches(limit: int = 20) -> list[BatchStatus]:

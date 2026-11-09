@@ -55,9 +55,13 @@ hiçbir şeye takma ad deme. Akıcı, sade ve heyecanlı bir dil kullan.
 """
 
 # Kalite kontrolü: süre hedefi (saniye) ve bağımsız doğruluk denetimi.
+# review_before_render: iki aşamalı akış. Önce bütün konuların metni ve terimleri üretilip denetlenir;
+# metinler arayüzde (ya da batch.py onay komutlarıyla) düzeltilip onaylanır; yalnız onaylananlar
+# "batch.py render <klasör>" ile videoya dönüşür. WebUI'da yalnız o toplu iş için değiştirilebilir.
 [quality]
 target_duration = [35, 60]
 audit = true
+review_before_render = true
 
 # Yükleme paketi: altyazi.tr.srt her zaman; burada listelenen diller için çeviri (altyazi.<dil>.srt).
 # BCP-47 kodları, ör. ["en", "de"]; WebUI'da yalnız o toplu iş için değiştirilebilir.

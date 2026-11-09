@@ -72,7 +72,7 @@ APP_OPTIONS = {
     "video_codec": str,
 }
 SCRIPT_OPTIONS = {"prompt", "target_words"}
-QUALITY_OPTIONS = {"target_duration", "audit"}
+QUALITY_OPTIONS = {"target_duration", "audit", "review_before_render"}
 PACKAGE_OPTIONS = {"subtitle_translations"}
 PRESET_SECTIONS = {"video", "app", "script", "quality", "package"}
 PROMPT_PLACEHOLDERS = {"kelime_min", "kelime_max", "konu"}
@@ -182,6 +182,8 @@ class Preset:
     target_duration: tuple[float, float] | None = None
     audit: bool = True
     subtitle_translations: tuple[str, ...] = ()  # altyazi.<dil>.srt çevirileri
+    # İki aşamalı akış: önce metin + terim + denetim, onaydan sonra yalnız onaylananların videosu.
+    review_before_render: bool = False
 
     def script_prompt(self, subject: str, instruction: str = "") -> str:
         """Reçetedeki talimat şablonu (yer tutucular dolu) ve satırın talimatı."""
@@ -311,6 +313,9 @@ def load_preset(path: str | Path) -> Preset:
     audit = quality.get("audit", True)
     if not isinstance(audit, bool):
         raise PresetError("[quality] audit true ya da false olmalı")
+    review_before_render = quality.get("review_before_render", False)
+    if not isinstance(review_before_render, bool):
+        raise PresetError("[quality] review_before_render true ya da false olmalı")
     raw_translations = package.get("subtitle_translations", [])
     if not isinstance(raw_translations, list):  # virgüllü metin yalnız CLI'da (--altyazi-cevirileri)
         raise PresetError('[package] subtitle_translations dil kodları listesi olmalı, ör. ["en"]')
@@ -318,7 +323,7 @@ def load_preset(path: str | Path) -> Preset:
     return Preset(
         path=str(path.resolve()), sha256=hashlib.sha256(raw).hexdigest(), video=video, app=app,
         prompt=prompt, target_words=target_words, target_duration=target_duration, audit=audit,
-        subtitle_translations=translations,
+        subtitle_translations=translations, review_before_render=review_before_render,
     )
 
 
@@ -348,6 +353,16 @@ def _suggest(key: str, choices) -> str:
 
 # ---------------------------------------------------------------- durum
 
+# Konu durumları (state.json; yalnız arka plan süreci yazar).
+# Tek aşamalı akış: pending → running → done | failed.
+# İki aşamalı akış: pending → preparing → awaiting_review → approved → rendering → done | failed; skipped.
+#   Onay ve atlama kararları review.json'da durur (batch_review); render süreci başlarken onaylıları
+#   approved, atlananları skipped yapar. "Kontrol gerekli", done + quality["kontrol_gerekli"]'dir.
+PENDING, RUNNING, DONE, FAILED = "pending", "running", "done", "failed"
+PREPARING, AWAITING_REVIEW, APPROVED, RENDERING, SKIPPED = (
+    "preparing", "awaiting_review", "approved", "rendering", "skipped")
+
+
 @dataclass
 class ItemState:
     index: int
@@ -355,7 +370,7 @@ class ItemState:
     instruction: str = ""
     voice: str = ""
     folder: str = ""
-    status: str = "pending"  # pending | running | done | failed
+    status: str = PENDING
     attempts: int = 0
     failures: int = 0
     task_id: str = ""
@@ -364,6 +379,11 @@ class ItemState:
     seconds: float = 0.0
     quality: dict = field(default_factory=dict)
     started: str = ""  # son denemenin başlangıcı (çalışırken geçen süre için)
+    # İki aşamalı akış: hazırlık (metin, terimler, denetim) ayrı sayılır; render süresi seconds'ta.
+    prepared: bool = False
+    prepare_seconds: float = 0.0
+    prepare_attempts: int = 0
+    prepare_task_id: str = ""
 
 
 @dataclass
@@ -379,6 +399,9 @@ class BatchState:
     finished: str = ""
     # Bu toplu işin çeviri dilleri (WebUI ya da --altyazi-cevirileri); None ise reçetedeki.
     subtitle_translations: list[str] | None = None
+    # İki aşamalı akış mı: toplu iş açılırken reçeteden ya da --inceleme / --inceleme-yok'tan bir kez
+    # belirlenir; devam ettirilen çalıştırmalar aynı akışı sürdürür. None: bu alan yokken açılmış toplu iş.
+    review_before_render: bool | None = None
 
     def save(self, directory: Path) -> None:
         payload = json.dumps(asdict(self), ensure_ascii=False, indent=1)
@@ -470,8 +493,23 @@ def build_task_argv(preset: Preset, item: ItemState) -> list[str]:
     return argv
 
 
-def run_video_task(argv: list[str], task_id: str) -> dict:
-    """CLI'ın tek görev yolunu izler: ayrıştır, geçersiz kılmaları uygula, parametreleri hazırla, task.start."""
+def build_render_argv(preset: Preset, item: ItemState, approved: dict) -> list[str]:
+    """
+    İki aşamalı akışta render: onaylanan metin, terimler ve çapalar görev parametresi olarak verilir,
+    böylece task.generate_script / generate_terms LLM'e sormadan bunları kullanır. Metin talimatı
+    (yalnız metin üretiminde kullanılır) eklenmez. "--x=değer" biçimi "-" ile başlayan değerleri de korur.
+    """
+    argv = ["--video-subject", item.subject, *video_option_argv(preset.video),
+            f"--video-script={approved['script']}", f"--video-terms={', '.join(approved['terms'])}"]
+    if approved.get("anchors"):
+        argv.append(f"--video-anchors={', '.join(approved['anchors'])}")
+    if item.voice:
+        argv.extend(["--voice-name", item.voice])
+    return argv
+
+
+def _task_params(argv: list[str], stop_at: str):
+    """CLI'ın tek görev yolu: ayrıştır, geçersiz kılmaları (NASA, render, LLM) uygula, parametreleri hazırla."""
     cli = _cli_module()
     args = _parse_cli(argv)
     cli.apply_nasa_overrides(args)
@@ -479,7 +517,13 @@ def run_video_task(argv: list[str], task_id: str) -> dict:
     cli.apply_llm_overrides(args)
     params = cli.build_video_params(args)
     cli._validate_video_source_fallback(params)
-    cli.prepare_cli_files(params, stop_at="video")
+    cli.prepare_cli_files(params, stop_at=stop_at)
+    return params
+
+
+def run_video_task(argv: list[str], task_id: str) -> dict:
+    """CLI'ın tek görev yolunu izler: ayrıştır, geçersiz kılmaları uygula, parametreleri hazırla, task.start."""
+    params = _task_params(argv, "video")
     from app.models import const
     from app.services import task as tm
 
@@ -489,6 +533,34 @@ def run_video_task(argv: list[str], task_id: str) -> dict:
         error = (result or {}).get("error") or "görev video üretmedi"
         raise TaskFailed(str(error), stage)
     return result
+
+
+def run_text_task(argv: list[str], task_id: str) -> dict:
+    """
+    Hazırlık: aynı görev yolu "terms" aşamasında durur (metin + arama terimleri + çapalar; ses ve video yok).
+    Metin LLM'in normalleştirilmiş çıktısıdır (noktalama düzeltmeleri dahil). Çapalar görevin
+    script.json'una yazılan parametrelerden okunur.
+    """
+    params = _task_params(argv, "terms")
+    from app.models import const
+    from app.services import task as tm
+
+    result = tm.start(task_id=task_id, params=params, stop_at="terms", allow_server_file_input=True)
+    if not result or result.get("state") == const.TASK_STATE_FAILED or not result.get("script") \
+            or not result.get("terms"):
+        stage = (result or {}).get("failed_stage", "")
+        error = (result or {}).get("error") or "görev metin ya da arama terimi üretmedi"
+        raise TaskFailed(str(error), stage)
+    anchors = []
+    try:
+        data = json.loads((Path(utils.task_dir(task_id)) / "script.json").read_text(encoding="utf-8"))
+        anchors = (data.get("params") or {}).get("video_anchors") or []
+    except (OSError, ValueError):
+        pass
+    if isinstance(anchors, str):
+        anchors = [part.strip() for part in re.split(r"[,，]", anchors)]
+    return {"script": str(result["script"]).strip(), "terms": [str(t).strip() for t in result["terms"] if str(t).strip()],
+            "anchors": [str(a).strip() for a in anchors if str(a).strip()]}
 
 
 def apply_app_overrides(preset: Preset) -> None:
@@ -501,8 +573,13 @@ def apply_app_overrides(preset: Preset) -> None:
 # ---------------------------------------------------------------- çalıştırıcı
 
 def _process(item: ItemState, state: BatchState, preset: Preset, batch_dir: Path,
-             task_runner: Callable, packager: Callable) -> None:
-    item.status, item.error, item.failed_stage = "running", "", ""
+             task_runner: Callable, packager: Callable, argv: list[str] | None = None,
+             running_status: str = RUNNING, package_extra: dict | None = None) -> None:
+    """
+    Bir konunun videosu ve paketi. Tek aşamalı akış argv'yi reçeteden kurar; iki aşamalı akış onaylanan
+    metinle kurulmuş argv'yi, "rendering" durumunu ve pakete onaylanan metnin denetimini (package_extra) verir.
+    """
+    item.status, item.error, item.failed_stage = running_status, "", ""
     item.attempts += 1
     item.task_id = str(uuid.uuid4())
     item.started = datetime.now().isoformat(timespec="seconds")
@@ -512,7 +589,7 @@ def _process(item: ItemState, state: BatchState, preset: Preset, batch_dir: Path
     captured: list[str] = []
     handler = logger.add(lambda message: captured.append(message.record["message"]), level="DEBUG")
     try:
-        result = task_runner(build_task_argv(preset, item), item.task_id)
+        result = task_runner(argv if argv is not None else build_task_argv(preset, item), item.task_id)
     except KeyboardInterrupt:
         item.seconds = round(item.seconds + time.monotonic() - started, 1)  # kesilen denemenin süresi de sayılır
         raise
@@ -529,7 +606,7 @@ def _process(item: ItemState, state: BatchState, preset: Preset, batch_dir: Path
     logger.info(f"toplu üretim [{item.index}] paket hazırlanıyor")  # batch_runner bu satırı aşama olarak okur
     try:
         item.quality = packager(item=item, result=result, preset=preset,
-                                folder=batch_dir / item.folder, log_lines=captured)
+                                folder=batch_dir / item.folder, log_lines=captured, **(package_extra or {}))
     except KeyboardInterrupt:
         raise
     except Exception as exc:
@@ -553,6 +630,8 @@ def run_batch(
     hold_lock: bool = False,
     log_file: bool = True,
     translations: list[str] | tuple[str, ...] | None = None,
+    review: bool | None = None,
+    preparer: Callable | None = None,
 ) -> int:
     """
     Toplu üretimi çalıştırır; tamamı bittiyse 0, başarısız konu kaldıysa 1, Ctrl+C ile
@@ -561,6 +640,9 @@ def run_batch(
     klasördeki batch.log'a ayrıca yazılmaz (WebUI stderr'i zaten oraya yönlendirir).
     translations: bu toplu işin çeviri altyazı dilleri (reçetedekinin yerine); state.json'a yazılır,
     devam ettirilen çalıştırma da aynılarını kullanır.
+    review: iki aşamalı akış (None: reçetedeki review_before_render). Açıksa bu çağrı yalnız hazırlığı
+    yapar (metin, terimler, denetim; preparer testlerde sahte fonksiyonla değişir) ve konular onay
+    beklerken temiz çıkar; videolar render_batch ile üretilir.
     """
     from app.services import batch_package
 
@@ -577,7 +659,8 @@ def run_batch(
         previous = None if new else find_previous_batch(input_path, preset)
         batch_dir = previous or new_batch_dir(input_path)
     batch_dir.mkdir(parents=True, exist_ok=True)
-    arguments = (batch_dir, input_path, preset, items, task_runner, packager, reporter, log_file, translations)
+    arguments = (batch_dir, input_path, preset, items, task_runner, packager, reporter, log_file, translations,
+                 review, preparer)
     if not hold_lock:
         return _run_in_folder(*arguments)
     from app.services import batch_runner
@@ -591,7 +674,7 @@ def run_batch(
 
 def _run_in_folder(batch_dir: Path, input_path: Path, preset: Preset, items: list[BatchInput],
                    task_runner: Callable, packager: Callable, reporter: Callable, log_file: bool,
-                   translations) -> int:
+                   translations, review: bool | None = None, preparer: Callable | None = None) -> int:
     if (batch_dir / STATE_FILE).exists():
         state = BatchState.load(batch_dir)
         if state.input_sha256 != _file_sha256(input_path) or state.preset_sha256 != preset.sha256:
@@ -605,6 +688,13 @@ def _run_in_folder(batch_dir: Path, input_path: Path, preset: Preset, items: lis
         logger.info(f"toplu üretim kaldığı yerden devam ediyor: {batch_dir}")
     else:
         state = new_state(input_path, preset, items)
+    if state.review_before_render is None:
+        state.review_before_render = preset.review_before_render if review is None else bool(review)
+    elif review is not None and bool(review) != state.review_before_render:
+        logger.warning("toplu işin akışı açılırken belirlendi; --inceleme / --inceleme-yok bu klasörde yok sayıldı")
+    if state.review_before_render:
+        return _run_review_folder(state, batch_dir, preset, "prepare", task_runner, packager, reporter, log_file,
+                                  translations, preparer)
     if translations is not None:
         state.subtitle_translations = list(translations)
     if state.subtitle_translations is not None:
@@ -656,11 +746,213 @@ def _run_in_folder(batch_dir: Path, input_path: Path, preset: Preset, items: lis
     return 1 if failed else 0
 
 
+# ---------------------------------------------------------------- iki aşamalı akış
+
+def _prepare_item(item: ItemState, state: BatchState, preset: Preset, batch_dir: Path, preparer: Callable) -> None:
+    """Metin + terimler + çapalar + denetim; sonuç konu klasöründeki hazirlik.json'a, konu onay beklemeye."""
+    from app.services import batch_review
+
+    item.status, item.error, item.failed_stage = PREPARING, "", ""
+    item.prepare_attempts += 1
+    item.prepare_task_id = str(uuid.uuid4())
+    item.started = datetime.now().isoformat(timespec="seconds")
+    state.save(batch_dir)
+    started = time.monotonic()
+    logger.info(f"toplu üretim [{item.index}/{len(state.items)}] başladı (hazırlık): {item.subject}")
+    try:
+        preparation = preparer(preset, item, item.prepare_task_id)
+    except KeyboardInterrupt:
+        item.prepare_seconds = round(item.prepare_seconds + time.monotonic() - started, 1)
+        raise
+    except Exception as exc:
+        item.status, item.failures = FAILED, item.failures + 1
+        item.error = str(exc).strip()[:500] or type(exc).__name__
+        item.failed_stage = getattr(exc, "stage", "") or "hazırlık"
+        item.prepare_seconds = round(item.prepare_seconds + time.monotonic() - started, 1)
+        state.save(batch_dir)
+        logger.error(f"toplu üretim [{item.index}] hazırlanamadı: {item.subject}: {item.error}")
+        return
+    seconds = round(time.monotonic() - started, 1)
+    item.prepare_seconds = round(item.prepare_seconds + seconds, 1)
+    batch_review.write_preparation(batch_dir / item.folder, {
+        **preparation, "subject": item.subject, "instruction": item.instruction, "task_id": item.prepare_task_id,
+        "seconds": seconds, "prepared_at": datetime.now().isoformat(timespec="seconds"),
+    })
+    item.prepared, item.status = True, AWAITING_REVIEW
+    state.save(batch_dir)
+    counts = (preparation.get("audit") or {}).get("sayim") or {}
+    logger.success(
+        f"toplu üretim [{item.index}] onay bekliyor ({seconds:.0f} sn): {item.subject}; "
+        f"{preparation.get('kelime')} kelime, ~{preparation.get('tahmini_sn')} sn, "
+        f"denetim {' '.join(f'{k} {v}' for k, v in counts.items()) or (preparation.get('audit') or {}).get('durum', '-')}"
+    )
+
+
+def _review_finished(state: BatchState) -> bool:
+    return all(item.status in (DONE, FAILED, SKIPPED) and (item.status != FAILED or item.prepared)
+               for item in state.items)
+
+
+def _render_snapshot(state: BatchState, batch_dir: Path) -> dict[int, dict]:
+    """
+    Render süreci başlarken onay kararlarını review.json'dan bir kez okur: geçerli onaylı ve henüz videosu
+    olmayan konular bu turda üretilir; sonradan onaylananlar sonraki "render" çağrısını bekler.
+    """
+    from app.services import batch_review
+
+    snapshot = {}
+    for item in state.items:
+        if item.status == DONE or not item.prepared:
+            continue
+        review = batch_review.load_review(batch_dir / item.folder)
+        if review and review.get("skipped"):
+            item.status = SKIPPED
+            continue
+        approved = batch_review.approved_copy(review)
+        if approved is None:
+            item.status = AWAITING_REVIEW
+            continue
+        snapshot[item.index] = approved
+        item.status = APPROVED
+    return snapshot
+
+
+def _run_review_folder(state: BatchState, batch_dir: Path, preset: Preset, phase: str, task_runner: Callable,
+                       packager: Callable, reporter: Callable, log_file: bool, translations,
+                       preparer: Callable | None) -> int:
+    """İki aşamalı akışın bir aşaması: "prepare" (metinler) ya da "render" (onaylı konuların videoları)."""
+    from app.services import batch_review
+
+    preparer = preparer or batch_review.prepare_item
+    for item in state.items:  # önceki çalıştırma bu konularda kesildi
+        if item.status in (RUNNING, PREPARING):
+            item.status = PENDING
+        elif item.status == RENDERING:
+            item.status = APPROVED
+    if translations is not None:
+        state.subtitle_translations = list(translations)
+    if state.subtitle_translations is not None:
+        preset = replace(preset, subtitle_translations=tuple(state.subtitle_translations))
+    state.finished = ""
+    state.save(batch_dir)
+
+    log_handler = logger.add(str(batch_dir / LOG_FILE), level="INFO", encoding="utf-8") if log_file else None
+    apply_app_overrides(preset)
+    started = time.monotonic()
+    snapshot: dict[int, dict] = {}
+    if phase == "render":
+        snapshot = _render_snapshot(state, batch_dir)
+        state.save(batch_dir)
+        logger.info(f"toplu üretim: {len(state.items)} konu, render: {len(snapshot)} onaylı konu, klasör {batch_dir}")
+    else:
+        prepared = sum(item.prepared for item in state.items)
+        logger.info(f"toplu üretim: {len(state.items)} konu, hazırlık: {prepared} tanesi daha önce hazırlandı, "
+                    f"klasör {batch_dir}")
+    utils.log_ffmpeg_version()
+    interrupted = False
+    try:
+        for retry in (False, True):
+            for item in state.items:
+                if phase == "render":
+                    if item.index not in snapshot or item.status == DONE or (retry and item.status != FAILED):
+                        continue
+                    if retry:
+                        logger.info(f"toplu üretim: başarısız konu yeniden deneniyor: {item.subject}")
+                    approved = snapshot[item.index]
+                    _process(item, state, preset, batch_dir, task_runner, packager,
+                             argv=build_render_argv(preset, item, approved), running_status=RENDERING,
+                             package_extra={"review": approved})
+                else:
+                    if item.prepared or item.status not in (PENDING, FAILED) or (retry and item.status != FAILED):
+                        continue
+                    if retry:
+                        logger.info(f"toplu üretim: hazırlanamayan konu yeniden deneniyor: {item.subject}")
+                    _prepare_item(item, state, preset, batch_dir, preparer)
+                reporter(state, batch_dir)
+    except KeyboardInterrupt:
+        interrupted = True
+        for item in state.items:
+            if item.status == PREPARING:
+                item.status = PENDING
+            elif item.status == RENDERING:
+                item.status = APPROVED
+        logger.warning("toplu üretim durduruldu; aynı komutla kaldığı yerden devam edebilirsiniz")
+    finally:
+        state.run_seconds = round(state.run_seconds + time.monotonic() - started, 1)
+        if not interrupted and _review_finished(state):
+            state.finished = datetime.now().isoformat(timespec="seconds")
+        state.save(batch_dir)
+        try:
+            reporter(state, batch_dir)
+        finally:
+            if log_handler is not None:
+                logger.remove(log_handler)
+    if phase == "render":
+        failed = [item for item in state.items if item.index in snapshot and item.status == FAILED]
+        logger.info(
+            f"toplu üretim render bitti: {sum(state.items[i - 1].status == DONE for i in snapshot)} başarılı, "
+            f"{len(failed)} başarısız, rapor {batch_dir / REPORT_FILE}"
+        )
+    else:
+        failed = [item for item in state.items if not item.prepared and item.status == FAILED]
+        waiting = sum(item.status == AWAITING_REVIEW for item in state.items)
+        logger.info(f"toplu üretim hazırlığı bitti: {waiting} konu onay bekliyor, {len(failed)} hazırlanamadı. "
+                    f"Onaydan sonra videolar için: batch.py render {batch_dir}")
+    if interrupted:
+        return 130
+    return 1 if failed else 0
+
+
+def render_batch(
+    batch_dir: str | Path,
+    task_runner: Callable | None = None,
+    packager: Callable | None = None,
+    reporter: Callable | None = None,
+    hold_lock: bool = False,
+    log_file: bool = True,
+) -> int:
+    """
+    İki aşamalı toplu işin render aşaması: review.json'da onaylanmış ve videosu olmayan konular, onaylanan
+    metin ve terimlerle (LLM'e yeniden sorulmadan) üretilir. Girdi değil klasör alır; reçete state.json'daki
+    yoldan okunur ve hazırlıktan beri değişmemiş olmalıdır. Çıkış kodları run_batch'teki gibi.
+    """
+    from app.services import batch_package
+
+    batch_dir = Path(batch_dir)
+    try:
+        state = BatchState.load(batch_dir)
+    except (OSError, ValueError, TypeError) as exc:
+        raise BatchInputError(f"toplu iş okunamadı: {batch_dir} ({exc})") from exc
+    if not state.review_before_render:
+        raise BatchInputError(f"{batch_dir} iki aşamalı (onaylı) bir toplu iş değil; render komutu yalnız onunla")
+    preset = load_preset(state.preset)
+    if preset.sha256 != state.preset_sha256:
+        raise PresetError(f"reçete hazırlıktan sonra değişmiş: {state.preset}")
+    arguments = (state, batch_dir, preset, "render", task_runner or run_video_task,
+                 packager or batch_package.build_package, reporter or batch_package.write_report, log_file, None, None)
+    if not hold_lock:
+        return _run_review_folder(*arguments)
+    from app.services import batch_runner
+
+    batch_runner.acquire_lock(batch_dir)
+    try:
+        return _run_review_folder(*arguments)
+    finally:
+        batch_runner.release_lock()
+
+
 def main(argv: list[str] | None = None, prog: str = "batch.py") -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    from app.services import batch_review
+
+    if argv and argv[0] in batch_review.COMMANDS:  # iki aşamalı akışın komutları: durum, render, onayla…
+        return batch_review.cli_main(argv, prog)
     parser = argparse.ArgumentParser(
         prog=prog,
         description="Bir .csv ya da .txt dosyasındaki konular için sırayla video üretir; her video için "
-                    "yüklemeye hazır bir paket ve toplu bir kalite raporu (rapor.html) yazar.",
+                    "yüklemeye hazır bir paket ve toplu bir kalite raporu (rapor.html) yazar. Reçetede "
+                    "review_before_render açıksa önce yalnız metinleri hazırlar; onay ve render için: "
+                    f"{prog} durum|onayla|yeniden-uret|yeniden-denetle|atla|temizleri-onayla|render <klasör> …",
     )
     parser.add_argument("input", help=".csv (konu, talimat, ses) ya da .txt (satır başına konu)")
     parser.add_argument("--preset", required=True, help="reçete dosyası (TOML), ör. presets/uzay.toml")
@@ -672,6 +964,12 @@ def main(argv: list[str] | None = None, prog: str = "batch.py") -> int:
     parser.add_argument("--altyazi-cevirileri", metavar="DİLLER",
                         help="çeviri altyazı dilleri, virgülle (ör. en,de; boş = çeviri yok); reçetedeki "
                              "subtitle_translations yerine yalnız bu toplu iş için geçerli")
+    flow = parser.add_mutually_exclusive_group()
+    flow.add_argument("--inceleme", dest="review", action="store_const", const=True, default=None,
+                      help="iki aşamalı akış: önce metinler hazırlanır ve onay beklenir (reçetedeki "
+                           "review_before_render yerine, yalnız bu toplu iş için)")
+    flow.add_argument("--inceleme-yok", dest="review", action="store_const", const=False,
+                      help="tek aşamalı akış: metinler onay beklemeden videoya dönüşür")
     args = parser.parse_args(argv)
     import app.config  # noqa: F401 -- yapılandırma ve günlük ayarları
     from app.utils.logging_utils import configure_terminal_logger, get_logging_options
@@ -685,8 +983,9 @@ def main(argv: list[str] | None = None, prog: str = "batch.py") -> int:
     try:
         translations = (None if args.altyazi_cevirileri is None
                         else parse_languages(args.altyazi_cevirileri, "--altyazi-cevirileri"))
+        extra = {} if args.review is None else {"review": args.review}
         return run_batch(args.input, args.preset, output=args.output, new=args.yeni, hold_lock=True,
-                         log_file=not args.gunluk_stderr, translations=translations)
+                         log_file=not args.gunluk_stderr, translations=translations, **extra)
     except (BatchInputError, PresetError) as exc:
         logger.error(str(exc))
         return 2

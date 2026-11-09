@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -23,7 +24,7 @@ from loguru import logger
 
 from app import paths
 from app.config import config
-from app.services import batch_package, batch_runner, batch_subtitles, voice
+from app.services import batch_package, batch_review, batch_runner, batch_subtitles, voice
 from app.services import batch_production as bp
 
 VIEW_PARAM = "view"
@@ -38,6 +39,10 @@ EMPTY_VOICE = " "
 DEFAULT_PRESET = "uzay.toml"
 HISTORY_LIMIT = 10
 LOG_LINES = 12
+# Bir konuda LLM işlemi (yeniden üretim, denetim) sürerken panel bu aralıkla yenilenir.
+REVIEW_REFRESH_SECONDS = 2
+RATING_COLORS = {"D": "green", "B": "blue", "Y": "orange", "X": "red"}
+LIVE_STATUSES = ("running", "preparing", "rendering")
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 _LOG_LINE = re.compile(r"\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2})\S* \| (\w+)\s*\| .*?: \S+ - (.*)")
 
@@ -223,10 +228,18 @@ def format_duration(seconds: float | None) -> str:
 
 
 def _status_label(item: batch_runner.ItemStatus, tr) -> str:
-    if item.status == "running":
+    if item.status in LIVE_STATUSES:
         stage = tr(f"batch.stage.{item.stage}") if item.stage else tr("batch.stage.preparing")
-        return tr("batch.status.running").format(stage=stage)
+        return tr(f"batch.status.{item.status}").format(stage=stage)
     return tr(f"batch.status.{item.status}")
+
+
+def progress_counts(status: batch_runner.BatchStatus) -> tuple[int, int]:
+    """(biten, toplam): hazırlıkta hazırlananlar, render'da onaylı kuyruktan çıkanlar biter sayılır."""
+    rendering = any(item.status == "rendering" for item in status.items)
+    open_statuses = {"pending", *LIVE_STATUSES} | ({"approved"} if rendering else set())
+    total = len(status.items)
+    return total - sum(item.status in open_statuses for item in status.items), total
 
 
 def status_table(status: batch_runner.BatchStatus, tr) -> pd.DataFrame:
@@ -291,6 +304,10 @@ def ended_message(batch_dir: Path, tr) -> tuple[str, str]:
     crashed = batch_runner.crash_line(batch_dir)
     if crashed:
         return "error", tr("batch.error.exited").format(line=crashed)
+    status = batch_runner.batch_status(batch_dir, lock={})
+    if status.awaiting_review:
+        st.session_state["batch_review_dir"] = str(batch_dir)
+        return "info", tr("batch.review.ready").format(name=batch_dir.name, count=status.count("awaiting_review"))
     return "warning", tr("batch.stop.done")
 
 
@@ -310,12 +327,11 @@ def _render_running(tr) -> None:
             st.info(tr("batch.running.starting"))
             status = None
         if status is not None:
-            total = len(status.items) or 1
-            finished = status.count("done") + status.count("review") + status.count("failed")
-            fields = {"done": finished, "total": len(status.items), "elapsed": format_duration(status.elapsed),
+            finished, total = progress_counts(status)
+            fields = {"done": finished, "total": total, "elapsed": format_duration(status.elapsed),
                       "remaining": format_duration(status.remaining)}
             key = "batch.running.progress" if status.remaining is not None else "batch.running.progress_noestimate"
-            st.progress(finished / total, text=tr(key).format(**fields))
+            st.progress(finished / (total or 1), text=tr(key).format(**fields))
             st.dataframe(status_table(status, tr), hide_index=True, width="stretch")
             if status.log_tail:
                 st.caption(tr("batch.log.header"))
@@ -350,6 +366,7 @@ def _render_editor(tr, running: bool) -> None:
     language = (preset.video.get("video_language") if preset else "") or ""
     voices = voices_for(language)
     translations: list[str] = []
+    review_flow = False
     if preset is not None:
         summary = preset_summary(preset, tr)
         st.dataframe(pd.DataFrame(summary, columns=[tr("batch.preset.setting"), tr("batch.preset.value")]),
@@ -361,6 +378,9 @@ def _render_editor(tr, running: bool) -> None:
             default=[code for code in preset.subtitle_translations if code in options],
             format_func=language_label, key=f"batch_translations_{name}", help=tr("batch.translations.help"),
         )
+        # İki aşamalı akış: reçeteden gelir, yalnız bu toplu iş için değiştirilebilir (batch.py --inceleme[-yok]).
+        review_flow = st.checkbox(tr("batch.review.flow"), value=preset.review_before_render,
+                                  key=f"batch_review_flow_{name}", help=tr("batch.review.flow_help"))
 
     notice = st.session_state.pop("batch_editor_flash", None)
     if notice:
@@ -423,7 +443,8 @@ def _render_editor(tr, running: bool) -> None:
         try:
             batch_dir = bp.new_batch_dir(Path("webui"))
             input_path = write_input(items, batch_dir)
-            batch_runner.start_batch(input_path, preset_path, batch_dir, translations=list(translations))
+            batch_runner.start_batch(input_path, preset_path, batch_dir, translations=list(translations),
+                                     review=review_flow)
         except batch_runner.BatchBusy as exc:
             name = Path(exc.lock.get("batch_dir") or "").name
             st.error(tr("batch.error.busy").format(name=name))
@@ -433,15 +454,335 @@ def _render_editor(tr, running: bool) -> None:
             st.error(tr("batch.error.start").format(error=exc))
             return
         st.session_state["batch_running_dir"] = str(batch_dir)  # süreç hemen düşerse hata yine görünür
-        _flash("success", tr("batch.start.started").format(name=batch_dir.name))
+        if review_flow:
+            st.session_state["batch_review_dir"] = str(batch_dir)
+        _flash("success", tr("batch.review.started" if review_flow else "batch.start.started").format(
+            name=batch_dir.name))
         st.rerun(scope="app")
 
 
+# ---------------------------------------------------------------- inceleme (iki aşamalı akış)
+
+def _md(text) -> str:
+    """İddia ve gerekçe metni Markdown/biçim yönergesi olarak yorumlanmasın."""
+    return re.sub(r"([\\`*_\[\]#$<>|~])", r"\\\1", str(text or ""))
+
+
+def _review_dir() -> Path | None:
+    """İncelenen toplu iş: Geçmiş'ten seçilen ya da onay bekleyen konusu olan en yeni iki aşamalı toplu iş."""
+    chosen = st.session_state.get("batch_review_dir")
+    if chosen and (Path(chosen) / bp.STATE_FILE).is_file():
+        return Path(chosen)
+    for status in batch_runner.list_batches(HISTORY_LIMIT):
+        if status.review and (status.count("awaiting_review") or status.count("approved")):
+            return status.directory
+    return None
+
+
+def _review_keys(batch_dir: Path, entry: batch_review.ItemReview) -> dict:
+    """
+    Panel öğelerinin anahtarları. Metin, terim ve çapa anahtarları review.json'un sürümünü içerir: dosya
+    değişince (yeniden üretim, onay denemesi) öğe yeni içerikle başlar; değişmedikçe kaydedilmemiş düzenleme
+    oturumda kalır, sayfanın yenilenmesi onu silmez.
+    """
+    base = f"rv_{batch_dir.name}_{entry.item.index}"
+    version = re.sub(r"\W", "", (entry.review.get("updated_at") or "")
+                     + batch_review.script_sha256(entry.review["script"])[:12])
+    return {"base": base, "text": f"{base}_text_{version}", "terms": f"{base}_terms_{version}",
+            "anchors": f"{base}_anchors_{version}", "instruction": f"{base}_instruction"}
+
+
+def _edits(batch_dir: Path, entry: batch_review.ItemReview) -> tuple[str, list[str], list[str]]:
+    keys, review = _review_keys(batch_dir, entry), entry.review
+    text = st.session_state.get(keys["text"], review["script"])
+    terms = batch_review.parse_list(st.session_state.get(keys["terms"], "\n".join(review["terms"])))
+    anchors = batch_review.parse_list(st.session_state.get(keys["anchors"], ", ".join(review["anchors"])))
+    return text, terms, anchors
+
+
+def has_unsaved_edits(batch_dir: Path, entry: batch_review.ItemReview) -> bool:
+    if entry.review is None:
+        return False
+    text, terms, anchors = _edits(batch_dir, entry)
+    return (batch_review.normalize_script(text) != entry.review["script"] or terms != entry.review["terms"]
+            or anchors != entry.review["anchors"])
+
+
+def _find_entry(batch_dir: Path, index: int) -> tuple[batch_review.Overview, batch_review.ItemReview] | None:
+    lock = batch_runner.current_lock()
+    running = bool(lock) and Path(lock.get("batch_dir") or "").resolve() == Path(batch_dir).resolve()
+    try:
+        view = batch_review.overview(batch_dir, running=running)
+    except (OSError, ValueError, TypeError):
+        return None
+    entry = next((entry for entry in view.items if entry.item.index == index), None)
+    return (view, entry) if entry else None
+
+
+def _start_llm_action(tr, batch_dir: Path, entry: batch_review.ItemReview, action: str,
+                      edits: tuple[str, list[str], list[str]] | None = None, instruction: str = "") -> None:
+    """LLM gerektiren onay işlemi alt süreçte: batch.py <action> <klasör> <sıra> (CLI ile aynı fonksiyonlar)."""
+    arguments = []
+    if edits is not None:
+        text, terms, anchors = edits
+        if batch_review.normalize_script(text) != entry.review["script"]:
+            edit_file = entry.folder / batch_review.EDIT_FILE
+            edit_file.write_text(text, encoding="utf-8")
+            arguments.append(f"--metin-dosyasi={edit_file}")
+        if terms != entry.review["terms"]:
+            arguments.append(f"--terimler={', '.join(terms)}")
+        if anchors != entry.review["anchors"]:
+            arguments.append(f"--capalar={', '.join(anchors)}")
+    if instruction.strip():
+        arguments.append(f"--talimat={instruction.strip()}")
+    try:
+        batch_runner.start_review_action(batch_dir, entry.folder, entry.item.index, action, arguments)
+    except batch_review.ReviewBusy:
+        _flash("error", tr("batch.review.error.busy"))
+    except OSError as exc:
+        logger.exception(f"onay işlemi başlatılamadı: {exc}")
+        _flash("error", tr("batch.review.error.start").format(error=exc))
+
+
+def _direct(tr, action, *args, **kwargs):
+    """LLM gerektirmeyen onay işlemi bu süreçte; kural hatası arayüz mesajı olur."""
+    try:
+        return action(*args, **kwargs)
+    except batch_review.ReviewError as exc:
+        _flash("error", tr(f"batch.review.error.{exc.reason}"))
+    return None
+
+
+def _render_audit(tr, review: dict, stale: bool) -> None:
+    audit = review.get("audit") or {}
+    label = f"**{tr('batch.review.audit')}**"
+    if audit.get("durum") == "tamam":
+        counts = audit.get("sayim") or {}
+        label += " " + " ".join(f":{RATING_COLORS[r]}-badge[{r} {counts.get(r, 0)}]" for r in batch_package.RATINGS)
+    if stale:
+        label += f" :gray-badge[{tr('batch.review.audit_stale')}]"
+    st.markdown(label)
+    if audit.get("durum") == "kapalı":
+        st.caption(tr("batch.review.audit_off"))
+        return
+    if audit.get("durum") != "tamam":
+        st.warning(tr("batch.review.audit_failed").format(error=audit.get("hata", "")))
+        return
+    for claim in audit.get("iddialar", []):
+        color = RATING_COLORS.get(claim.get("rating"), "gray")
+        st.markdown(f":{color}-badge[{claim.get('rating')}] {_md(claim.get('claim'))}  \n"
+                    f":small[{_md(claim.get('reason'))}]")
+
+
+def _review_item(tr, view: batch_review.Overview, entry: batch_review.ItemReview) -> None:
+    """Onay bekleyen konunun paneli: düzenlenebilir metin, tahmin, denetim, terimler ve düğmeler."""
+    batch_dir, item, review = view.batch_dir, entry.item, entry.review
+    keys = _review_keys(batch_dir, entry)
+    busy = entry.busy is not None
+    preset = view.preset
+    with st.container(border=True, key=f"batch_review_item_{item.index}"):
+        st.markdown(f"**{item.index}. {_md(item.subject)}** :orange-badge[{tr('batch.status.awaiting_review')}]")
+        for key, default in ((keys["text"], review["script"]), (keys["terms"], "\n".join(review["terms"])),
+                             (keys["anchors"], ", ".join(review["anchors"]))):
+            if key not in st.session_state:
+                st.session_state[key] = default
+        text = st.text_area(tr("batch.review.text"), key=keys["text"], height=230, disabled=busy)
+        info = batch_review.estimate(text, (preset.video if preset else {}).get("voice_rate", 1.0))
+        line = tr("batch.review.estimate").format(words=info["kelime"], seconds=f"{info['tahmini_sn']:.0f}")
+        problems = []
+        if preset and preset.target_words and not preset.target_words[0] <= info["kelime"] <= preset.target_words[1]:
+            problems.append(tr("batch.review.words_out").format(low=preset.target_words[0],
+                                                                 high=preset.target_words[1]))
+        if preset and preset.target_duration and not (
+                preset.target_duration[0] <= info["tahmini_sn"] <= preset.target_duration[1]):
+            problems.append(tr("batch.review.duration_out").format(low=f"{preset.target_duration[0]:g}",
+                                                                    high=f"{preset.target_duration[1]:g}"))
+        if problems:
+            st.warning(f"{line} · {' · '.join(problems)}", icon=":material/warning:")
+        else:
+            st.caption(line)
+        stale = batch_review.script_sha256(text) != review.get("audit_sha256")
+        _render_audit(tr, review, stale)
+        with st.expander(tr("batch.review.terms_header")):
+            st.text_area(tr("batch.review.terms"), key=keys["terms"], height=170, disabled=busy,
+                         help=tr("batch.review.terms_help"))
+            st.text_input(tr("batch.review.anchors"), key=keys["anchors"], disabled=busy,
+                          help=tr("batch.review.anchors_help"))
+            if review.get("terms_edited"):
+                st.caption(tr("batch.review.terms_edited"))
+        instruction = st.text_input(tr("batch.review.instruction"), key=keys["instruction"], disabled=busy,
+                                    placeholder=tr("batch.review.instruction_placeholder"))
+        blocked = not stale and batch_review.audit_blocks(review.get("audit"))
+        with st.container(horizontal=True, gap="small"):
+            approve = st.button(tr("batch.review.approve_anyway" if blocked else "batch.review.approve"),
+                                key=f"{keys['base']}_approve", type="primary", disabled=busy,
+                                icon=":material/warning:" if blocked else ":material/check:")
+            regenerate = st.button(tr("batch.review.regenerate"), key=f"{keys['base']}_regenerate", disabled=busy,
+                                   icon=":material/autorenew:")
+            reaudit = st.button(tr("batch.review.reaudit"), key=f"{keys['base']}_reaudit", disabled=busy,
+                                icon=":material/fact_check:")
+            skip = st.button(tr("batch.review.skip"), key=f"{keys['base']}_skip", disabled=busy,
+                             icon=":material/skip_next:")
+        if busy:
+            action = batch_review.action_key(entry.busy.get("action", ""))
+            started = batch_runner._seconds_since(entry.busy.get("started", ""), datetime.now())
+            st.info(tr("batch.review.busy").format(action=tr(f"batch.review.action.{action}"),
+                                                   seconds=int(started)), icon=":material/hourglass_top:")
+            st.progress(min(0.95, started / 90), text=tr("batch.review.busy_hint"))
+        last = review.get("last_action") or {}
+        if not busy and last and not last.get("ok"):
+            if last.get("reason") == "needs_force":
+                st.warning(tr("batch.review.needs_force").format(audit=last.get("message", "")))
+            else:
+                action = batch_review.action_key(last.get("action", ""))
+                st.error(tr("batch.review.action_failed").format(action=tr(f"batch.review.action.{action}"),
+                                                                 error=last.get("message", "")))
+    if not (approve or regenerate or reaudit or skip):
+        return
+    if batch_review.busy(entry.folder):
+        _flash("error", tr("batch.review.error.busy"))
+        st.rerun()
+    edits = _edits(batch_dir, entry)
+    if approve:
+        try:
+            needs_llm = batch_review.needs_llm(review, *edits)
+        except batch_review.ReviewError as exc:
+            _flash("error", tr(f"batch.review.error.{exc.reason}"))
+            st.rerun()
+        if needs_llm:
+            _start_llm_action(tr, batch_dir, entry, "onayla", edits=edits)
+        else:
+            outcome = _direct(tr, batch_review.approve, entry.folder, script=edits[0], terms=edits[1],
+                              anchors=edits[2], force=blocked)
+            if outcome is not None and outcome.status == "approved":
+                _flash("success", tr("batch.review.approved").format(index=item.index, subject=item.subject))
+    elif regenerate:
+        _start_llm_action(tr, batch_dir, entry, "yeniden-uret", instruction=instruction)
+    elif reaudit:
+        _start_llm_action(tr, batch_dir, entry, "yeniden-denetle", edits=edits)
+    elif skip:
+        _direct(tr, batch_review.skip, entry.folder)
+    st.rerun()
+
+
+@st.fragment
+def _review_item_static(tr, batch_dir: Path, index: int) -> None:
+    found = _find_entry(batch_dir, index)
+    if found is None:
+        return
+    view, entry = found
+    if entry.status != bp.AWAITING_REVIEW or entry.busy:  # başka bir oturum ya da komut değiştirdi
+        st.rerun(scope="app")
+    _review_item(tr, view, entry)
+
+
+@st.fragment(run_every=REVIEW_REFRESH_SECONDS)
+def _review_item_live(tr, batch_dir: Path, index: int) -> None:
+    """LLM işlemi süren konu: öğeler kilitli, ilerleme her 2 sn'de yenilenir; işlem bitince sayfa yenilenir."""
+    found = _find_entry(batch_dir, index)
+    if found is None or not found[1].busy:
+        st.rerun(scope="app")
+        return
+    _review_item(tr, *found)
+
+
+def _review_item_compact(tr, view: batch_review.Overview, entry: batch_review.ItemReview) -> None:
+    item = entry.item
+    colors = {"approved": "green", "skipped": "gray", "done": "green", "review": "orange", "failed": "red",
+              "rendering": "violet", "preparing": "blue", "pending": "gray", "running": "violet"}
+    with st.container(border=True, key=f"batch_review_item_{item.index}"):
+        columns = st.columns([5, 1.6], vertical_alignment="center")
+        label = tr(f"batch.status.{entry.status}")
+        if entry.status in LIVE_STATUSES:
+            label = tr(f"batch.status.{entry.status}").format(stage=tr("batch.stage.preparing"))
+        text = f"**{item.index}. {_md(item.subject)}** :{colors.get(entry.status, 'gray')}-badge[{_md(label)}]"
+        review = entry.review or {}
+        if entry.status == bp.APPROVED:
+            when = (review.get("approved_at") or "").replace("T", " ")[:16]
+            text += "  \n" + tr("batch.review.approved_at").format(time=when)
+            if review.get("approved_despite_flags"):
+                text += " · " + tr("batch.review.approved_despite_flags")
+        elif entry.status == bp.FAILED and item.error:
+            stage = f" ({item.failed_stage})" if item.failed_stage else ""
+            text += f"  \n:small[{_md(item.error)}{_md(stage)}]"
+        columns[0].markdown(text)
+        if entry.status == bp.SKIPPED and columns[1].button(tr("batch.review.unskip"),
+                                                            key=f"rv_{view.batch_dir.name}_{item.index}_unskip"):
+            _direct(tr, batch_review.unskip, entry.folder)
+            st.rerun()
+        if entry.status in (bp.APPROVED, bp.DONE, "review", bp.RENDERING) and review.get("script"):
+            with st.expander(tr("batch.review.approved_text")):
+                st.markdown(_md(review["script"]))
+
+
+def _render_review(tr, running: bool) -> None:
+    batch_dir = _review_dir()
+    if batch_dir is None:
+        return
+    lock = batch_runner.current_lock()
+    this_running = bool(lock) and Path(lock.get("batch_dir") or "").resolve() == batch_dir.resolve()
+    try:
+        view = batch_review.overview(batch_dir, running=this_running)
+    except (OSError, ValueError, TypeError):
+        return
+    if not view.state.review_before_render:
+        return
+    st.markdown(f"#### {tr('batch.review.header').format(name=batch_dir.name)}")
+    st.caption(tr("batch.review.intro"))
+    metrics = (("batch.review.count.awaiting", view.count(bp.AWAITING_REVIEW)),
+               ("batch.review.count.approved", view.approved_waiting),
+               ("batch.review.count.flagged", view.flagged),
+               ("batch.review.count.skipped", view.count(bp.SKIPPED)),
+               ("batch.review.count.done", view.count(bp.DONE) + view.count("review")))
+    for column, (key, value) in zip(st.columns(len(metrics)), metrics):
+        column.metric(tr(key), value)
+    unsaved = {entry.item.index for entry in view.items
+               if entry.status == bp.AWAITING_REVIEW and has_unsaved_edits(batch_dir, entry)}
+    clean = sum(entry.status == bp.AWAITING_REVIEW and batch_review.is_clean(entry.review) and not entry.busy
+                and entry.item.index not in unsaved for entry in view.items)
+    with st.container(horizontal=True, gap="small"):
+        approve_clean = st.button(tr("batch.review.approve_clean").format(count=clean), key="batch_review_approve_clean",
+                                  disabled=clean == 0, icon=":material/done_all:")
+        render = st.button(tr("batch.review.render").format(count=view.approved_waiting), key="batch_review_render",
+                           type="primary", disabled=running or view.approved_waiting == 0, icon=":material/movie:")
+    if running:
+        st.caption(tr("batch.review.render_disabled_running"))
+    if unsaved:
+        st.caption(tr("batch.review.unsaved").format(items=", ".join(map(str, sorted(unsaved)))))
+    if approve_clean:
+        approved = batch_review.approve_clean(batch_dir, view.state, exclude=unsaved)
+        _flash("success", tr("batch.review.approved_clean").format(items=", ".join(map(str, approved)) or "-"))
+        st.rerun()
+    if render:
+        try:
+            batch_runner.start_render(batch_dir)
+        except batch_runner.BatchBusy as exc:
+            st.error(tr("batch.error.busy").format(name=Path(exc.lock.get("batch_dir") or "").name))
+            return
+        except OSError as exc:
+            logger.exception(f"render başlatılamadı: {exc}")
+            st.error(tr("batch.error.start").format(error=exc))
+            return
+        st.session_state["batch_running_dir"] = str(batch_dir)
+        _flash("success", tr("batch.review.render_started").format(name=batch_dir.name, count=view.approved_waiting))
+        st.rerun()
+    for entry in view.items:
+        if entry.status == bp.AWAITING_REVIEW and entry.review is not None:
+            (_review_item_live if entry.busy else _review_item_static)(tr, batch_dir, entry.item.index)
+        else:
+            _review_item_compact(tr, view, entry)
+
+
 def _history_counts(status: batch_runner.BatchStatus, tr) -> str:
-    return tr("batch.history.counts").format(
+    counts = tr("batch.history.counts").format(
         total=len(status.items), done=status.count("done") + status.count("review"),
         failed=status.count("failed"), review=status.count("review"),
     )
+    if status.review:
+        counts += " · " + tr("batch.history.counts_review").format(
+            awaiting=status.count("awaiting_review"), approved=status.count("approved"),
+            skipped=status.count("skipped"))
+    return counts
 
 
 @st.fragment
@@ -454,11 +795,15 @@ def _render_history(tr, running: bool) -> None:
     local = local_access()
     for status in batches:
         folder = status.directory
-        state = "running" if status.running else ("finished" if status.finished else "unfinished")
+        state = "running" if status.running else ("finished" if status.finished else (
+            "awaiting" if status.awaiting_review else "unfinished"))
         with st.container(border=True, key=f"batch_history_{folder.name}"):
             columns = st.columns([5, 1.4, 1.4, 1.4], vertical_alignment="center")
             created = status.created.replace("T", " ")[:16]
-            columns[0].markdown(f"**{created}** · `{folder.name}` · {tr(f'batch.history.state.{state}')}  \n"
+            label = tr(f"batch.history.state.{state}")
+            if state == "awaiting":
+                label = f":orange-badge[{label}]"
+            columns[0].markdown(f"**{created}** · `{folder.name}` · {label}  \n"
                                 f"{_history_counts(status, tr)}")
             report = folder / bp.REPORT_FILE
             if columns[1].button(tr("batch.history.open_report"), key=f"batch_report_{folder.name}",
@@ -484,6 +829,10 @@ def _render_history(tr, running: bool) -> None:
                     continue
                 st.session_state["batch_running_dir"] = str(folder)
                 _flash("success", tr("batch.history.resumed").format(name=folder.name))
+                st.rerun(scope="app")
+            if status.review and (status.count("awaiting_review") or status.count("approved")) and columns[3].button(
+                    tr("batch.history.review"), key=f"batch_review_open_{folder.name}", type="primary"):
+                st.session_state["batch_review_dir"] = str(folder)
                 st.rerun(scope="app")
             files = subtitle_listing(status)
             if files:
@@ -515,5 +864,6 @@ def render_batch_page(tr) -> None:
         getattr(st, kind)(message)
     if running:
         _render_running(tr)
+    _render_review(tr, running)
     _render_editor(tr, running)
     _render_history(tr, running)
