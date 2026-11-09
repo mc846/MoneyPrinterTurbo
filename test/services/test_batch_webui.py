@@ -246,7 +246,9 @@ def test_start_writes_the_input_under_storage_batches_and_calls_the_runner(batch
     assert preset_path == batch_page.presets_dir() / "uzay.toml"
     assert [item.subject for item in bp.read_inputs(input_path)] == ["Ay neden hep aynı yüzünü gösterir?",
                                                                     "Güneş bir gün sönecek mi?"]
-    assert f"Batch started: {folder.name}" in messages(app.success)
+    # uzay.toml iki aşamalı: önce hazırlık (review_before_render reçeteden gelir).
+    assert start.call_args.kwargs["review"] is True
+    assert f"Preparation started: {folder.name}" in messages(app.success)[0]
 
 
 def test_start_reports_a_running_batch(batches):

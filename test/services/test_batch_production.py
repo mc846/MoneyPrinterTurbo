@@ -158,7 +158,7 @@ def test_batch_translations_override_the_preset_and_are_kept_for_resume(tmp_path
 
     output = tmp_path / "out"
     assert bp.run_batch(source, PRESET, output=output, task_runner=FakeRunner(interrupt_at=2), packager=packager,
-                        reporter=lambda state, folder: None, translations=["de", "fr"]) == 130
+                        reporter=lambda state, folder: None, translations=["de", "fr"], review=False) == 130
     assert bp.BatchState.load(output).subtitle_translations == ["de", "fr"]
     # Devam ettirilen çalıştırma (seçenek verilmeden) aynı dilleri kullanır.
     bp.run_batch(source, PRESET, output=output, task_runner=FakeRunner(), packager=packager,
@@ -170,7 +170,7 @@ def test_without_an_override_the_preset_languages_are_used(tmp_path):
     seen = []
     bp.run_batch(write(tmp_path / "k.txt", "A\n"), PRESET, output=tmp_path / "out", task_runner=FakeRunner(),
                  packager=lambda item, result, preset, folder, log_lines: seen.append(preset.subtitle_translations) or {},
-                 reporter=lambda state, folder: None)
+                 reporter=lambda state, folder: None, review=False)
     assert seen == [("en",)] and bp.BatchState.load(tmp_path / "out").subtitle_translations is None
 
 
@@ -251,6 +251,8 @@ def fake_packager(calls=None):
 
 
 def run(source, runner, packager=None, **kwargs):
+    # uzay.toml iki aşamalı (review_before_render); bu testler tek aşamalı akışın eski davranışını sınar.
+    kwargs.setdefault("review", False)
     return bp.run_batch(source, PRESET, task_runner=runner, packager=packager or fake_packager(),
                         reporter=lambda state, batch_dir: None, **kwargs)
 
@@ -394,7 +396,7 @@ def test_reporter_runs_after_each_subject_and_at_the_end(tmp_path):
     source = write(tmp_path / "k.txt", "A\nB\n")
     reports = []
     bp.run_batch(source, PRESET, task_runner=FakeRunner(), packager=fake_packager(),
-                 reporter=lambda state, batch_dir: reports.append([i.status for i in state.items]))
+                 reporter=lambda state, batch_dir: reports.append([i.status for i in state.items]), review=False)
     assert reports == [["done", "pending"], ["done", "done"], ["done", "done"]]
 
 

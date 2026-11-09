@@ -216,7 +216,7 @@ def test_run_batch_holds_the_lock_while_running(tmp_path):
         return {"videos": ["x.mp4"]}
 
     bp.run_batch(source, PRESET, output=tmp_path / "out", task_runner=runner, hold_lock=True, log_file=False,
-                 packager=lambda **kwargs: {}, reporter=lambda state, folder: None)
+                 packager=lambda **kwargs: {}, reporter=lambda state, folder: None, review=False)
     assert seen == [os.getpid()] and not br.lock_path().exists()
     assert not (tmp_path / "out" / bp.LOG_FILE).exists()  # günlük stderr'den batch.log'a gider
 
