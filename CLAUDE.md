@@ -75,7 +75,7 @@ uv run ruff check app cli.py main.py webui test docs/skill   # CI'daki lint
 ## Ortam notları
 
 - Python 3.11'i uv yönetir (`.python-version`, `%APPDATA%\uv\python`). Sistemdeki Python 3.14 (`C:\Python314`) kullanılmaz. `python` ya da `pip`'i doğrudan çağırma, her şeyi `uv run` ile çalıştır.
-- ffmpeg, `imageio-ffmpeg` paketinden gelir (`.venv\Lib\site-packages\imageio_ffmpeg\binaries\`); PATH'te ffmpeg yok. Başka bir ffmpeg kullanmak için `[app] ffmpeg_path` ya da `IMAGEIO_FFMPEG_EXE` ver. ffprobe olmadığı için `video_project.py` çalışmaz.
+- ffmpeg, `imageio-ffmpeg` paketinden gelir (`.venv\Lib\site-packages\imageio_ffmpeg\binaries\`); PATH'te ffmpeg yok. Başka bir ffmpeg kullanmak için `[app] ffmpeg_path` ya da `IMAGEIO_FFMPEG_EXE` ver. ffprobe olmadığı için `video_project.py` çalışmaz. Paketteki sürüm (7.1) ve bilinen açıklar: bkz. **Upstream güncellemesi > ffmpeg**.
 - `config.toml` gitignore'da ve API anahtarları orada durur. Yeni ya da değişen her ayar `config.example.toml`'a da işlenmeli.
 - **Uçtan uca test kuralı:** `config.toml`'daki LLM sağlayıcısına güvenme; kullanıcı onu WebUI'dan değiştirir (04.11'den beri `ollama` / `gpt-oss:120b-cloud`). Sağlayıcıyı her CLI koşusunda `--llm-provider` (gerekirse `--llm-model`) ile ver, ör. `--llm-provider claude_code`. Bayraklar yalnız o süreçte geçerli, `config.toml`'a yazılmaz. Claude Code içinden `claude_code` sağlayıcısını kullanırken `CLAUDECODE` ve `CLAUDE_*` ortam değişkenlerini temizle.
 - **Eski WebUI süreci config yazabilir.** Açık kalan WebUI süreci ayarları bellekte tutar ve ana sayfa her yeniden çalıştığında `config.toml`'a yazar. Kod güncellendikten sonra yeniden başlatılmazsa eski seçenek listeleriyle yazabilir. 05.11'de `config.toml` 19:40:47 ve 20:04:17'de değişti: render motoru `moviepy`, eşzamanlılık 1, ses `af-ZA-AdriNeural-Female`, yazı tipi `BeVietnamPro-Bold.ttf`; ayrıca `subtitle_enabled = false`, `voice_rate = 0.8`, `subtitle_position = "top"`, `font_size = 30`. O sırada çalışan tek süreç, 04.11 15:42'den beri açık WebUI'ydı. **`config.toml`'u elle ya da betikle düzeltmeden önce WebUI'yı durdur, sonra yeniden başlat:** açık bir WebUI belleğindeki eski değerleri ilk yeniden çalıştırmada geri yazar.
@@ -96,13 +96,13 @@ Yerel çalıştırma ve Docker aynı portları kullanır: WebUI 8501, API 8080 (
 ## Test baz durumu
 
 04.11.2026, Windows 11, Python 3.11.18. Redis yok, API anahtarı yok, PATH'te ffmpeg yok. `pytest -q test` 12–23 dakika sürer.
-**4124 geçti, 3 kaldı, 244 atlandı** (05.11, toplu üretim altyazılarından sonra, `main` 35895be, 13 dk 46 sn; ayrıca 15 908 alt test geçti; düzeltmelerin, kırpma, etiket uygunluğu, görsel arama terimi, doğruluk kuralı, eşit aralıklı terim seçimi, NASA kaynağı, noktalama normalleştirmesi, CLI sağlayıcı bayraklarının, yedek kaynağın, yüz kenarı kuralının, metin filtresinin, üretim süresi hızlandırmalarının, ffmpeg son render'ının, toplu üretimin, WebUI toplu üretiminin ve toplu üretim altyazılarının 1025 yeni testi dahil; atlananlara `MPT_RUN_SLOW_TESTS=1` ile açılan 96 matris testi eklendi). NASA testleri ağa çıkmaz; `test/resources/nasa/` altındaki kayıtlı API yanıtlarını kullanır. Yüz ve metin testleri çizilmiş bir yüz, çizilmiş yazı ve yapay bir yıldız alanı üretir (gerçek kişi fotoğrafı yok); `face` extra'sı kurulu değilse OpenCV isteyen 7'si atlanır. CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
+**4145 geçti, 1 kaldı, 244 atlandı** (09.11, v1.3.10 yükseltmesinden sonra, `main` 8f45aab, 19 dk; ayrıca 15 915 alt test geçti; upstream'in 17 yeni testi ve `-nostdin` ek düzeltmesinin 2 testi dahil; upstream bf33010 bilinen 3 hatanın 2'sini düzeltti). Önceki baz: 4124 geçti, 3 kaldı, 244 atlandı (05.11, toplu üretim altyazılarından sonra, `main` 35895be, 13 dk 46 sn; ayrıca 15 908 alt test geçti; düzeltmelerin, kırpma, etiket uygunluğu, görsel arama terimi, doğruluk kuralı, eşit aralıklı terim seçimi, NASA kaynağı, noktalama normalleştirmesi, CLI sağlayıcı bayraklarının, yedek kaynağın, yüz kenarı kuralının, metin filtresinin, üretim süresi hızlandırmalarının, ffmpeg son render'ının, toplu üretimin, WebUI toplu üretiminin ve toplu üretim altyazılarının 1025 yeni testi dahil; atlananlara `MPT_RUN_SLOW_TESTS=1` ile açılan 96 matris testi eklendi). NASA testleri ağa çıkmaz; `test/resources/nasa/` altındaki kayıtlı API yanıtlarını kullanır. Yüz ve metin testleri çizilmiş bir yüz, çizilmiş yazı ve yapay bir yıldız alanı üretir (gerçek kişi fotoğrafı yok); `face` extra'sı kurulu değilse OpenCV isteyen 7'si atlanır. CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
 
-Kalan 4 testin hiçbiri bir özelliğin bozulduğunu göstermiyor; nedenleri Windows ya da ortam:
+Aşağıdaki testlerin hiçbiri bir özelliğin bozulduğunu göstermiyor; nedenleri Windows ya da ortam. İkinci ve üçüncüsü v1.3.10'daki upstream bf33010 ile düzeldi; v1.3.10'dan beri her turda kalan yalnız ilki:
 - `test_image_sanitize_identity.py::test_long_source_name_renders_without_exceeding_filesystem_name_limit`: tam yol 260 karakteri aşıyor ve `LongPathsEnabled=0` (MAX_PATH sınırı).
-- `test_material.py::TestMaterialTlsVerification::test_metadata_probe_failure_preserves_existing_cache`: test yolun `\` ile kurulmasını bekliyor, kod `/` kullanıyor.
-- `test_utils_ffmpeg_check.py::TestGetFfmpegBinaryEnvExpansion::test_normalizes_home_path_in_os_environ`: test `HOME`'u değiştiriyor, oysa Windows'ta `expanduser` `USERPROFILE`'ı okur.
-- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç 4123–4124 geçti, 3–4 kaldı arasında değişir (04.11'deki iki tam turun birinde kaldı, tek başına geçti).
+- `test_material.py::TestMaterialTlsVerification::test_metadata_probe_failure_preserves_existing_cache`: test yolun `\` ile kurulmasını bekliyordu, kod `/` kullanıyor (v1.3.10'da düzeldi).
+- `test_utils_ffmpeg_check.py::TestGetFfmpegBinaryEnvExpansion::test_normalizes_home_path_in_os_environ`: test `HOME`'u değiştiriyordu, oysa Windows'ta `expanduser` `USERPROFILE`'ı okur (v1.3.10'da düzeldi).
+- `test_material_cache_duration.py::test_legacy_finite_float_duration_remains_usable`: aralıklı kalıyor, tek başına çalıştırılınca 300 denemenin 24'ünde. Windows'ta yeni yazılan bir dosyanın `mtime` değeri `time.time()`'dan ileride olabiliyor (ölçümde 2000 yazmanın 227'sinde). O zaman `cache_age < 0` çıkar ve önbellek geçersiz sayılır. Bu yüzden toplam sonuç v1.3.10'dan beri 4144–4145 geçti, 1–2 kaldı arasında değişir (önce 4123–4124 / 3–4; 04.11'deki iki tam turun birinde kaldı, tek başına geçti).
 - `test_webui_startup.py::TestWebuiStartup::test_external_directory_prefers_project_app_package` tam turun yükü altında bazen alt süreç zaman aşımına (60 sn) takılıyor; tek başına 9–14 sn'de geçiyor.
 
 Atlananların dağılımı: 96 ffmpeg son render'ın tam stil matrisi (`MPT_RUN_SLOW_TESTS=1` ile çalışır; varsayılan turda her boyutu kapsayan 12 çekirdek durum çalışıyor), 91 native ffmpeg/ffprobe ister, 38 Redis ister (`MPT_TEST_REDIS_HOST`), 8 Kokoro test sunucusu ister, 7 canlı sağlayıcı ister (`MPT_RUN_INTEGRATION_TESTS=1`), 3 `twelvelabs` extra'sı kurulu olmadığı için, 1 Windows'ta geçersiz bir yol yüzünden atlanıyor.
@@ -114,7 +114,7 @@ Testler `test/conftest.py` fixture'ı sayesinde izole çalışır; gerçek `conf
 - `origin` = https://github.com/mc846/MoneyPrinterTurbo (fork), `upstream` = https://github.com/harry0703/MoneyPrinterTurbo. `main` dalı `origin/main`'i izler.
 - Her özellik ayrı bir dalda geliştirilir: `git switch -c feat/<ad> main`, ardından `git push -u origin feat/<ad>`.
 - **upstream'e asla push edilmez.** upstream'in push adresi `DISABLE` yapıldı (`git remote set-url --push upstream DISABLE`), bu yüzden `git push upstream` hata verir.
-- upstream güncellemeleri merge ile alınır: `git switch main; git fetch upstream; git merge upstream/main; git push origin main`.
+- upstream güncellemeleri ayrı bir `upgrade/<sürüm>` dalında, yayın etiketinden merge ile alınır; yöntem, çakışma ilkesi ve doğrulama listesi için bkz. **Upstream güncellemesi**.
 - Commit mesajları upstream'in biçimini izler: `fix(webui): …`, `feat(tts): …`, `docs: …`, `test: …`.
 - upstream `.gitignore`'u `CLAUDE.md`'yi yok sayar; fork bu dosyayı `git add -f` ile izliyor. upstream'e PR açılacaksa dalı `upstream/main`'den aç ki bu commit PR'a girmesin.
 - **PR yığını** (upstream'de bu sırayla birleşmeli): `upstream/main` → `fix/test-config-isolation` → `feat/cross-orientation-crop` → `feat/material-relevance` → `feat/visual-search-terms`. Yığının bütün dalları `test/conftest.py`'yi içerir. `feat/script-accuracy-rules` de `fix/test-config-isolation`'ın üzerinde ama yığından bağımsız: upstream'de isolation'dan sonra herhangi bir sırada birleşebilir. `fix/script-order-dedup` ve `fix/cli-video-source-default` `upstream/main` tabanlı ve bağımsızdır; bu ikisinde `test/conftest.py` yoktur.
@@ -130,6 +130,87 @@ Testler `test/conftest.py` fixture'ı sayesinde izole çalışır; gerçek `conf
 - `feat/batch-subtitles` (05.11, `feat/batch-webui`'nin üzerinden): pakete `.srt` altyazılar ve çeviriler. Commit 8070a72; main merge 35895be.
 - `feat/batch-webui` (05.11, `feat/batch-production`'ın üzerinden): WebUI'dan toplu üretim. Commit'ler b144039 (özellik), 9d6b80a (test yalıtımı), 1d657c7 (venv başlatıcısı kilidi, erken çıkış mesajı), 2e4185f (`state.json` değiştirme yeniden denemesi); main merge'leri e9d6ff5, 5739466, 469bf67, 04cd0fe.
 - **Test kuralı:** `test/conftest.py` içermeyen bir dalda test çalıştırma; önce `ls test/conftest.py` ile bak. Böyle bir dalın değişiklikleri `main`'de olduğu için testleri orada çalıştır. conftest yoksa testler gerçek `config.toml`'u okur ya da bozar ve `storage/tasks`'a yazar.
+
+## Upstream güncellemesi
+
+Kalıcı yöntem (ilk kez v1.3.10'da, 09.11 uygulandı). upstream'e push ve PR yok.
+
+1. **Hazırlık:** Çalışan WebUI'yı ve toplu işleri durdur; açık WebUI kod değişince `config.toml`'a eski değerleri yazabilir (bkz. Ortam notları). `config.toml`'un özetini al (`sha256sum config.toml`). Bundan sonraki adımların hiçbiri onu değiştirmemeli.
+2. **Bilgi:** `git fetch upstream --tags`. Yerel sürüm dizesi (`app/__init__.py`) main'in gerçek tabanını göstermeyebilir: `git describe --tags $(git merge-base main upstream/main)`. Ardından `git rev-list --count <son alınan upstream commit'i>..<etiket>`, sürüm notu (`docs/release-notes-<sürüm>.md`) ve `git diff --stat`.
+3. **Yedek etiket:** `git tag -a pre-upgrade-<sürüm> main -m "..."`, `git push origin pre-upgrade-<sürüm>`. Geri dönüş: `git switch main; git reset --hard pre-upgrade-<sürüm>; git push --force-with-lease origin main`.
+4. **Örtüşme tablosu:** upstream'in her commit'i özelliklerimizle karşılaştırılır ve her birine karar verilir: upstream'i al / bizimkini koru / birleştir. `git merge-tree --write-tree --name-only main <etiket>`, main'e dokunmadan çakışacak dosyaları gösterir. Çözülemeyecek kadar büyük bir çakışmada dur ve sor.
+5. **Dal:** `git switch -c upgrade/<sürüm> main; git merge <etiket>`. Merge edilen, `upstream/main` değil etikettir: etiketten sonraki commit'ler sürüme girmemiştir. Her çakışma kararı merge commit mesajına yazılır. Kaynak dosyalar Edit ile değiştirilir, CRLF korunur.
+6. **Çakışma ilkesi:**
+   - Bizim dalımız upstream'in aynı düzeltmesini kapsıyorsa (üst küme) bizimki korunur, upstream'in testleri alınır.
+   - Upstream'in düzeltmesi bizim dokunmadığımız bir yolu iyileştiriyorsa alınır, sonra bizim eklediğimiz eşdeğer yollara da uygulanır (ör. `-nostdin`).
+   - Önbelleğe alınan çıktılarda (yakınlaştırma klipleri) upstream'in değiştirdiği yolun önbellek kimliği değiştirilir ki eski çıktı kullanılmasın. Değişmeyen yolların önbelleği geçerli kalır.
+   - `uv.lock`: upstream'in kilidinden başlanır, `face` extra'sı (`opencv-python-headless`) en az değişiklikle eklenir. Yerel uv kilidi baştan yeniden yazdığı için `uv lock` çalıştırılmaz. `uv lock --check` temiz çıkmalı, `uv sync --frozen --extra face` başarılı olmalı (`--extra face` verilmezse OpenCV kaldırılır).
+   - i18n: 14 dilde ve upstream'in yeni dillerinde eksik anahtar olmamalı. upstream sağlayıcı etiketlerini ve ipuçlarını yalnız İngilizce tutar; `test_webui_i18n` (`ENGLISH_FALLBACK_KEYS`, `PROVIDER_TIPS_PREFIXES`) bunların ikincil dillere kopyalanmasını yasaklar.
+   - `config.example.toml`: iki tarafın yeni anahtarları açıklamalarıyla birlikte.
+7. **Doğrulama listesi** (upgrade dalında; her adımdan sonra `config.toml` özeti aynı olmalı):
+   - Tam takım, `config.toml` özeti ve `storage/tasks` önce/sonra karşılaştırılarak. Yeni her hata açıklanır ve düzeltilir.
+   - `MPT_RUN_SLOW_TESTS=1` ile `test/services/test_ffmpeg_final_render.py`, ruff, `uv lock --check`, `uv sync --frozen --extra face`.
+   - E2E (a): "Zombi yıldızlar" tek video, sıcak önbellek, profil betiğiyle (kaynak görev bb6c6d3d'nin metni ve terimleri). `config.toml`'da kayma varsa ffmpeg son render ve eşzamanlılık 3 yalnız o süreçte verilir (`PROFILE_OVERRIDES`). Karşılaştırılanlar: aşama süreleri, son render'ın ffmpeg komutu (aynıysa süre farkı yükten gelir), `credits.txt` ve `subtitle.srt` (bayt bayt), bütün videoda SSIM. NASA arama önbelleğinin süresi dolduysa ilk koşu ağa çıkar; sıcak süre ikinci koşudan okunur.
+   - E2E (b): iki konulu toplu iş, `presets/uzay.toml` (İngilizce çeviri açık), `--yeni` ile. Aynı girdi ve reçeteyle eski bir klasör varsa batch.py `--yeni` olmadan onu sürdürür. Kontrol edilenler: .srt doğrulayıcı, denetçi, `kalite.json` (kredi sorunları, filtre elemeleri), süreler.
+   - E2E (c): WebUI Playwright ile: Toplu Üretim görünümü, ana sayfadaki "Son video oluşturma" ve Ayarlar > Materyal kaynağı ayarları > NASA (filtreler, atıf, Pixabay yedeği ve eşikleri). Değerler okunur, değiştirilmez. Streamlit 1.66 notları:
+     - Seçim kutusu react-aria ComboBox'tır: değer `input[role=combobox]`'ta, liste `.react-aria-ComboBox button` ile açılır (`stSelectbox`'taki ilk düğme yardım "?" düğmesidir).
+     - Çerçeveli kap `stLayoutWrapper`'dır.
+     - Yeni tarayıcı profilinde ana sayfada driver.js tanıtım turu (`.driver-popover`) açılır ve tıklamaları örter; `.driver-popover-close-btn` ile kapatılır.
+     - "Ayarlar" düğmesi için `exact: true` gerekir ("Altyazı Ayarlarını Sıfırla" ile çakışır).
+8. **main:** Her şey geçerse `git switch main; git merge --ff-only upgrade/<sürüm>; git push origin main`. Geçmezse main'e dokunulmaz. Sonra WebUI yeniden başlatılır.
+9. **PR dalları:** v1.3.10'a taşınabilirlikleri geçici bir worktree'de deneme rebase'iyle ölçülür (`git worktree add --detach`, geçici dallar silinir, push yok).
+
+### v1.3.10 (09.11.2026)
+
+- **Önce:** `main` a989c2c, v1.3.9 + upstream ab6004e'ye kadar 52 commit (sürüm dizesi 1.3.9). v1.3.10 = 8b0206b (07.11); ab6004e..v1.3.10 arası 11 commit, 24 dosya, +578/−61. upstream/main etiketin 2 commit ilerisinde (66db0e5, c235354); bunlar alınmadı.
+- **Yedek etiket:** `pre-upgrade-v1.3.10` (a989c2c), origin'de. Merge 8f7eee1, ek düzeltme 8f45aab. main a989c2c'den 8f45aab'ye ileri sarıldı.
+- **Kararlar:**
+
+  | upstream | alan | karar |
+  |---|---|---|
+  | d72bb58 (#1772) | senaryo sırasında tekrar eden konular | Bizimki korundu: `fix/script-order-dedup` + even-spread aynı işi yapıyor ve ek olarak `screen_material` kancası ile eşit aralık yedek terimlerini taşıyor. |
+  | 76614ae | yavaş yakınlaştırmada titreme | Birleştirildi. `_smooth_zoom_clip` hedef boyutsuz yola alındı; hedef boyutlu (NASA) yol zaten alt piksel kırpıyordu. upstream'in dosya adı etiketi yerine o yolun ayar kimliğine `zoom = "smooth"` eklendi, NASA klip önbelleği geçerli kaldı. |
+  | c8dbf96 | ffmpeg konsoldan tuş okuyor | Alındı. `-nostdin` kopya concat'e ve paketin kare çıkarmasına da eklendi (8f45aab, 2 test). |
+  | b42ecbc, 842525d | `subtitle.py` | Alındı. Bu dosyaya dokunmamıştık; .srt modülümüz görevin `subtitle.srt`'ini okur. Zombi'nin `subtitle.srt`'i bayt bayt aynı çıktı. |
+  | ace6c8f (#1773) | ses adında yazı alt etiketi | Alındı. |
+  | 22c4671 | `cheapaimodel` sağlayıcısı ve config anahtarları | Alındı; upstream ilkesi gereği ikincil dillere eklenmedi. |
+  | bf33010 | Windows'ta yol testleri | Alındı; bilinen 3 hatanın 2'si düzeldi. |
+  | 0501fac, e308df6, 8b0206b | README, sürüm notu | Alındı. |
+  | `uv.lock`, `pyproject.toml` | — | Otomatik birleşti: upstream'in kilidi (1.3.10) + `face` extra'sı. |
+
+- **Doğrulama:**
+  - Tam takım 4145 geçti, 1 kaldı (MAX_PATH), 244 atlandı. Yavaş matris 122 geçti. ruff ve kilit temiz.
+  - E2E (a): ilk koşu 73,4 sn (NASA arama önbelleğinin süresi dolmuştu, 8 arama ağa çıktı). İkinci koşu 56,7 sn (05.11: 52,2): malzeme 12,5 / 11,0, birleştirme 10,8 / 10,4, son render 31,3 / 28,7. Son render komutu aynı, fark sistem yükünden. `credits.txt` ve `subtitle.srt` aynı, bütün videoda SSIM 0,969.
+  - E2E (b): 405 sn (05.11: 423). Konu başına 179 / 226 sn. .srt doğrulayıcı temiz (tr ve en altyazı sayıları eşit, konuşma örtüşmesi ort. 0,94–0,96). Kara delikler denetçide 2 Y ile kontrol gerekli çıktı (LLM içeriği: "Sagittarius A" yerine A*); Mars temiz.
+  - E2E (c): bütün değerler `config.toml` ile aynı, hata yok. `config.toml` özeti baştan sona 7e00d054f184.
+- **Yan etki:** İlk (b) denemesi `--yeni` olmadan 05.11 klasörünü (`20261105-220755_altyazi-iki`) sürdürdü. Yalnız `finished` damgası, `rapor.html` ve `batch.log` güncellendi.
+- **PR dalları** (deneme rebase'i):
+  - 28 dalın hepsi ab6004e tabanlı ve main'de.
+  - 14'ü v1.3.10'a temiz taşınıyor.
+  - Çakışan 11'inin hepsi acfe361 (`fix/script-order-dedup`) yüzünden; upstream d72bb58 aynı işi yapıyor. acfe361 atlanınca sıradaki çakışma 2e7a788'de (even-spread, aynı fonksiyon). Dalın tarafı kazanırsa (`-X theirs`) hepsi geçiyor, ama `perf/image-clip-reuse` ve `perf/nasa-clip-size`'da bu `_smooth_zoom_clip`'i siliyor. Bu ikisinde 8f7eee1'deki elle çözüm uygulanmalı.
+  - `perf/ffmpeg-concat-normalize` metin olarak temiz, ama 8f45aab'deki `-nostdin` onda yok.
+  - Üç `feat/batch-*` dalı kişisel ve main'de; rebase gerekmez (doğrusallaştırılınca 857c68c'de `schema.py`'de duruyor).
+  - `fix/script-order-dedup`'ın upstream PR'ının #1772'den sonra hâlâ gerekli olup olmadığına kullanıcı karar verir.
+
+### ffmpeg (09.11.2026, yalnız okuma)
+
+- **Paketteki ikili:** imageio-ffmpeg 0.6.0 → `ffmpeg-win-x86_64-v7.1.exe`. Başlık "ffmpeg version 7.1-essentials_build-www.gyan.dev"; gcc 14.2.0 (MSYS2), statik, GPLv3 (libx264, libx265, libaom, libvpx, libwebp, libopenjpeg, gnutls, libxml2, libass…). SHA-256 `2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3`. v1.3.10 bunu değiştirmiyor: `uv.lock`'ta ab6004e, v1.3.10 ve upstream/main'de imageio-ffmpeg 0.6.0.
+- **Seçim sırası** (`utils.get_ffmpeg_binary`): `IMAGEIO_FFMPEG_EXE` (`[app] ffmpeg_path` dosya varsa buna yazılır) → PATH'teki ffmpeg → imageio-ffmpeg. Bu makinede ilk ikisi yok.
+- **ffprobe:** `material_upload._ffprobe_binary` önce ffmpeg'in yanındaki ffprobe'u, sonra PATH'i dener; ikisi de yok. Video ölçümü bu yüzden MoviePy'nin `ffmpeg_parse_infos`'una (ffmpeg -i çıktısı) düşüyor.
+- **Hangi dosyayı kim çözüyor:** NASA görselleri Pillow ile açılıyor (`Image.open`, dosya yolundan `ImageClip`). ffmpeg çoğunlukla stok videoları (Pixabay/Pexels/Coverr mp4) ve ara klipleri çözüyor.
+- **Açıklar:** 7.1 (Eylül 2024) sonrası düzeltilmiş, güvenilmeyen dosyayı çözerken erişilebilen açıklar var (kaynak: ffmpeg.org/security.html ve NVD):
+  - 7.1.2: CVE-2025-9951 (JPEG 2000 çözücüsünde yığın taşması, yüksek); CVE-2025-59731/59732/59733 (OpenEXR DWAA/DWAB sınır dışı yazma); CVE-2025-59728 (DASH demuxer).
+  - 7.1.1: CVE-2023-6605 (DASH üzerinden SSRF), CVE-2023-6602, CVE-2025-22919 (AAC çözücüsünde DoS).
+  - security.html'de 8.0.3/8.1.2/9.0 altında: CVE-2026-8461 (MagicYUV sınır dışı yazma, yüksek; MOV/MKV/AVI içinde gelebilir).
+  - 9.0 altında: CVE-2026-12706 (RASC use-after-free) ve CVE-2026-70631/66038/70629 (TIFF/LCL/RSCC bellek sızıntısı). 7.1.x'e taşındıkları doğrulanmadı.
+  - ffmpeg dosya uzantısına değil içeriğe bakar: ".mp4" diye inen bir HLS/DASH listesi ağa çıkabilir.
+  - Kaynaklarımız (NASA, Pixabay, Pexels, Coverr) yüklemeleri yeniden kodladığı için risk düşük, ama sıfır değil.
+- **Öneri:** güncelle, acil değil.
+  - En temiz yol, ayrı bir dalda imageio-ffmpeg 0.8.1'e geçmek (PyPI, 03.11.2026; Windows x64 için `ffmpeg-win-x86_64-v9.0.2.exe`, gyan.dev 9.0.2 essentials). 7.1 → 9.0 iki ana sürüm atladığı için tam takım, yavaş matris ve E2E şart (MoviePy'nin ffmpeg çıktısını ayrıştırması dahil). Son sürümler: 7.1 dalında 7.1.5 (20.06.2026), en yeni ana sürüm 9.0.2 (18.09.2026).
+  - Paket değiştirmeden: gyan.dev'den release "essentials" (statik) zip indirilir. SHA-256'sı (`Get-FileHash -Algorithm SHA256` ya da `certutil -hashfile <zip> SHA256`) sitedeki `.sha256` dosyasıyla ve GitHub'daki GyanD/codexffmpeg sürüm varlığının özetiyle karşılaştırılır (imza yok).
+  - Ardından `ffmpeg -version` başlığı ve `ffmpeg -hide_banner -encoders | findstr libx264` kontrol edilir. Son olarak `IMAGEIO_FFMPEG_EXE` ya da `[app] ffmpeg_path` `bin\ffmpeg.exe`'ye verilir.
+  - BtbN derlemeleri dal ucundan (ör. `n9.0.2-48-g…`) ve günlük üretiliyor; tam sürüm etiketi isteniyorsa gyan.dev'in release derlemesi daha uygun.
+- **Sertleştirme önerisi** (uygulanmadı): çözme komutlarına girdi seçeneği olarak `-protocol_whitelist file` eklenirse indirilen dosya bir akış listesi olsa bile ağa çıkamaz.
 
 ## Toplu üretim (batch.py)
 
