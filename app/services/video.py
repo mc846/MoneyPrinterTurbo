@@ -47,8 +47,11 @@ from app.models.schema import (
 )
 from app.services import bgm as bgm_service
 from app.services.utils import subtitle_shaping, video_effects
-from app.utils import file_security, logging_utils, utils
+from app.utils import ffmpeg_inputs, file_security, logging_utils, utils
 from app.utils.subtitle_reader import moviepy_subtitles
+
+# MoviePy's readers and writers start ffmpeg themselves; restrict their inputs too.
+ffmpeg_inputs.guard_libraries()
 
 class SubClippedVideoClip:
     def __init__(
@@ -936,8 +939,8 @@ def concat_video_clips_with_ffmpeg(
             "concat",
             "-safe",
             "0",
-            "-i",
-            concat_list_file,
+            # The concat demuxer opens the listed clips with this input's whitelist.
+            *ffmpeg_inputs.ffmpeg_input(concat_list_file),
             "-c:v",
             codec,
         ]

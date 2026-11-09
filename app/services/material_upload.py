@@ -14,7 +14,7 @@ from loguru import logger
 from moviepy.video.io.ffmpeg_reader import ffmpeg_parse_infos
 from PIL import Image, UnidentifiedImageError
 
-from app.utils import utils
+from app.utils import ffmpeg_inputs, utils
 
 
 # Local materials are usually short clips. This matches Streamlit's default upload
@@ -204,12 +204,9 @@ def _validate_video(
                 "-xerror",
                 # Uploaded files must be self-contained media, not playlists
                 # that cause validation/rendering to read adjacent files or URLs.
-                "-protocol_whitelist",
-                "file,pipe",
                 "-format_whitelist",
                 "mov,avi,flv,matroska",
-                "-i",
-                file_path,
+                *ffmpeg_inputs.ffmpeg_input(file_path),
                 "-map",
                 # Uppercase V excludes attached pictures/album covers. A cover
                 # in an audio container is not a renderable video material.

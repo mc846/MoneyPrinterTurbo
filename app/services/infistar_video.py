@@ -234,6 +234,9 @@ def _download(task_id, base, headers, output_dir):
         material_upload._validate_video(str(staged))
         from moviepy import VideoFileClip
 
+        from app.utils import ffmpeg_inputs
+
+        ffmpeg_inputs.guard_libraries()
         with VideoFileClip(str(staged)) as clip:
             duration = float(clip.duration)
             width, height = clip.size

@@ -32,9 +32,12 @@ from openai import OpenAI
 
 from app.config import config
 from app.services import bgm
-from app.utils import utils
+from app.utils import ffmpeg_inputs, utils
 from app.utils.subtitle_reader import moviepy_subtitles
 from app.utils.subtitle_writer import staged_subtitle_file
+
+# MoviePy's audio reader and pydub start ffmpeg themselves; restrict their inputs too.
+ffmpeg_inputs.guard_libraries()
 
 _DEFAULT_EDGE_TTS_TIMEOUT_SECONDS = 30.0
 _SILICONFLOW_TTS_TIMEOUT_SECONDS = (10, 300)  # connect, read
@@ -622,8 +625,7 @@ def generate_silent_audio(duration_seconds: float, output_file: str) -> bool:
         "-y",
         "-f",
         "lavfi",
-        "-i",
-        "anullsrc=r=44100:cl=mono",
+        *ffmpeg_inputs.ffmpeg_input("anullsrc=r=44100:cl=mono"),
         "-t",
         f"{duration_seconds:.3f}",
         "-codec:a",
@@ -863,7 +865,7 @@ def apply_audio_volume(audio_file: str, output_file: str, volume: float) -> bool
     ensure_file_path_exists(output_file)
     command = [
         utils.get_ffmpeg_binary(), "-nostdin", "-v", "error", "-y",
-        "-i", audio_file, "-vn", "-af", f"volume={volume}",
+        *ffmpeg_inputs.ffmpeg_input(audio_file), "-vn", "-af", f"volume={volume}",
         "-codec:a", "libmp3lame", "-q:a", "4",
     ]
     return _publish_tts_ffmpeg_output(command, output_file, "audio export volume")
@@ -939,8 +941,7 @@ def _concat_audio_files(audio_files: list[str], output_file: str) -> bool:
                         "-v",
                         "error",
                         "-y",
-                        "-i",
-                        f,
+                        *ffmpeg_inputs.ffmpeg_input(f),
                         "-vn",
                         "-ac",
                         "1",
@@ -978,8 +979,7 @@ def _concat_audio_files(audio_files: list[str], output_file: str) -> bool:
             "-v",
             "error",
             "-y",
-            "-i",
-            temp_combined_wav,
+            *ffmpeg_inputs.ffmpeg_input(temp_combined_wav),
             "-codec:a",
             "libmp3lame",
             "-q:a",
@@ -1084,8 +1084,7 @@ def _tts_with_pauses(
                     "-v",
                     "error",
                     "-y",
-                    "-i",
-                    chunk_audio_file,
+                    *ffmpeg_inputs.ffmpeg_input(chunk_audio_file),
                     "-vn",
                     "-ac",
                     "1",
@@ -3194,8 +3193,7 @@ def prepare_voxcpm_reference_audio(uploaded_audio: bytes, suffix: str = "") -> b
                     "-xerror",
                     "-t",
                     str(VOXCPM_REFERENCE_AUDIO_MAX_DURATION_SECONDS),
-                    "-i",
-                    input_path,
+                    *ffmpeg_inputs.ffmpeg_input(input_path),
                     "-map",
                     "0:a:0",
                     "-ac",

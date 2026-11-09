@@ -12,7 +12,7 @@ from app.utils.request_logging import trace_http_call
 
 from app.config import config
 from app.services import bgm as bgm_service
-from app.utils import utils
+from app.utils import ffmpeg_inputs, utils
 
 
 DEFAULT_BASE_URL = "https://api.elevenlabs.io"
@@ -226,8 +226,7 @@ def _create_video_proxy(video_path: str) -> str:
         "-v",
         "error",
         "-y",
-        "-i",
-        video_path,
+        *ffmpeg_inputs.ffmpeg_input(video_path),
         "-vf",
         (
             "scale=w=1280:h=1280:force_original_aspect_ratio=decrease:"

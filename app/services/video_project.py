@@ -22,6 +22,8 @@ import time
 from typing import Callable, Iterator
 from uuid import uuid4
 
+from app.utils import ffmpeg_inputs
+
 PREPARED_FORMATS = "mov,matroska,avi,mpegts,mpegvideo,ogg,flv,wav,mp3,flac,aac"
 SCHEMA_VERSION = 1
 RENDERER_VERSION = "local-ffmpeg-v1"
@@ -498,11 +500,7 @@ class VideoProject:
             raise RenderCancelled("revision cancelled")
         # Prepared media may contain playlist references. Never let an input
         # silently initiate network access; allow local files and pipes only.
-        secured_arguments = []
-        for argument in arguments:
-            if argument == "-i":
-                secured_arguments.extend(["-protocol_whitelist", "file,pipe"])
-            secured_arguments.append(argument)
+        secured_arguments = ffmpeg_inputs.restrict_ffmpeg_inputs(arguments)
         with tempfile.TemporaryFile() as errors:
             process = subprocess.Popen(
                 secured_arguments, stdout=subprocess.PIPE, stderr=errors, text=True
