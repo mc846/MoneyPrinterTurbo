@@ -62,6 +62,8 @@ uv run python cli.py --video-subject "Konu"            # CLI ile video
 uv run python cli.py --help
 uv run python cli.py --batch-file .\tasks.json --stop-at video
 uv run python batch.py .\konular.csv --preset presets\uzay.toml   # toplu üretim + yükleme paketleri + rapor.html
+uv run python batch.py durum <klasör>                              # iki aşamalı akış: onay bekleyenler, denetim
+uv run python batch.py render <klasör>                             # iki aşamalı akış: yalnız onaylıların videosu
 uv run python -X utf8 -m pytest -q test                # bütün testler
 uv run python -X utf8 -m pytest -q test/services/test_video.py::TestVideoService
 $env:MPT_RUN_SLOW_TESTS="1"; uv run python -X utf8 -m pytest -q test/services/test_ffmpeg_final_render.py   # ffmpeg son render'ın tam stil matrisi (~2,5 dk)
@@ -96,7 +98,7 @@ Yerel çalıştırma ve Docker aynı portları kullanır: WebUI 8501, API 8080 (
 ## Test baz durumu
 
 04.11.2026, Windows 11, Python 3.11.18. Redis yok, API anahtarı yok, PATH'te ffmpeg yok. `pytest -q test` 12–23 dakika sürer.
-**4179 geçti, 1 kaldı, 244 atlandı** (09.11, ffmpeg 9.0.2 ile — `IMAGEIO_FFMPEG_EXE` verilerek —, `main` cdff882, 14 dk 36 sn; 15 915 alt test; 34 yeni test: ffmpeg sürüm günlüğü 9, protocol whitelist 13, main komutları 10, toplu üretim 2). Paketteki 7.1 ile iki DASH testi ve gerçek ffprobe testi atlanır. `MPT_RUN_SLOW_TESTS=1` matrisi 9.0 ile 122 geçti. Önceki: 4145 geçti, 1 kaldı, 244 atlandı (09.11, v1.3.10 yükseltmesinden sonra, `main` 8f45aab, 19 dk; ayrıca 15 915 alt test geçti; upstream'in 17 yeni testi ve `-nostdin` ek düzeltmesinin 2 testi dahil; upstream bf33010 bilinen 3 hatanın 2'sini düzeltti). Daha önceki baz: 4124 geçti, 3 kaldı, 244 atlandı (05.11, toplu üretim altyazılarından sonra, `main` 35895be, 13 dk 46 sn; ayrıca 15 908 alt test geçti; düzeltmelerin, kırpma, etiket uygunluğu, görsel arama terimi, doğruluk kuralı, eşit aralıklı terim seçimi, NASA kaynağı, noktalama normalleştirmesi, CLI sağlayıcı bayraklarının, yedek kaynağın, yüz kenarı kuralının, metin filtresinin, üretim süresi hızlandırmalarının, ffmpeg son render'ının, toplu üretimin, WebUI toplu üretiminin ve toplu üretim altyazılarının 1025 yeni testi dahil; atlananlara `MPT_RUN_SLOW_TESTS=1` ile açılan 96 matris testi eklendi). NASA testleri ağa çıkmaz; `test/resources/nasa/` altındaki kayıtlı API yanıtlarını kullanır. Yüz ve metin testleri çizilmiş bir yüz, çizilmiş yazı ve yapay bir yıldız alanı üretir (gerçek kişi fotoğrafı yok); `face` extra'sı kurulu değilse OpenCV isteyen 7'si atlanır. CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
+**4241 geçti, 1 kaldı, 244 atlandı** (09.11, iki aşamalı toplu üretimden sonra, ffmpeg 9.0.2 ile — `IMAGEIO_FFMPEG_EXE` verilerek —, `main` b572fb7, 19 dk 21 sn; 17 667 alt test; 61 yeni test: `test_batch_review.py` 47, `test_batch_review_webui.py` 14; yeniden başlatılan WebUI'nın günlük satırı için 1). Önceki: 4179 geçti, 1 kaldı, 244 atlandı (09.11, ffmpeg 9.0.2 ile, `main` cdff882, 14 dk 36 sn; 15 915 alt test; 34 yeni test: ffmpeg sürüm günlüğü 9, protocol whitelist 13, main komutları 10, toplu üretim 2). Paketteki 7.1 ile iki DASH testi ve gerçek ffprobe testi atlanır. `MPT_RUN_SLOW_TESTS=1` matrisi 9.0 ile 122 geçti. Önceki: 4145 geçti, 1 kaldı, 244 atlandı (09.11, v1.3.10 yükseltmesinden sonra, `main` 8f45aab, 19 dk; ayrıca 15 915 alt test geçti; upstream'in 17 yeni testi ve `-nostdin` ek düzeltmesinin 2 testi dahil; upstream bf33010 bilinen 3 hatanın 2'sini düzeltti). Daha önceki baz: 4124 geçti, 3 kaldı, 244 atlandı (05.11, toplu üretim altyazılarından sonra, `main` 35895be, 13 dk 46 sn; ayrıca 15 908 alt test geçti; düzeltmelerin, kırpma, etiket uygunluğu, görsel arama terimi, doğruluk kuralı, eşit aralıklı terim seçimi, NASA kaynağı, noktalama normalleştirmesi, CLI sağlayıcı bayraklarının, yedek kaynağın, yüz kenarı kuralının, metin filtresinin, üretim süresi hızlandırmalarının, ffmpeg son render'ının, toplu üretimin, WebUI toplu üretiminin ve toplu üretim altyazılarının 1025 yeni testi dahil; atlananlara `MPT_RUN_SLOW_TESTS=1` ile açılan 96 matris testi eklendi). NASA testleri ağa çıkmaz; `test/resources/nasa/` altındaki kayıtlı API yanıtlarını kullanır. Yüz ve metin testleri çizilmiş bir yüz, çizilmiş yazı ve yapay bir yıldız alanı üretir (gerçek kişi fotoğrafı yok); `face` extra'sı kurulu değilse OpenCV isteyen 7'si atlanır. CI tam takımı yalnız Linux'ta çalıştırır; Windows'ta yalnız 4 dosyalık bir duman testi var, o yüzden aşağıdaki hatalar CI'da görünmez.
 
 Aşağıdaki testlerin hiçbiri bir özelliğin bozulduğunu göstermiyor; nedenleri Windows ya da ortam. İkinci ve üçüncüsü v1.3.10'daki upstream bf33010 ile düzeldi; v1.3.10'dan beri her turda kalan yalnız ilki:
 - `test_image_sanitize_identity.py::test_long_source_name_renders_without_exceeding_filesystem_name_limit`: tam yol 260 karakteri aşıyor ve `LongPathsEnabled=0` (MAX_PATH sınırı).
@@ -136,6 +138,7 @@ Testler `test/conftest.py` fixture'ı sayesinde izole çalışır; gerçek `conf
   - `fix/ffmpeg-protocol-whitelist` (83b307c, 388c0ff): bkz. **Upstream güncellemesi > ffmpeg girdi güvenliği**. main'e çakışmasız girdi.
   - main'e özgü takip commit'i cdff882: bizim komutlarımıza whitelist, ffmpeg 8+ için `-/filter_complex`, `batch.log`'a ffmpeg satırı.
 - `fix/batch-draft-empty-voice` (09.11, `main`'den; kişisel): Toplu Üretim tablosunda boş ses hücresi boş görünür (65f9e37).
+- `feat/batch-review` (09.11, `main`'den; kişisel, upstream PR'ı yok): iki aşamalı toplu üretim (d160392), e2e'de bulunan sağlayıcı ve denetim kaybı düzeltmesi (eab2a1b); main merge'leri a52df58, b572fb7. Bkz. **Toplu üretim > İki aşamalı akış**.
 - **Test kuralı:** `test/conftest.py` içermeyen bir dalda test çalıştırma; önce `ls test/conftest.py` ile bak. Böyle bir dalın değişiklikleri `main`'de olduğu için testleri orada çalıştır. conftest yoksa testler gerçek `config.toml`'u okur ya da bozar ve `storage/tasks`'a yazar.
 
 ## Upstream güncellemesi
@@ -267,7 +270,7 @@ mpt batch .\konular.csv --preset presets\uzay.toml                            # 
 - `[video]`: CLI bayraklarının alt çizgili adları (`--video-source-fallback` → `video_source_fallback`); değerler `cli.parse_args`'tan geçer, yani seçenek listeleri ve tipler CLI'daki gibi denetlenir. `true`/`false` → `--x` / `--no-x`; liste virgülle birleşir. Konu başına değişen anahtarlar yasak: `video_subject`, `video_script`, `video_terms`, `video_anchors`, `video_script_prompt`, `task_id`, `batch_file`, `stop_at`, `video_count`, `video_materials`, `custom_audio_file`. Reçetede olmayan ayarlar `config.toml`'dan gelir.
 - `[app]`: yalnız bu süreçte `config.app`'e yazılır, `config.toml` değişmez: `material_concurrency`, `video_clip_concurrency`, `nasa_face_filter`, `video_source_fallback_min_relevance`, `video_source_fallback_min_candidates`, `video_codec`.
 - `[script]`: `prompt` (metin talimatı; yer tutucular `{kelime_min}`, `{kelime_max}`, `{konu}`) ve `target_words = [90, 100]`. Talimat göreve `--video-script-prompt` olarak gider.
-- `[quality]`: `target_duration = [35, 60]` (saniye) ve `audit = true` (doğruluk denetimi).
+- `[quality]`: `target_duration = [35, 60]` (saniye), `audit = true` (doğruluk denetimi) ve `review_before_render` (iki aşamalı akış; `uzay.toml`'da `true`, bkz. **İki aşamalı akış**).
 - `[package]`: `subtitle_translations = ["en"]` (BCP-47 kodları; boş liste = çeviri yok). `batch.py --altyazi-cevirileri en,de` (boş değer = yok) yalnız o toplu iş için reçetedekinin yerine geçer ve `state.json`'a yazılır; devam ettirilen çalıştırma aynı dilleri kullanır.
 - **Altyazı görünümü reçetede sabit** (`subtitle_enabled = true`, `subtitle_position = "bottom"`, `font_size = 60`, beyaz yazı + siyah kontur, `voice_rate = 1.0`). CLI reçetede olmayan bu değerleri `config.toml`'un `[ui]` bölümünden alır; 05.11'de eski bir WebUI orada altyazıyı kapatıp sesi 0,8'e, yazı boyutunu 30'a çektiği için o günkü WebUI e2e videoları (`20261105-204332_webui`, `20261105-210031_webui`) altyazısız ve yavaş seslendirmeyle üretildi. Altyazı kapalıysa görevde `subtitle.srt` da olmaz.
 - `uzay.toml` uzay reçetesidir: `claude_code`, tr-TR, doğruluk kuralları, NASA + Pixabay yedeği (eşik 0,5 / 1), 9:16 kırpma, `rank`, sıra koruma, `visual` terimler, yapay zeka dışlaması kapalı, atıf katmanı, metin ve yüz filtresi, EmelNeural, STHeitiMedium, kontur 3, klip 5 sn, ffmpeg son render, eşzamanlılık 3. Talimat: en az 90, en çok 100 kelime ("90'ın altına inme"); merak uyandıran açılış; tek bir somut ve gerçek örnek; yalnız konunun adı bir takma adsa (ör. "zombi yıldız") bunu söyle, başka hiçbir şeye takma ad deme. İlk sürüm ("Yaklaşık 90-100 kelime"; "konu bir takma ad ya da benzetme içeriyorsa…") e2e'de 86 ve 88 kelime verdi ve Satürn metnine "halkaların kaybolması aslında bir takma ad" cümlesini soktu. Yeni sürüm 4 konuda 90, 94, 98 ve 103 kelime verdi; takma ad yalnız Zombi'de geçti.
@@ -394,7 +397,7 @@ Dal `feat/batch-webui` (`feat/batch-production` üzerinden). Kod `webui/batch_pa
 - Çeviri dilleri için çoklu seçim (`batch_subtitles.LANGUAGES`, videonun dili hariç; reçetedeki değerle başlar). Seçim `start_batch(..., translations=…)` ile `--altyazi-cevirileri` olarak gider; reçete dosyasına ve `config.toml`'a yazılmaz. Reçete özetinde "Çeviri altyazıları" satırı var.
 - Tablonun boş hücreleri "None" yerine boş görünür: metin sütunlarının varsayılanı `""`. Seste `""` kullanılamaz: Streamlit 1.66'nın `SelectboxColumn`'u `""` değerini (seçeneklerde olsa da, `format_func` etiketi verilse de) boş değer sayıp gri "None" çizer, `TextColumn` çizmez. Bu yüzden tabloda "ses seçilmedi" `EMPTY_VOICE = " "` (seçenek ve varsayılan; taslaktan yüklenen satırlarda da). `normalize_rows` kırptığı için taslak, CSV ve doğrulama `""` görür (`fix/batch-draft-empty-voice`, 65f9e37; önceki `""` varsayılanı yeni satırlarda da "None" gösteriyordu). "Boş = reçetedeki ses" ipucu sütun başlığında ve tablonun altında (`batch.col.voice_hint`).
 - Geçmiş kartında video başına `.srt` dosyaları ("Altyazı dosyaları" açılır bölümü).
-- 86 metin (`batch.*`) 14 dilde.
+- 159 metin (`batch.*`; 73'ü iki aşamalı akışın) 14 dilde.
 
 **Çalıştırıcı** (`batch_runner`)
 - `start_batch`: `[python, -X, utf8, batch.py, <girdi>, --preset, <reçete>, --output, <klasör>, --gunluk-stderr]`; kabuk yok, `stdin` boş, stdout/stderr klasördeki `batch.log`'a (ekleme kipinde), Windows'ta `CREATE_NEW_PROCESS_GROUP` (POSIX'te yeni oturum). pip kurulumunda `-m app.services.batch_production`. `--gunluk-stderr` batch.py'nin aynı dosyaya ikinci kez yazmasını önler.
@@ -426,8 +429,86 @@ Dal `feat/batch-webui` (`feat/batch-production` üzerinden). Kod `webui/batch_pa
 
 **Sıradaki**
 - (a) Altyazı görünümü düzenleyicisi: yazı tipi, boyut, renk, kontur ve konum için canlı önizleme (örnek karede); Türkçe glif kontrolü (ğ ı İ ş ç ö ü ve noktalama, `video._subtitle_font_supports_sample`); sonucu yeni bir reçete olarak kaydetme (`presets/*.toml`). Bugün altyazı görünümü `uzay.toml`'da elle sabitleniyor.
-- (b) İki aşamalı toplu iş: önce bütün konular için metin ve terimleri üret ve denetle (`--stop-at terms` + doğruluk denetimi); arayüzde metni düzelt ya da onayla; sonra yalnız onaylananları render et (`--video-script` / `--video-terms` ile). İşaretli iddialar render'dan önce düzeltilebilir, boşa render olmaz.
+- (b) ~~İki aşamalı toplu iş~~: yapıldı (09.11), bkz. **İki aşamalı akış**.
 - (c) Arayüzde sonuç inceleme: Geçmiş'teki bir toplu işin videolarını oynatma, kapağı ve kareleri görme, işaretli iddiaları gerekçeleriyle okuma, paylaşım metnini ve `.srt`'leri platform başına kopyalanabilir alanlarda gösterme. Bugün bunlar için `rapor.html` açılıyor.
+
+### İki aşamalı akış (önce metin, onaydan sonra video)
+
+Dal `feat/batch-review` (09.11). Kod `app/services/batch_review.py` (dosyalar, onay kuralları, komutlar), `batch_production.py` (hazırlık ve render aşamaları), `batch_runner.py` (başlatma, durum), `batch_package.py` (onaylanan metnin denetimi), `webui/batch_page.py` (inceleme paneli). Testler `test_batch_review.py` (47) ve `test_batch_review_webui.py` (14, AppTest).
+
+**Ne zaman:** reçetede `[quality] review_before_render = true` (`uzay.toml`'da açık). Yalnız o toplu iş için `batch.py --inceleme` / `--inceleme-yok` ya da WebUI'daki "İki aşamalı akış" kutusu (reçeteye ve config.toml'a yazılmaz). Akış toplu iş açılırken `state.json`'a yazılır, devam ettirilen çalıştırmalar aynı akışı sürer. Kapalıyken davranış birebir eskisi gibi (eski testler `review=False` / `--inceleme-yok` ile koşuyor).
+
+**Durumlar** (`state.json`, yalnız arka plan süreci yazar): `pending` → `preparing` → `awaiting_review` → `approved` → `rendering` → `done` / `failed`; ayrıca `skipped`. "Kontrol gerekli" `done` + `kalite.json`'daki işarettir. Onay ve atlama kararları `review.json`'dadır; görünen durumu `batch_review.effective_status` ikisinden birlikte çıkarır. Süreç ölmüşse yarıda kalan hazırlık "bekliyor", yarıda kalan render "onaylandı" görünür ve sonraki çalıştırma sürdürür. `ItemState`'te hazırlık ayrı sayılır: `prepared`, `prepare_seconds`, `prepare_attempts`, `prepare_task_id` (render süresi `seconds`'ta).
+
+**Hazırlık** (`batch.py <girdi> --preset …`; aynı komut ve aynı kural: biten atlanır, başarısız turun sonunda bir kez daha denenir):
+- Her konu için metin, arama terimleri ve çapalar, görevin "terms"te duran yolundan (`bp.run_text_task`; LLM çıktısının noktalama düzeltmeleri dahil). Ardından mevcut denetçi (`batch_package.audit_script`). Ses ve video yok.
+- Kelime sayısı ve tahmini süre (`batch_review.estimate`). Türkçe Edge (EmelNeural, hız 1.0) 18 videoda ölçüldü: süre ≈ 0,067 sn × boşluksuz harf + 7,7 sn (en büyük sapma 3,1 sn; kelimeyle 5,2 sn).
+- Sonuç konu klasörünün `hazirlik.json`'una yazılır, konu `awaiting_review` olur. Hepsi hazırlanınca süreç 0 ile çıkar (hazırlanamayan kaldıysa 1).
+
+**Dosyalar** (konu klasöründe):
+- `hazirlik.json` (yalnız arka plan süreci): metin, özeti, terimler, çapalar, denetim, kelime/harf/tahmini süre, istem, görev kimliği, süre.
+- `review.json` (yalnız WebUI ve onay komutları; atomik: benzersiz geçici dosya + `replace_file`; okuma `PermissionError`/yarım JSON'da 20 kez yeniden denenir): güncel metin, terimler, çapalar, `script_edited`, `terms_edited` (elle düzenlendi: metin değişince yeniden üretilmez), `terms_sha256` (terimlerin üretildiği metin), `audit` ve `audit_sha256` (son denetim ve ait olduğu metin), `approved`, `approved_at`, `approved_sha256` (onaylanan metin; metin sonra değişirse onay geçersiz), `approved_despite_flags`, `skipped`, `history` (yeniden üretimlerde talimat + önceki metin, terimler, denetim), `last_action` (son işlem; başarısızsa WebUI gösterir). İlk işleme kadar dosya yoktur, içerik `hazirlik.json`'dan gelir.
+- `.islem.json`: süren LLM işleminin kilidi (pid + süreç başlangıcı; süreç ölünce bayat sayılıp silinir). `.duzenleme.txt`: WebUI'nın düzenlenmiş metni komuta verdiği dosya. `inceleme.log`: WebUI'nın başlattığı komutların çıktısı.
+
+**Onay kuralları** (`batch_review`; CLI ve WebUI aynı fonksiyonları kullanır):
+- Onayla: metin son denetimden sonra değiştiyse önce yeniden denetlenir; terimler elle düzenlenmediyse ve metin terimlerden sonra değiştiyse metinden yeniden üretilir. Denetimde Y/X varsa ya da denetim yapılamadıysa onay yalnız "yine de onayla" ile (`force`; `approved_despite_flags` ve kalite nedeni olarak raporda). Engellenen onayda düzenleme ve yeni denetim yine kaydedilir.
+- Yeniden üret: isteğe bağlı ek talimat satırın talimatına eklenir; metin + terimler + çapalar üretilip denetlenir, önceki metin `history`'de.
+- Yeniden denetle: (düzenlenmiş) metni onaylamadan denetler; eskimiş ve elle düzenlenmemiş terimleri de yeniler. Böylece "Temizleri onayla" hiç LLM gerektirmez.
+- Atla / atlamayı geri al. Onaylı ya da atlanmış konu düzenlenemez.
+- Temizleri onayla: onay bekleyen, son denetimi güncel metne ait, terimleri güncel (ya da elle düzenlenmiş) ve Y/X içermeyen (denetimi yapılmış) bütün konular. Kilitli konular ve WebUI'da kaydedilmemiş düzenlemesi olanlar (`exclude`) dışarıda.
+- LLM işlemleri (`PipelineServices`) reçetenin `[app]` ayarlarını ve LLM sağlayıcısını/modelini ilk çağrıdan önce süreç içi `config.app`'e yazar. Bu yüzden yalnız batch.py süreçlerinde çalışır, Streamlit sürecinde hata verir. E2e'de bulunan hata: geçersiz kılma yalnız görev yolundaydı, denetimin önce geldiği yeniden denetim config.toml'daki sağlayıcıyla (moonshot) denetledi (eab2a1b). Terim üretimi başarısız olursa yeni denetim önce kaydedilir.
+- `test/conftest.py`'deki `no_real_batch_review_llm` her testte `prepare_item` ve `PipelineServices`'i reddedene çevirir: `uzay.toml`'u `review=False` ya da sahte fonksiyon vermeden koşan bir test gerçek LLM'e (claude_code) gitmez, hemen düşer. İlk denemede eski testler böyle takılıp kalmıştı.
+
+**Render** (`batch.py render <klasör>`; WebUI'da "Onaylıları render et"):
+- Süreç başlarken `review.json`'lar bir kez okunur: geçerli onaylı ve videosu olmayan konular `approved`, atlananlar `skipped` olur. Render sürerken onaylananlar bu turda alınmaz, sonraki `render` çağrısını bekler.
+- Onaylanan metin, terimler ve çapalar görev parametresi olur (`build_render_argv`: `--video-script=…`, `--video-terms=…`, `--video-anchors=…`; metin talimatı eklenmez). `task.generate_script` / `generate_terms` LLM'e sormaz.
+- Paket yeniden denetlemez: `kalite.json` ve rapor onaylanan metnin son denetimini kullanır, `inceleme` alanı (onay zamanı, yine de onaylandı mı, metin/terim düzenlendi mi, yeniden üretim sayısı) eklenir. Paylaşım metni ve altyazı çevirisi için LLM yine çağrılır.
+- Kesinti ve devam eski kurallarla: `rendering` → `approved`. Bütün konular `done`/`skipped`/(render'da) `failed` olunca toplu iş biter. Reçete hazırlıktan sonra değiştiyse `render` reddeder.
+
+**Komutlar** (`batch.py <komut> <klasör> …`; klasör yol ya da `storage/batches` altındaki ad). Çıkış kodları: 0 tamam, 1 işlem başarısız (LLM; `review.json`'da `last_action`), 2 girdi hatası ya da işlem yapılamaz, 3 başka işlem sürüyor, 4 `--yine-de` gerekiyor.
+
+```powershell
+uv run python batch.py .\konular.csv --preset presets\uzay.toml        # hazırlık; konular onay bekler
+uv run python batch.py durum 20261109-155927_webui                       # kelime, süre tahmini, denetim, Y/X iddiaları
+uv run python batch.py onayla <klasör> 2 3                               # değişmemiş, temiz metinler (LLM yok)
+uv run python batch.py onayla <klasör> 1 --metin-dosyasi .\duzeltilmis.txt   # düzenle + yeniden denetle + onayla
+uv run python batch.py onayla <klasör> 1 --yine-de                       # Y/X'e rağmen
+uv run python batch.py onayla <klasör> 1 --terimler "black hole, milky way" --capalar "space"
+uv run python batch.py yeniden-uret <klasör> 2 --talimat "Kabuğun kalınlığından söz etme"
+uv run python batch.py yeniden-denetle <klasör> 1 --metin-dosyasi .\duzeltilmis.txt
+uv run python batch.py atla <klasör> 3            # --geri-al ile geri
+uv run python batch.py temizleri-onayla <klasör>
+uv run python batch.py render <klasör>            # yalnız onaylılar; sonradan onaylananlar için yeniden çağır
+```
+
+**WebUI:**
+- Başlatırken "İki aşamalı akış" kutusu (reçeteden gelir). Hazırlık sürerken durum tablosunda "Hazırlanıyor: metin / arama terimleri / doğruluk denetimi". Bitince "Hazırlık bitti: N konu onay bekliyor" ve inceleme bölümü açılır.
+- İnceleme bölümü (en yeni onay bekleyen toplu iş ya da Geçmiş'te "İncele"):
+  - Üstte sayılar: onay bekliyor, onaylı (render bekliyor), Y/X olan, atlandı, videosu hazır. Düğmeler: "Temizleri onayla (n)" ve "Onaylıları render et (n)"; başka bir toplu iş çalışırken render kilitli.
+  - Onay bekleyen her konunun paneli: düzenlenebilir metin, kelime sayısı ve tahmini süre (hedef dışında turuncu uyarı; metin kutudan çıkınca ya da Ctrl+Enter'la güncellenir), D/B/Y/X renkli iddialar ve gerekçeleri (metin değiştiyse "eski denetim"), açılır bölümde terimler (satır başına) ve çapalar, ek talimat kutusu.
+  - Düğmeler: Onayla (güncel denetimde Y/X varsa "Yine de onayla"), Yeniden üret, Yeniden denetle, Atla. Onaylı/atlanmış/bitmiş konular tek satır; onaylı metin açılır bölümde.
+- LLM gerektirmeyen işlemler (değişmemiş metnin onayı, atlama, temizleri onaylama) WebUI sürecinde doğrudan. Gerektirenler aynı onay komutuyla alt süreçte (`batch_runner.start_review_action`), konunun kilidi alt sürecin PID'iyle yazılır. Kilitliyken konunun öğeleri kapalı, "… sürüyor … sn" ve ilerleme çubuğu var; panel 2 sn'de bir yenilenir, işlem bitince sayfa yenilenir.
+- Kaydedilmemiş düzenlemeler oturumda kalır: öğe anahtarları `review.json`'un sürümünü içerir, başka konuların değişmesi ve sayfanın kendini yenilemesi onları silmez. "Temizleri onayla" bu konuları atlar ve altta listeler.
+- Geçmiş'te onay bekleyen toplu işler turuncu "onay bekliyor" rozeti, "N onay bekliyor · N onaylı · N atlandı" ve "İncele" düğmesiyle. "Devam ettir" yalnız yarıda kalmış hazırlık ya da render için.
+
+**Uçtan uca (09.11, `main` b572fb7, WebUI + Playwright, ffmpeg 9.0.2, claude_code; `storage/batches/20261109-155927_webui`; ekran görüntüleri scratchpad `e2e_review\`; config.toml özeti baştan sona 7e00d054f184):**
+- Hazırlık 194,8 sn (konu başına 56 / 55,6 / 82,9 sn). Denetim üç konuda da Y buldu:
+  - Kara delikler D5 B2 Y2: "Sagittarius A" (doğrusu A*) ve "değişen tek şey, artık geri dönüş yolunun olmamasıdır".
+  - Ay D7 B2 Y1: "kabuk daha kalın" Luna 3'e bağlanmış.
+  - Nötron D8 B2 Y1: Yengeç pulsarının "saat gibi" kullanıldığı.
+- Kara delikler elle düzeltildi (A*; "gelgit kuvvetleri onu sonunda parçalar"). Düzenleme kaydedilmeden Ay yeniden üretilirken sayfa kendini yeniledi ve düzenleme korundu. Yeniden denetim temiz (D7 B2, 44 sn), terimler yeni metinden yeniden üretildi, Onayla doğrudan (LLM yok).
+- Ay ek talimatla yeniden üretildi (65 sn): kabuk sorunu gitti ama yeni metin X ("kimse arka yüzü görmedi"; Apollo 8 gördü) ve Y ("hiç görünmez") aldı. Talimat genişletilip ikinci kez üretildi (59 sn): temiz (D7 B2), onaylandı. Geçmişte iki eski metin var.
+- Nötron "Temizleri onayla"da (0) kaldı, çünkü güncel denetimde Y vardı. Render sürerken metni düzeltildi ("milisaniye pulsarlarını saat gibi kullanır"), yeniden denetim temiz (D6 B6, 55 sn), "Temizleri onayla (1)" ile onaylandı. Çalışan render onu almadı.
+- Render 1 (iki konu) 313 sn: 200,3 / 102,8 sn. Render 2 (Nötron) 186 sn: 174,2 sn.
+- Doğrulama:
+  - üç videoda `script.txt` = görevin metni = onaylanan metin, görevin terimleri ve çapaları = onaylananlar;
+  - `kalite.json` denetimi = onaylanan metnin son denetimi, kontrol gerekli yok;
+  - render günlüğünde konunun başlangıcı ile paket satırı arasında LLM çağrısı yok;
+  - düzenlenen ifadeler (Sagittarius A*, "gelgit kuvvetleri onu sonunda parçalar", "milisaniye pulsarlarını saat gibi kullanır", Ay'ın yeni cümlesi) hem `altyazi.tr.srt`'de hem görevin TTS'ten gelen `subtitle.srt`'sinde, yani seslendirmede.
+  - Tahmini/gerçek süre: 46,6/44,2, 47,2/47,6, 50,6/51,5 sn.
+- İlk deneme iki sorun buldu:
+  - claude_code oturum sınırına takıldı ("session limit · resets 4:20pm"); yeniden üretim ve yeniden denetim başarısız oldu, `last_action` hatası WebUI'da göründü.
+  - Yeniden denetimin denetimi moonshot ile yapıldı (yukarıdaki düzeltme). Sınır kalkınca adımlar yeniden koşuldu.
 
 ## Planlanan iyileştirmeler
 
