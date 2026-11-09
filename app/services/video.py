@@ -971,7 +971,7 @@ def concat_video_clips_with_ffmpeg(
             # 片段由同一编码设置写出且没有 B 帧：直接复制码流，少一次有损编码。
             # 复制失败时（例如文件被并发清理）继续走下面的重新编码。
             copy_command = [
-                utils.get_ffmpeg_binary(), "-y", "-f", "concat", "-safe", "0",
+                utils.get_ffmpeg_binary(), "-nostdin", "-y", "-f", "concat", "-safe", "0",
                 "-i", concat_list_file, "-map", "0:v", "-c", "copy",
             ]
             if max_duration is not None and max_duration > 0:

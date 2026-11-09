@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from PIL import Image
@@ -300,6 +301,14 @@ def test_package_contents(finished_task, tmp_path):
                        "altyazilar": ["altyazi.tr.srt", "altyazi.en.srt"]}
     moments = quality["kareler_sn"]
     assert len(moments) == bpk.SHEET_FRAMES and moments == sorted(moments) and 0 < moments[0] and moments[-1] < 4
+
+
+def test_frame_extraction_never_reads_the_console(finished_task):
+    real = subprocess.run
+    with patch.object(bpk.subprocess, "run", side_effect=real) as run:
+        assert bpk._frame(finished_task / "final-1.mp4", 1.0) is not None
+    command = run.call_args.args[0]
+    assert "-nostdin" in command[: command.index("-i")]
 
 
 def test_cover_prefers_primary_source_then_sharpest_frame(finished_task, tmp_path):

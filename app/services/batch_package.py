@@ -135,7 +135,7 @@ def _frame(path: Path, seconds: float, size: tuple[int, int] | None = None) -> I
         width, height = size
         filters = ["-vf", f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"]
     result = subprocess.run(
-        [utils.get_ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-ss", f"{max(0.0, seconds):.3f}",
+        [utils.get_ffmpeg_binary(), "-nostdin", "-hide_banner", "-loglevel", "error", "-ss", f"{max(0.0, seconds):.3f}",
          "-i", str(path), *filters, "-frames:v", "1", "-f", "image2pipe", "-c:v", "png", "-"],
         capture_output=True, check=False, timeout=300,
     )

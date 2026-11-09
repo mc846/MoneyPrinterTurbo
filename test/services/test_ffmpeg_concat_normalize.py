@@ -207,6 +207,21 @@ def test_empty_or_unreadable_clips_prevent_copying(tmp_path):
     assert video._clips_allow_stream_copy([good, str(tmp_path / "missing.mp4")]) is False
 
 
+def test_stream_copy_never_reads_the_console(tmp_path):
+    # v1.3.10 (c8dbf96): ffmpeg konsoldan tuş okur; "q" birleştirmeyi erken bitirir. Kopya yolu da -nostdin geçer.
+    clips = [_encode(tmp_path / "a.mp4"), _encode(tmp_path / "b.mp4")]
+    commands = []
+    real = video._run_concat_with_heartbeat
+
+    def run(command, output_file):
+        commands.append(command)
+        return real(command, output_file)
+
+    with patch.object(video, "_run_concat_with_heartbeat", side_effect=run):
+        assert video.concat_video_clips_with_ffmpeg(clips, str(tmp_path / "out.mp4"), None, str(tmp_path), 1.5) == "copy"
+    assert "-nostdin" in commands[0][: commands[0].index("-i")]
+
+
 def test_failed_stream_copy_falls_back_to_re_encoding(tmp_path):
     clips = [_encode(tmp_path / "a.mp4"), _encode(tmp_path / "b.mp4")]
     real = video._run_concat_with_heartbeat
