@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -129,11 +130,19 @@ def load_draft() -> dict:
 
 
 def save_draft(rows: list[dict], preset: str) -> None:
+    """
+    Taslak atomik yazılır. Geçici dosyanın adı her yazımda farklı: yeniden başlatılan WebUI'ya iki oturum aynı
+    anda bağlanınca (açık sekme + yeni sekme) aynı adlı geçici dosyayı biri taşıyıp öteki bulamıyordu.
+    """
     path = draft_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(path.name + ".tmp")
+    temp = path.with_name(f"{path.name}.{uuid.uuid4().hex[:12]}.tmp")
     temp.write_text(json.dumps({"rows": normalize_rows(rows), "preset": preset}, ensure_ascii=False), encoding="utf-8")
-    bp.replace_file(temp, path)
+    try:
+        bp.replace_file(temp, path)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
 
 
 # ---------------------------------------------------------------- reçete ve sesler
