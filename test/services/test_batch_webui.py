@@ -156,6 +156,29 @@ def test_no_translation_is_passed_as_an_empty_list(batches):
     assert start.call_args.kwargs["translations"] == []
 
 
+def test_two_sessions_saving_the_draft_at_once(batches):
+    """Yeniden başlatılan WebUI'ya iki oturum aynı anda bağlanınca ikisi de taslağı yazar (09.11 e2e)."""
+    import threading
+
+    errors = []
+
+    def save(subject):
+        try:
+            for number in range(150):
+                batch_page.save_draft([{"konu": f"{subject} {number}"}], "uzay.toml")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=save, args=(name,)) for name in ("A", "B")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    assert json.loads((batches / batch_page.DRAFT_FILE).read_text(encoding="utf-8"))["rows"][0]["konu"].endswith("149")
+    assert not list(batches.glob("*.tmp"))
+
+
 def test_draft_survives_a_new_session(batches):
     batch_page.save_draft([{"konu": "Kara delikler", "talimat": "Kısa tut", "ses": ""}], "uzay.toml")
     app = page()
