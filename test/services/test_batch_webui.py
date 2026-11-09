@@ -118,7 +118,9 @@ def test_empty_cells_of_new_rows_are_blank_not_none(batches):
     app = page()
     columns = json.loads(app.dataframe[1].proto.columns)
     assert columns["konu"]["default"] == "" and columns["talimat"]["default"] == ""
-    assert columns["ses"]["default"] == "" and columns["ses"]["type_config"]["options"] == ["", *VOICES]
+    # SelectboxColumn draws "" as a grey "None"; a single space is drawn blank.
+    assert batch_page.EMPTY_VOICE == " "
+    assert columns["ses"]["default"] == " " and columns["ses"]["type_config"]["options"] == [" ", *VOICES]
     assert columns["ses"]["help"] == "Empty: the preset's voice"
     hint = [item.value for item in app.caption if "preset's voice" in item.value]
     assert hint and hint[0].startswith("Empty voice cells use the preset's voice (tr-TR-EmelNeural-Female).")
@@ -159,6 +161,29 @@ def test_draft_survives_a_new_session(batches):
     app = page()
     assert app.session_state["batch_rows"] == [{"konu": "Kara delikler", "talimat": "Kısa tut", "ses": ""}]
     assert app.dataframe[1].value["konu"].tolist() == ["Kara delikler"]
+
+
+def test_empty_voice_of_rows_loaded_from_the_draft_is_blank_not_none(batches, no_config_writes):
+    """Rows from the draft (or an older one with null/missing voices) reach the editor with a blank voice."""
+    (batches / batch_page.DRAFT_FILE).write_text(json.dumps({"rows": [
+        {"konu": "Ay", "talimat": "", "ses": ""},
+        {"konu": "Güneş", "talimat": None, "ses": None},
+        {"konu": "Mars"},
+        {"konu": "Satürn", "talimat": "", "ses": VOICES[1]},
+    ], "preset": "uzay.toml"}), encoding="utf-8")
+    app = page()
+    shown = app.dataframe[1].value
+    assert shown["ses"].tolist() == [" ", " ", " ", VOICES[1]]
+    assert shown["talimat"].tolist() == ["", "", "", ""]
+    # The blank exists only in the table: the session, the draft and the CSV keep "".
+    expected = [{"konu": subject, "talimat": "", "ses": voice_name}
+                for subject, voice_name in (("Ay", ""), ("Güneş", ""), ("Mars", ""), ("Satürn", VOICES[1]))]
+    assert app.session_state["batch_rows"] == expected
+    edit(app, edited={0: {"talimat": "Kısa tut"}})
+    draft = json.loads((batches / batch_page.DRAFT_FILE).read_text(encoding="utf-8"))
+    assert [row["ses"] for row in draft["rows"]] == ["", "", "", VOICES[1]]
+    assert draft["rows"][0] == {"konu": "Ay", "talimat": "Kısa tut", "ses": ""}
+    assert batch_page.rows_csv(draft["rows"]).decode("utf-8-sig").splitlines()[1:3] == ["Ay;Kısa tut;", "Güneş;;"]
 
 
 @pytest.mark.parametrize("rows, expected", [
