@@ -1039,8 +1039,12 @@ def _prepared_image(
     os.makedirs(save_dir, exist_ok=True)
     image_path = _download_image(item.url, save_dir)
     if not image_path:
+        task_materials.failed(item, "download", "the image could not be downloaded or opened")
         return "", ""
-    return image_path, prepare_image(image_path, video_aspect, clip_duration, image_motion)
+    prepared_path = prepare_image(image_path, video_aspect, clip_duration, image_motion)
+    if not prepared_path:
+        task_materials.failed(item, "prepare", "the image could not be cropped and resized")
+    return image_path, prepared_path
 
 
 def _shows_face(item: MaterialInfo, prepared_path: str, image_path: str = "",

@@ -211,11 +211,32 @@ def source_filtered(provider: str, term: str, skipped: dict, unchecked: int = 0)
 
 def rejected(item, filter_name: str, detail: str = "") -> None:
     """A candidate a filter turned down after ranking (NASA text and face filters)."""
+    _record_filter(item, filter_name, "rejected", detail)
+
+
+def failed(item, stage: str, detail: str = "") -> None:
+    """A chosen candidate that could not be downloaded or prepared.
+
+    The first record of a candidate wins: a filter's rejection or the specific NASA
+    failure explains the empty download that follows it better than "no file".
+    """
+    recorder = _current.get()
+    if recorder:
+        with recorder.lock:
+            if recorder.rejections.get(_key(item)):
+                return
+        _record_filter(item, stage, "failed", detail)
+
+
+def _record_filter(item, filter_name: str, result: str, detail: str) -> None:
     recorder = _current.get()
     if recorder:
         with recorder.lock:
             entries = recorder.rejections.setdefault(_key(item), [])
-            entry = {"filter": filter_name, "result": "rejected"}
+            if result == "rejected":
+                # A filter's verdict explains the candidate better than the empty download it caused.
+                entries[:] = [entry for entry in entries if entry["result"] != "failed"]
+            entry = {"filter": filter_name, "result": result}
             if detail:
                 entry["detail"] = detail
             if entry not in entries:
@@ -450,9 +471,16 @@ def _candidate_entries(recorder, term_index, term, ordered, used_by_term, previe
         if key in used_here:
             entry["status"] = "selected"
             higher_used = True
-        elif filters:
+        elif any(f["result"] == "rejected" for f in filters):
             entry["status"] = "rejected"
-            entry["reason"] = "filtered: " + ", ".join(sorted({f["filter"] for f in filters}))
+            entry["reason"] = "filtered: " + ", ".join(
+                sorted({f["filter"] for f in filters if f["result"] == "rejected"})
+            )
+        elif filters:
+            entry["status"] = "failed"
+            entry["reason"] = "could not be used: " + "; ".join(
+                f"{f['filter']}" + (f" ({f['detail']})" if f.get("detail") else "") for f in filters
+            )
         elif key in used_anywhere:
             entry["status"] = "not_selected"
             entry["reason"] = f"already used for the term {used_anywhere[key]!r}"
@@ -461,7 +489,7 @@ def _candidate_entries(recorder, term_index, term, ordered, used_by_term, previe
             entry["reason"] = "a higher-ranked candidate was used"
         else:
             entry["status"] = "not_selected"
-            entry["reason"] = "not needed: the voiceover was already covered, or the download failed"
+            entry["reason"] = "not needed: the voiceover was already covered"
         entry["preview"] = None
         url = _preview_url(item)
         if url:

@@ -127,8 +127,10 @@ SEARCH = {
 }
 
 
-def _download(task_id, storage, monkeypatch):
-    """Run the real material stage of a NASA task with a Pixabay fallback, offline."""
+def _download(task_id, storage, monkeypatch, text_rejected=("moon-1",), unavailable=()):
+    """Run the real material stage of a NASA task with a Pixabay fallback, offline.
+
+    ``text_rejected`` assets have text in the crop; ``unavailable`` ones fail to download."""
     cache = storage["cache"]
 
     def nasa_search(search_term, minimum_duration, video_aspect, **kwargs):
@@ -138,13 +140,17 @@ def _download(task_id, storage, monkeypatch):
     def pixabay_search(search_term, minimum_duration, video_aspect, **kwargs):
         return list(SEARCH[("pixabay", search_term)])
 
-    def prepared_image(item, save_dir, video_aspect, clip_duration, image_motion):
-        asset = item.source_info["asset_id"]
-        original = cache / f"nasa-{utils.md5(item.url)}.jpg"
-        original.write_bytes(_jpeg())
-        prepared = cache / f"nasa-{utils.md5(item.url)}-portrait-1080x1920.jpg"
-        prepared.write_bytes(_jpeg((540, 960)) + asset.encode())
-        return str(original), str(prepared)
+    def download_image(url, save_dir):
+        if any(f"/{asset}/" in url for asset in unavailable):
+            return ""
+        original = Path(save_dir) / f"nasa-{utils.md5(url)}.jpg"
+        original.write_bytes(_jpeg() + url.encode())
+        return str(original)
+
+    def prepare_image(image_path, video_aspect, clip_duration, image_motion):
+        prepared = Path(image_path).with_name(f"{Path(image_path).stem}-portrait-1080x1920.jpg")
+        prepared.write_bytes(_jpeg((540, 960)) + image_path.encode())
+        return str(prepared)
 
     def render_clip(prepared_path, duration, image_motion=None, output_size=None):
         clip = cache / f"{hashlib.sha256(prepared_path.encode()).hexdigest()}.zoom-0123456789abcdef.mp4"
@@ -157,13 +163,15 @@ def _download(task_id, storage, monkeypatch):
         return str(target)
 
     def text_lines(preview_url, video_aspect, save_dir):
-        return [{"height": 0.12, "score": 0.97}] if "moon-1" in preview_url else []
+        rejected = any(f"/{asset}/" in preview_url for asset in text_rejected)
+        return [{"height": 0.12, "score": 0.97}] if rejected else []
 
     task_artifacts.write_script_data(task_id, {"script": "s", "search_terms": [], "params": {}})
     monkeypatch.setattr(nasa, "search_images", nasa_search)
     monkeypatch.setattr(material, "search_videos_pixabay", pixabay_search)
     monkeypatch.setattr(material, "_has_api_key", lambda key: True)
-    monkeypatch.setattr(nasa, "_prepared_image", prepared_image)
+    monkeypatch.setattr(nasa, "_download_image", download_image)
+    monkeypatch.setattr(nasa, "prepare_image", prepare_image)
     monkeypatch.setattr(nasa.video, "render_image_zoom_video", render_clip)
     monkeypatch.setattr(material, "save_video", save_video)
     monkeypatch.setattr(nasa, "text_filter_active", lambda: True)
@@ -272,6 +280,22 @@ def test_manifest_records_scenes_materials_and_candidates(storage, monkeypatch):
     assert first["sha256"] == nasa_material["files"]["clip"]["sha256"]
     assert (first["start"], first["duration"]) == (0.0, 5.0)
     assert (second["material"], second["start"], second["duration"]) == ("m02", 5.0, 3.0)
+
+
+def test_a_candidate_that_could_not_be_downloaded_says_so(storage, monkeypatch):
+    task_id = str(uuid4())
+    with task_materials.task_scope(task_id, _params()):
+        _download(task_id, storage, monkeypatch, text_rejected=(), unavailable=("moon-1",))
+    moon = _manifest(task_id)["terms"][0]
+    first, second, third = moon["candidates"]
+    assert (first["asset_id"], first["status"]) == ("moon-1", "failed")
+    assert first["filters"] == [{
+        "filter": "download", "result": "failed",
+        "detail": "the image could not be downloaded or opened",
+    }]
+    assert "download" in first["reason"]
+    assert (second["asset_id"], second["status"]) == ("moon-2", "selected")
+    assert third["reason"] == "a higher-ranked candidate was used"
 
 
 def test_credits_follow_from_the_manifest_unchanged(storage, monkeypatch):

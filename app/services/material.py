@@ -2877,12 +2877,15 @@ def _download_materials_in_parallel(
                     f"error={type(exc).__name__}, "
                     f"detail={_redact_request_error(exc, item.url)}"
                 )
+                task_materials.failed(item, "download", type(exc).__name__)
                 continue
             if saved_video_path:
                 downloaded.append((search_term, item, saved_video_path))
                 _report_material_downloaded(
                     position, total, item, saved_video_path, on_downloaded
                 )
+            else:
+                task_materials.failed(item, "download", "no file")
         return downloaded
 
     futures = {}
@@ -2919,12 +2922,15 @@ def _download_materials_in_parallel(
                     f"error={type(exc).__name__}, "
                     f"detail={_redact_request_error(exc, item.url)}"
                 )
+                task_materials.failed(item, "download", type(exc).__name__)
                 continue
             if saved_video_path:
                 downloaded.append((search_term, item, saved_video_path))
                 _report_material_downloaded(
                     position, total, item, saved_video_path, on_downloaded
                 )
+            else:
+                task_materials.failed(item, "download", "no file")
         return downloaded
 
 
