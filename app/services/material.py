@@ -37,7 +37,10 @@ from app.services import (
     video,
     volcengine_seedance,
 )
-from app.utils import logging_utils, utils
+from app.utils import ffmpeg_inputs, logging_utils, utils
+
+# VideoFileClip starts ffmpeg itself; restrict its inputs too.
+ffmpeg_inputs.guard_libraries()
 
 # Thread-safe counter for API key rotation
 _api_key_counter = 0

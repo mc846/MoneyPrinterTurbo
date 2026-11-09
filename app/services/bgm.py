@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from app.utils import file_security, utils
+from app.utils import ffmpeg_inputs, file_security, utils
 
 
 # Streamlit 默认允许较大的上传文件，但背景音乐通常只有几 MB。这里设置明确的
@@ -161,12 +161,9 @@ def _validate_audio(file_path: str, timeout_seconds: int = 30) -> None:
                 "-xerror",
                 # Uploaded files must be self-contained media, not playlists
                 # that cause validation/rendering to read adjacent files or URLs.
-                "-protocol_whitelist",
-                "file,pipe",
                 "-format_whitelist",
                 "mp3,mov,aac,wav,flac,ogg,asf",
-                "-i",
-                file_path,
+                *ffmpeg_inputs.ffmpeg_input(file_path),
                 "-map",
                 "0:a:0",
                 # Normalize timestamps from decoded samples. A header-only
