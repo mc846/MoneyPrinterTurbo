@@ -17,6 +17,8 @@ from app.services import batch_package, batch_review, batch_runner
 from app.services import batch_production as bp
 
 PRESET = Path(__file__).resolve().parents[2] / "presets" / "uzay.toml"
+# conftest testlerde PipelineServices'i reddeden bir yer tutucuyla değiştirir; asıl sınıf toplama sırasında alınır.
+REAL_PIPELINE_SERVICES = batch_review.PipelineServices
 FLAGGED = "Sagittarius A"
 CLEAN_AUDIT = {"durum": "tamam", "iddialar": [{"claim": "Işık kaçamaz.", "rating": "D", "reason": "Doğru."}],
                "sayim": {"D": 1, "B": 0, "Y": 0, "X": 0}, "isaretli": []}
@@ -665,6 +667,48 @@ def test_cli_render_runs_the_render_phase(tmp_path, monkeypatch):
     monkeypatch.setattr(bp, "render_batch", fake_render)
     assert run_cli("render", str(batch_dir), "--gunluk-stderr") == 0
     assert called == {"path": batch_dir, "hold_lock": True, "log_file": False}
+
+
+def test_llm_actions_use_the_presets_provider_even_when_the_audit_comes_first(tmp_path, monkeypatch):
+    """E2e'de yeniden denetim config.toml'daki sağlayıcıyla (moonshot) denetledi: geçersiz kılma terimlerdeydi."""
+    from app.services import task as tm
+
+    batch_dir = prepare(tmp_path)
+    monkeypatch.setattr(batch_review, "PipelineServices", REAL_PIPELINE_SERVICES)
+    monkeypatch.setattr(batch_review, "_ensure_not_webui", lambda: None)
+    monkeypatch.setitem(config.app, "llm_provider", "moonshot")
+    seen = []
+
+    def audit(subject, script, ask=None):
+        seen.append(("audit", config.app["llm_provider"]))
+        return CLEAN_AUDIT
+
+    def terms(task_id, params, script):
+        seen.append(("terms", config.app["llm_provider"]))
+        return ["moon"]
+
+    monkeypatch.setattr(batch_package, "audit_script", audit)
+    monkeypatch.setattr(tm, "generate_terms", terms)
+    text = tmp_path / "ay.txt"
+    text.write_text("Ay kilitlidir.", encoding="utf-8")
+    assert run_cli("yeniden-denetle", str(batch_dir), "2", "--metin-dosyasi", str(text)) == 0
+    assert seen == [("audit", "claude_code"), ("terms", "claude_code")]
+
+
+def test_a_failed_term_generation_keeps_the_new_audit(tmp_path):
+    batch_dir = prepare(tmp_path)
+
+    class TermsFail(FakeServices):
+        def terms(self, subject, script):
+            raise bp.TaskFailed("arama terimleri üretilemedi", "terms")
+
+    fixed = SCRIPTS["Kara delikler"].replace(FLAGGED, f"{FLAGGED}*")
+    for action in (batch_review.reaudit, batch_review.approve):
+        with pytest.raises(bp.TaskFailed):
+            action(folder(batch_dir, 1), TermsFail(), script=fixed)
+        review = batch_review.load_review(folder(batch_dir, 1))
+        assert review["script"] == fixed and batch_review.audit_current(review) and review["audit"] == CLEAN_AUDIT
+        assert not batch_review.terms_current(review) and not review["approved"]
 
 
 def test_cli_rejects_a_single_phase_batch(tmp_path):

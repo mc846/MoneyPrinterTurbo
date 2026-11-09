@@ -330,14 +330,19 @@ def _record(review: dict, action: str, ok: bool = True, reason: str = "", messag
     review["last_action"] = {"action": action, "ok": ok, "reason": reason, "message": message, "at": _now()}
 
 
-def _refresh(review: dict, services, subject: str) -> None:
-    """Eskimiş denetimi ve (elle düzenlenmemiş) eskimiş terimleri yeniler; LLM gerekiyorsa services şart."""
+def _refresh(review: dict, services, subject: str, folder: Path | None = None) -> None:
+    """
+    Eskimiş denetimi ve (elle düzenlenmemiş) eskimiş terimleri yeniler; LLM gerekiyorsa services şart. Terim
+    üretimi de gerekiyorsa yeni denetim (ve düzenleme) önce kaydedilir: terim üretimi başarısız olursa kaybolmaz.
+    """
     sha = script_sha256(review["script"])
     stale_audit, stale_terms = review.get("audit_sha256") != sha, not terms_current(review)
     if (stale_audit or stale_terms) and services is None:
         raise ReviewError("needs_llm", "metin değişti: yeniden denetim ve terim üretimi için onay komutu gerekli")
     if stale_audit:
         review["audit"], review["audit_sha256"] = services.audit(subject, review["script"]), sha
+        if stale_terms and folder is not None:
+            save_review(folder, review)
     if stale_terms:
         review["terms"], review["anchors"] = services.terms(subject, review["script"])
         review["terms_sha256"] = sha
@@ -354,7 +359,7 @@ def approve(folder: Path, services=None, *, script=None, terms=None, anchors=Non
     folder = Path(folder)
     review = _editable(folder)
     _apply_edits(review, script, terms, anchors)
-    _refresh(review, services, _subject(folder))
+    _refresh(review, services, _subject(folder), folder)
     blocked = audit_blocks(review.get("audit"))
     if blocked and not force:
         message = describe_audit(review.get("audit"))
@@ -376,6 +381,7 @@ def reaudit(folder: Path, services, *, script=None, terms=None, anchors=None) ->
     sha = script_sha256(review["script"])
     review["audit"], review["audit_sha256"] = services.audit(subject, review["script"]), sha
     if not terms_current(review):
+        save_review(folder, review)  # terim üretimi başarısız olursa denetim kaybolmasın
         review["terms"], review["anchors"] = services.terms(subject, review["script"])
         review["terms_sha256"] = sha
     _record(review, "reaudit", message=describe_audit(review["audit"]))
@@ -601,9 +607,14 @@ class PipelineServices:
         self._ready = False
 
     def _prepare(self) -> None:
+        """
+        Reçetenin [app] ayarları ve LLM sağlayıcısı/modeli bu sürece. Denetim de reçetenin sağlayıcısıyla
+        yapılmalı: yeniden denetimde denetim terim üretiminden (ve görev yolunun geçersiz kılmalarından) önce gelir.
+        """
         if not self._ready:
             _ensure_not_webui()
             bp.apply_app_overrides(self.preset)
+            bp._cli_module().apply_llm_overrides(bp._parse_cli(bp.build_task_argv(self.preset, self.item)))
             self._ready = True
 
     def generate(self, subject: str, instruction: str = "", task_id: str | None = None) -> dict:
