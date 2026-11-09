@@ -21,21 +21,36 @@ from app.utils.logging_utils import (
     log_scope_thread_id,
     runtime_log_filter,
 )
+from app.utils.process_objects import process_object
 
 
 # WebUI 的配置保存在进程级全局字典中。原来的同步实现会在完整生成期间持有
 # runtime_config_lock，因此不同浏览器会话实际上也是串行执行。这里把并发数固定
 # 为 1，既延续原有配置一致性，也避免多个线程只是在配置锁外无意义地等待。
-_task_manager = InMemoryTaskManager(
-    max_concurrent_tasks=1,
-    max_queued_tasks=max(1, int(config.app.get("max_queued_tasks", 100))),
+# The queue, the logs and the record of running generations belong to the process:
+# a re-import of this module must not hide jobs that are still running
+# (see app/utils/process_objects.py).
+_task_manager = process_object(
+    "app.services.webui_task.task_manager",
+    lambda: InMemoryTaskManager(
+        max_concurrent_tasks=1,
+        max_queued_tasks=max(1, int(config.app.get("max_queued_tasks", 100))),
+    ),
 )
-_task_logs: dict[str, deque[str]] = {}
-_task_logs_lock = threading.RLock()
+_task_logs: dict[str, deque[str]] = process_object(
+    "app.services.webui_task.task_logs", dict
+)
+_task_logs_lock = process_object(
+    "app.services.webui_task.task_logs_lock", threading.RLock
+)
 _MAX_LOG_TASKS = 20
 _MAX_LOG_RECORDS_PER_TASK = 1000
-_submission_lock = threading.RLock()
-_active_submissions: dict[str, str] = {}
+_submission_lock = process_object(
+    "app.services.webui_task.submission_lock", threading.RLock
+)
+_active_submissions: dict[str, str] = process_object(
+    "app.services.webui_task.active_submissions", dict
+)
 # Streamlit 无法由后台线程直接推送组件更新，只能通过 Fragment 轮询。0.5 秒
 # 足以让 WebUI 日志接近终端实时输出，又不会像高频刷新那样持续占用浏览器资源。
 TASK_LOG_REFRESH_INTERVAL_SECONDS = 0.5

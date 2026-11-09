@@ -984,6 +984,13 @@ def _add_active_generation_task(task_id, subject=None):
     task["mtime"] = task.get("mtime") or datetime.now().timestamp()
 
 
+def _remember_generation_video_source(task_id, video_source):
+    """Keep the video source a task was submitted with, also after it finishes."""
+    sources = st.session_state.setdefault("generation_video_sources", {})
+    if isinstance(sources, dict):
+        sources[task_id] = str(video_source or "")
+
+
 def _remove_active_generation_task(task_id):
     tasks = _active_generation_tasks()
     if task_id in tasks:
@@ -2332,6 +2339,37 @@ def _render_generation_task_snapshot(task_id, task):
         logger.info(f"{tr('Video Generation Completed')}: task_id={task_id}")
 
 
+# Stock footage and local files are fetched again without a charge. The AI video and
+# image sources create paid remote jobs; only they, or an unknown source, need the
+# warning about duplicate charges.
+_FREE_VIDEO_SOURCES = frozenset(
+    VIDEO_SOURCE_GROUPS["stock_video"] + VIDEO_SOURCE_GROUPS["local"]
+)
+
+
+def _generation_video_source(task_id):
+    """Video source of a task this session submitted, or the one in its script.json."""
+    sources = st.session_state.get("generation_video_sources")
+    if isinstance(sources, dict) and sources.get(task_id):
+        return sources[task_id]
+    try:
+        script_file = os.path.join(utils.task_dir(), str(UUID(str(task_id))), "script.json")
+        with open(script_file, encoding="utf-8") as file:
+            params = json.load(file).get("params") or {}
+        return str(params.get("video_source") or "")
+    except (OSError, ValueError, TypeError, AttributeError):
+        return ""
+
+
+def _render_unavailable_generation_task(task_id):
+    """This process has no record of the task, e.g. the WebUI restarted while it ran."""
+    if _generation_video_source(task_id) in _FREE_VIDEO_SOURCES:
+        folder = os.path.join(utils.task_dir(), str(UUID(str(task_id))))
+        st.warning(tr("Generation Task Unavailable Free Sources").format(folder=folder))
+    else:
+        st.warning(tr("Generation Task Unavailable"))
+
+
 @st.fragment(run_every=webui_task.TASK_LOG_REFRESH_INTERVAL_SECONDS)
 def _render_running_generation_task(task_id):
     """只在任务运行期间轮询；结束后切回静态结果，停止不必要的定时刷新。"""
@@ -2345,7 +2383,7 @@ def _render_running_generation_task(task_id):
         return
 
     if not task and not webui_task.is_generation_active(task_id):
-        st.warning(tr("Generation Task Unavailable"))
+        _render_unavailable_generation_task(task_id)
         return
     state = _normalize_task_state((task or {}).get("state"))
     if state in {const.TASK_STATE_COMPLETE, const.TASK_STATE_FAILED}:
@@ -2383,7 +2421,7 @@ def _render_current_generation_task():
         return
 
     if not task and not webui_task.is_generation_active(task_id):
-        st.warning(tr("Generation Task Unavailable"))
+        _render_unavailable_generation_task(task_id)
         return
     state = _normalize_task_state((task or {}).get("state"))
     if state in {const.TASK_STATE_COMPLETE, const.TASK_STATE_FAILED}:
@@ -9351,6 +9389,7 @@ def _render_generation_controls(
             task_id,
             subject=params.video_subject or params.video_script or task_id,
         )
+        _remember_generation_video_source(task_id, params.video_source)
         if not params.video_subject and not params.video_script:
             _remove_active_generation_task(task_id)
             st.error(tr("Video Script and Subject Cannot Both Be Empty"))
@@ -9781,6 +9820,7 @@ def _render_generation_controls(
             _remove_active_generation_task(task_id)
             task_id = submitted_task_id
             _add_active_generation_task(task_id, subject=params.video_subject)
+            _remember_generation_video_source(task_id, params.video_source)
         st.session_state["current_generation_task_id"] = task_id
         st.query_params["generation_task"] = task_id
         logger.info(f"WebUI generation task submitted: task_id={task_id}")

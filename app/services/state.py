@@ -8,6 +8,7 @@ from itertools import islice
 
 from app.config import config
 from app.models import const
+from app.utils.process_objects import process_object
 
 
 _PATCH_EXISTING_TASK_SCRIPT = """
@@ -319,5 +320,7 @@ state = (
         host=_redis_host, port=_redis_port, db=_redis_db, password=_redis_password
     )
     if _enable_redis
-    else MemoryState()
+    # Tasks started before a re-import of this module keep writing to the first
+    # store; a new empty one would hide them from the WebUI.
+    else process_object("app.services.state.memory_state", MemoryState)
 )
