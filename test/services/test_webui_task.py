@@ -811,13 +811,13 @@ def test_generation_submit_skips_duplicate_config_save():
 
 def test_terminal_logger_reload_preserves_task_log_handler():
     """热重载只能替换终端 handler，不能清空后台任务的日志 sink。"""
-    previous_handler_id = logging_utils._terminal_handler_id
+    previous_handler_id = logging_utils._terminal_handler["id"]
     try:
         with (
             patch.object(logging_utils.logger, "remove") as remove,
             patch.object(logging_utils.logger, "add", return_value=456) as add,
         ):
-            logging_utils._terminal_handler_id = 123
+            logging_utils._terminal_handler["id"] = 123
             handler_id = logging_utils.configure_terminal_logger(
                 sink=object(),
                 level="DEBUG",
@@ -827,9 +827,9 @@ def test_terminal_logger_reload_preserves_task_log_handler():
         assert handler_id == 456
         remove.assert_called_once_with(123)
         add.assert_called_once()
-        assert logging_utils._terminal_handler_id == 456
+        assert logging_utils._terminal_handler["id"] == 456
     finally:
-        logging_utils._terminal_handler_id = previous_handler_id
+        logging_utils._terminal_handler["id"] = previous_handler_id
 
 
 def test_worker_wrapper_failure_is_saved_instead_of_leaving_processing_state():

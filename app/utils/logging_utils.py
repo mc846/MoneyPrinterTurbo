@@ -6,6 +6,8 @@ import threading
 
 from loguru import logger
 
+from app.utils.process_objects import process_object
+
 
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -20,8 +22,13 @@ LOG_RECORD_FORMAT = (
 # Loguru 启动时默认终端 handler 的 ID 为 0。WebUI 重新加载时只能替换这个
 # 基础终端输出，不能调用 logger.remove() 清空全部 handler，否则正在运行任务
 # 用于收集 WebUI 日志的临时 sink 也会被删除。
-_terminal_handler_id: int | None = 0
-_terminal_handler_lock = threading.RLock()
+# Loguru is not re-imported with the application, so the ID of the terminal handler
+# it holds must outlive this module too; otherwise each re-import adds one more
+# terminal handler and every line is printed again (see process_objects).
+_terminal_handler = process_object(
+    "app.utils.logging_utils.terminal_handler",
+    lambda: {"id": 0, "lock": threading.RLock()},
+)
 LOG_LEVELS = ("TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL")
 # 只替换不可变快照，日志线程不获取生成任务持有的配置锁。
 _runtime_logging = ("DEBUG", False)
@@ -173,24 +180,22 @@ def configure_terminal_logger(sink, level: str, colorize: bool = True) -> int:
     的 handler ID 精确移除旧终端输出，因此不会中断后台任务正在写入的 WebUI
     日志。锁用于保护多个浏览器会话同时初始化时的 ID 更新。
     """
-    global _terminal_handler_id
-
     set_logging_options(level, get_logging_options()[1])
 
-    with _terminal_handler_lock:
-        if _terminal_handler_id is not None:
+    with _terminal_handler["lock"]:
+        if _terminal_handler["id"] is not None:
             try:
-                logger.remove(_terminal_handler_id)
+                logger.remove(_terminal_handler["id"])
             except ValueError:
                 # 测试或外部入口可能已经移除该 handler。继续创建新的终端输出，
                 # 不需要影响其它仍有效的日志 sink。
                 pass
 
-        _terminal_handler_id = logger.add(
+        _terminal_handler["id"] = logger.add(
             sink,
             level=0,
             filter=runtime_log_filter,
             format=format_log_record,
             colorize=colorize,
         )
-        return _terminal_handler_id
+        return _terminal_handler["id"]

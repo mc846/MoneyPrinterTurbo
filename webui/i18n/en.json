@@ -705,6 +705,7 @@
     "Generation Existing Task Hint": "A remote task already exists: {task_id}. Check its status or recover its output before generating again to avoid duplicate charges.",
     "Generation Status Unavailable": "Task status is temporarily unavailable. The job may still be running; please wait and avoid submitting again.",
     "Generation Task Unavailable": "The task record is unavailable. If paid generation was already submitted, check the original task before generating again to avoid duplicate charges.",
+    "Generation Task Unavailable Free Sources": "The task record is unavailable, for example because the WebUI was restarted while the task was running. A video the task finished is in its folder: `{folder}`",
     "Generation Untracked Worker Hint": "This service has no active execution record for this task; it may still be running elsewhere. If the service restarted, check the original task first. Stopping tracking does not cancel generation.",
     "Stop Tracking Generation": "Stop tracking this task",
     "llm_provider_label.openai_chatgpt": "OpenAI - ChatGPT (Native OAuth)",

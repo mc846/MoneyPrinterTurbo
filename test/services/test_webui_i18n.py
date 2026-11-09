@@ -46,6 +46,7 @@ ENGLISH_FALLBACK_KEYS = frozenset(
         "Generation Existing Task Hint",
         "Generation Status Unavailable",
         "Generation Task Unavailable",
+        "Generation Task Unavailable Free Sources",
         "Generation Untracked Worker Hint",
         "Stop Tracking Generation",
         "Diagnostic Logging",
