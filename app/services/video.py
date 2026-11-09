@@ -621,6 +621,26 @@ def _run_ffmpeg_final_command(command: list[str], cwd: str) -> None:
         raise RuntimeError((result.stderr or result.stdout or "").strip()[-2000:] or "ffmpeg failed")
 
 
+@lru_cache(maxsize=4)
+def _filter_script_option(ffmpeg_binary: str) -> str:
+    """
+    The option that reads the final render's filter graph from a file.
+
+    ffmpeg 7.0 added "-/<option> <file>" and deprecated -filter_complex_script,
+    ffmpeg 8.0 removed it (9.0 answers "Unrecognized option"). Releases before 7.0,
+    such as Debian's 5.1 in the Docker image, only know -filter_complex_script.
+    Unknown versions (git builds) are treated as current.
+    """
+    try:
+        version = utils.ffmpeg_version_line(ffmpeg_binary)
+    except Exception:
+        return "-/filter_complex"
+    match = re.match(r"ffmpeg version n?(\d+)\.", version)
+    if match and int(match.group(1)) < 7:
+        return "-filter_complex_script"
+    return "-/filter_complex"
+
+
 def _render_final_video_with_ffmpeg(
     final_clip,
     base_clip,
@@ -696,7 +716,7 @@ def _write_final_video_with_ffmpeg(
                 Image.fromarray(rgba).save(
                     os.path.join(work_dir, names[digest]), compress_level=1
                 )
-            inputs.extend(["-i", names[digest]])
+            inputs.extend(ffmpeg_inputs.ffmpeg_input(names[digest]))
         width, height = canvas_size
         # 与 MoviePy 读取原视频的方式相同（bicubic 缩放器转 RGB），在 RGB 中叠加，
         # 再与 MoviePy 写出时一样转成 BT.709。
@@ -721,7 +741,7 @@ def _write_final_video_with_ffmpeg(
                 audio_file, audio_fps, 4, 2000, audio_codec,
                 bitrate=audio_bitrate, write_logfile=False, logger=None,
             )
-            audio_args = ["-i", audio_file]
+            audio_args = ffmpeg_inputs.ffmpeg_input(audio_file)
             audio_map = ["-map", f"{len(overlays) + 1}:a", "-c:a", "copy"]
 
         descriptor, staged_output = tempfile.mkstemp(
@@ -741,8 +761,8 @@ def _write_final_video_with_ffmpeg(
                 script.write(";\n".join([*graph, f"{last}[out]"]))
             return [
                 utils.get_ffmpeg_binary(), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
-                "-i", os.path.abspath(video_path), *inputs, *audio_args,
-                "-filter_complex_script", "graph.txt",
+                *ffmpeg_inputs.ffmpeg_input(os.path.abspath(video_path)), *inputs, *audio_args,
+                _filter_script_option(utils.get_ffmpeg_binary()), "graph.txt",
                 "-map", "[out]", *audio_map,
                 "-c:v", selected_codec, "-preset", "medium",
                 *(["-threads", str(params.n_threads)] if params.n_threads else []),
@@ -975,7 +995,7 @@ def concat_video_clips_with_ffmpeg(
             # 复制失败时（例如文件被并发清理）继续走下面的重新编码。
             copy_command = [
                 utils.get_ffmpeg_binary(), "-nostdin", "-y", "-f", "concat", "-safe", "0",
-                "-i", concat_list_file, "-map", "0:v", "-c", "copy",
+                *ffmpeg_inputs.ffmpeg_input(concat_list_file), "-map", "0:v", "-c", "copy",
             ]
             if max_duration is not None and max_duration > 0:
                 copy_command.extend(["-t", f"{max_duration:.3f}"])
@@ -1026,7 +1046,7 @@ def _video_stream_signature(video_file: str) -> tuple | None:
     try:
         result = subprocess.run(
             [
-                utils.get_ffmpeg_binary(), "-hide_banner", "-nostdin", "-i", video_file,
+                utils.get_ffmpeg_binary(), "-hide_banner", "-nostdin", *ffmpeg_inputs.ffmpeg_input(video_file),
                 "-map", "0:v:0", "-c:v", "copy", "-bsf:v", "h264_mp4toannexb",
                 "-frames:v", "1", "-f", "h264", "-",
             ],
@@ -1154,7 +1174,7 @@ def _normalize_clip_with_ffmpeg(
         result = subprocess.run(
             [
                 utils.get_ffmpeg_binary(), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
-                *seek, "-i", subclipped_item.file_path, "-an",
+                *seek, *ffmpeg_inputs.ffmpeg_input(subclipped_item.file_path), "-an",
                 "-vf", ",".join(part for part in chain if part),
                 "-c:v", codec, "-preset", "medium", "-bf", "0",
                 "-r", str(fps), "-frames:v", str(total_frames), output_file,

@@ -276,6 +276,13 @@ def test_all_subjects_succeed(tmp_path):
     assert (batch / bp.LOG_FILE).read_text(encoding="utf-8").count("sahte görev günlüğü") == 2
 
 
+def test_batch_log_names_the_ffmpeg_in_use(tmp_path):
+    source = write(tmp_path / "k.txt", "Işık\n")
+    with patch.object(bp.utils, "log_ffmpeg_version", side_effect=lambda: logger.info("using ffmpeg TEST")):
+        assert run(source, FakeRunner()) == 0
+    assert "using ffmpeg TEST" in (only_batch(tmp_path) / bp.LOG_FILE).read_text(encoding="utf-8")
+
+
 def test_preset_app_section_applies_to_this_process_only(tmp_path):
     source = write(tmp_path / "k.txt", "Işık\n")
     seen = {}

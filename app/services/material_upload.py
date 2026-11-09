@@ -16,6 +16,9 @@ from PIL import Image, UnidentifiedImageError
 
 from app.utils import ffmpeg_inputs, utils
 
+# _probe_video_metadata falls back to MoviePy's ffmpeg_parse_infos; restrict its inputs too.
+ffmpeg_inputs.guard_libraries()
+
 
 # Local materials are usually short clips. This matches Streamlit's default upload
 # limit while still placing an explicit server-side bound on direct API clients.
@@ -268,7 +271,7 @@ def _probe_video_metadata(video_path: str) -> tuple[float, float]:
             [
                 ffprobe, "-v", "error", "-select_streams", "V:0",
                 "-show_entries", "stream=avg_frame_rate,r_frame_rate,duration:format=duration",
-                "-of", "json", video_path,
+                "-of", "json", *ffmpeg_inputs.input_options(video_path), video_path,
             ],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=MATERIAL_VALIDATION_TIMEOUT_SECONDS, check=True,

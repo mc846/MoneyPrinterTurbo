@@ -617,6 +617,7 @@ def _run_in_folder(batch_dir: Path, input_path: Path, preset: Preset, items: lis
     started = time.monotonic()
     done = sum(item.status == "done" for item in state.items)
     logger.info(f"toplu üretim: {len(state.items)} konu, {done} tanesi daha önce bitti, klasör {batch_dir}")
+    utils.log_ffmpeg_version()  # süreç başına bir kez; batch.log'da hangi ffmpeg'in kullanıldığı görünsün
     interrupted = False
     try:
         # İlk tur bitmemiş her konuyu (önceki çalıştırmada başarısız olanlar dahil) bir kez dener;

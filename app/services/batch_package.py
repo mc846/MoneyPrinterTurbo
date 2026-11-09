@@ -23,7 +23,10 @@ from loguru import logger
 from PIL import Image, ImageDraw
 
 from app.services import batch_subtitles, llm, nasa, video
-from app.utils import utils
+from app.utils import ffmpeg_inputs, utils
+
+# Süre ölçümü MoviePy'nin ffmpeg_parse_infos'unu kullanır; onun girdileri de yalnız yerel dosya açabilsin.
+ffmpeg_inputs.guard_libraries()
 
 RATINGS = ("D", "B", "Y", "X")
 RATING_LABELS = {"D": "doğru", "B": "belirsiz/basitleştirilmiş", "Y": "yanıltıcı", "X": "yanlış"}
@@ -136,7 +139,7 @@ def _frame(path: Path, seconds: float, size: tuple[int, int] | None = None) -> I
         filters = ["-vf", f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"]
     result = subprocess.run(
         [utils.get_ffmpeg_binary(), "-nostdin", "-hide_banner", "-loglevel", "error", "-ss", f"{max(0.0, seconds):.3f}",
-         "-i", str(path), *filters, "-frames:v", "1", "-f", "image2pipe", "-c:v", "png", "-"],
+         *ffmpeg_inputs.ffmpeg_input(path), *filters, "-frames:v", "1", "-f", "image2pipe", "-c:v", "png", "-"],
         capture_output=True, check=False, timeout=300,
     )
     if result.returncode != 0 or not result.stdout:
