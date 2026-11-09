@@ -29,7 +29,7 @@ from PIL import Image, ImageFile
 
 from app.config import config
 from app.models.schema import ImageMotion, MaterialInfo, VideoAspect
-from app.services import generation_progress, video
+from app.services import generation_progress, task_materials, video
 from app.utils import utils
 from app.utils.request_logging import trace_http_call
 
@@ -791,6 +791,7 @@ def search_images(
         f"checked={len(detailed)}, kept={len(items)}, skipped={dict(skipped)}, "
         f"unchecked={len(survivors) - len(detailed)}"
     )
+    task_materials.source_filtered("nasa", search_term, skipped, len(survivors) - len(detailed))
     return items
 
 
@@ -1053,6 +1054,7 @@ def _shows_face(item: MaterialInfo, prepared_path: str, image_path: str = "",
     if faces:
         source_info = item.source_info if isinstance(item.source_info, dict) else {}
         logger.info(f"nasa face filter: skipped {source_info.get('asset_id') or item.url}, {where}={faces}")
+        task_materials.rejected(item, "face", f"{where}={faces}")
         return True
     return False
 
@@ -1090,10 +1092,12 @@ def save_image_clip(
         return ""
     try:
         # 处理后的图片已是目标比例并带有放大余量，直接渲染成成片尺寸，合成阶段不再缩放。
-        return video.render_image_zoom_video(
+        clip_path = video.render_image_zoom_video(
             prepared_path, int(math.ceil(clip_duration)), image_motion=image_motion,
             output_size=VideoAspect(video_aspect).to_resolution(),
         )
+        task_materials.derived_files(clip_path, original=image_path, prepared=prepared_path)
+        return clip_path
     except Exception as exc:
         logger.error(f"failed to render nasa image clip: error={type(exc).__name__}, detail={exc}")
         return ""
@@ -1291,6 +1295,10 @@ def screen_text(items: List[MaterialInfo], video_aspect: VideoAspect, search_ter
                 f"nasa text filter: skipped {source_info.get('asset_id') or item.url} for {search_term!r}, "
                 f"text lines in the crop area={len(lines)}, tallest={tallest['height']:.1%} of the crop height, "
                 f"score={tallest['score']:.2f}"
+            )
+            task_materials.rejected(
+                item, "text",
+                f"text lines in the crop area={len(lines)}, tallest={tallest['height']:.1%} of the crop height",
             )
             continue
         kept.append(item)

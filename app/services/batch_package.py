@@ -22,7 +22,7 @@ import numpy as np
 from loguru import logger
 from PIL import Image, ImageDraw
 
-from app.services import batch_subtitles, llm, nasa, video
+from app.services import batch_subtitles, llm, nasa, task_materials, video
 from app.utils import ffmpeg_inputs, utils
 
 # Süre ölçümü MoviePy'nin ffmpeg_parse_infos'unu kullanır; onun girdileri de yalnız yerel dosya açabilsin.
@@ -495,7 +495,11 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
 
     placement = _place_video(final_video, folder / "video.mp4")
     (folder / "script.txt").write_text(script + "\n", encoding="utf-8")
-    if (task_dir / nasa.CREDITS_FILE).is_file():
+    credits = task_materials.credits_text(task_dir)
+    if credits:
+        # materials.json keeps the records credits.txt is made from (the same text).
+        (folder / "credits.txt").write_text(credits, encoding="utf-8", newline="\n")
+    elif (task_dir / nasa.CREDITS_FILE).is_file():
         shutil.copy2(task_dir / nasa.CREDITS_FILE, folder / "credits.txt")
 
     # Altyazılar önce: paylasim.md dosya adlarını anar.

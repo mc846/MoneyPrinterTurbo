@@ -164,6 +164,20 @@ nasa_text_filter = true
 # 结尾 2 秒显示图片来源；任务目录中的 credits.txt 不受此开关影响。
 nasa_credit_overlay = false
 
+# Keep a snapshot of the materials every task used in its folder
+# (storage/tasks/<task_id>/materials/): the files the video used (NASA original,
+# cropped image and zoom clip, stock videos, local files), small previews of the
+# first 5 candidates of every search term (candidates/) and materials.json, which
+# records for every scene the term, anchors, source, asset ID and page, credit,
+# local files with SHA-256, the part of the file used (start and duration),
+# relevance and filter decisions, and for every term the candidates that were
+# passed over and why. Files on the same drive as the material cache are hard
+# links and take no extra space; cleaning the cache does not touch them, and
+# deleting the task deletes them. A failed task keeps what it had downloaded.
+# false keeps only credits.txt and the material records in script.json.
+# 在任务目录中保存所用素材及 materials.json 清单；false 时不保存。
+save_task_materials = true
+
 # Fallback stock source per search term: "pexels", "pixabay", "coverr" or "nasa"
 # (another one than video_source, which must be a stock source too); empty means
 # no fallback. A term whose video_source candidates, after filtering, include

@@ -46,6 +46,7 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
+from app.services import task_materials
 from app.services.utils import subtitle_shaping, video_effects
 from app.utils import ffmpeg_inputs, file_security, logging_utils, utils
 from app.utils.subtitle_reader import moviepy_subtitles
@@ -65,8 +66,11 @@ class SubClippedVideoClip:
         source_file_path=None,
         source_duration=None,
         owns_file=True,
+        source_start=0.0,
     ):
         self.file_path = file_path
+        # Where in the source file this clip starts; a processed clip's own file starts at 0.
+        self.source_start = source_start
         self.start_time = start_time
         self.end_time = end_time
         self.width = width
@@ -1653,6 +1657,7 @@ def combine_videos(
                         width=subclipped_item.width,
                         height=subclipped_item.height,
                         source_file_path=subclipped_item.source_file_path,
+                        source_start=subclipped_item.start_time,
                     )
                     clip_file = None
                     return processed_clip
@@ -1754,6 +1759,7 @@ def combine_videos(
                 width=clip_w,
                 height=clip_h,
                 source_file_path=subclipped_item.source_file_path,
+                source_start=subclipped_item.start_time,
             )
             clip_file = None
             return processed_clip
@@ -1884,6 +1890,20 @@ def combine_videos(
                     break
                 used_video_paths.append(clip.source_file_path)
                 elapsed += clip.duration
+        if task_materials.recording():
+            # The same cut-off as above: the part of every clip the video shows.
+            segments, elapsed = [], 0.0
+            for clip in processed_clips:
+                if elapsed >= audio_duration:
+                    break
+                shown = min(clip.duration, audio_duration - elapsed)
+                segments.append({
+                    "source": clip.source_file_path,
+                    "start": clip.source_start or 0.0,
+                    "duration": shown,
+                })
+                elapsed += clip.duration
+            task_materials.timeline(combined_video_path, segments)
     finally:
         # FFmpeg failures and timeouts must not strand one encoded MP4 per clip.
         # Repeated clips share a path; delete_files already deduplicates them.

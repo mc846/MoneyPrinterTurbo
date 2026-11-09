@@ -39,6 +39,7 @@ from app.services import (
     sonilo,
     subtitle,
     task_artifacts,
+    task_materials,
     twelvelabs,
     video,
     volcengine_seedance,
@@ -777,6 +778,8 @@ def get_video_materials(
 ):
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
+        # preprocess_video replaces an image's path with the clip rendered from it.
+        uploads = {id(item): item.url for item in params.video_materials or []}
         materials = video.preprocess_video(
             materials=params.video_materials,
             clip_duration=params.video_clip_duration,
@@ -784,6 +787,10 @@ def get_video_materials(
             video_aspect=params.video_aspect,
             video_fit_mode=params.video_fit_mode,
         )
+        for material_info in materials or []:
+            task_materials.local_material(uploads.get(id(material_info), ""), material_info.url)
+        if materials:
+            task_materials.materials_ready()
         if not materials:
             _mark_task_failed(
                 task_id,
@@ -2107,7 +2114,10 @@ def start(
     ``allow_server_file_input`` 只供本机 CLI 使用。HTTP API 和 WebUI 必须保持
     默认值，让自定义音频始终受当前任务目录约束。
     """
-    with generation_progress.task_scope(task_id):
+    with (
+        generation_progress.task_scope(task_id),
+        task_materials.task_scope(task_id, params),
+    ):
         try:
             return _run_pipeline(
                 task_id,

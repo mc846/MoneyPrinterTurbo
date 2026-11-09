@@ -43,6 +43,7 @@ from app.services import (
     nasa,
     ofox,
     task_artifacts,
+    task_materials,
     video,
     volcengine_seedance,
 )
@@ -185,6 +186,9 @@ def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, An
                 rendition[field] = str(value) if field == "id" else value
         if rendition:
             record["rendition"] = rendition
+    # Every successful download gets this record; the task's materials snapshot
+    # keeps the full path and the item next to it (see task_materials).
+    task_materials.downloaded(item, local_path, record)
     return record
 
 
@@ -216,6 +220,7 @@ def _persist_material_sources(
             "failed to persist material source records: "
             f"task_id={task_id}, error={type(exc).__name__}, detail={exc}"
         )
+    task_materials.materials_ready()
 
 
 def _get_tls_verify() -> bool:
@@ -766,10 +771,20 @@ def _stock_source_search(
             video_aspect=video_aspect,
             **search_cache_options,
         )
+        dropped = []
         if crop_enabled or tag_enabled:
             # 每个关键词的候选按 相关度 > 同方向优先 > 素材源顺序 排列。放在缓存
             # 之后排序，旧缓存里按素材源顺序保存的结果同样生效。
-            items = _order_material_candidates(items, video_aspect, **order_options)
+            ordered = _order_material_candidates(items, video_aspect, **order_options)
+            if task_materials.recording():
+                kept = {id(item) for item in ordered}
+                dropped = [
+                    (item, "ai_generated" if order_options["exclude_ai_generated"]
+                     and _is_ai_generated(item) else "relevance_strict")
+                    for item in items if id(item) not in kept
+                ]
+            items = ordered
+        task_materials.searched(provider, search_term, items, dropped)
         if provider == "nasa" and items and nasa.text_filter_active():
             # 文字检查按排序后的顺序进行，只查靠前、真正会被用到的候选（见 nasa.screen_text）。
             items = nasa.screen_text(items, video_aspect, search_term)
@@ -834,6 +849,14 @@ def _search_with_fallback(
             search_term, fallback_items, fallback_relevance, min_relevance
         )
         use_fallback = fallback_qualified > qualified or (not items and bool(fallback_items))
+        task_materials.fallback(
+            search_term,
+            primary=source, primary_qualified=qualified, primary_candidates=len(items),
+            fallback=fallback_source, fallback_qualified=fallback_qualified,
+            fallback_candidates=len(fallback_items),
+            min_relevance=min_relevance, min_candidates=min_candidates,
+            used=fallback_source if use_fallback else source,
+        )
         logger.info(
             f"material fallback: term={search_term!r}, "
             f"{source}={qualified}/{len(items)} qualified, "
@@ -1155,6 +1178,21 @@ def search_videos_pixabay(
                 "tags": _pixabay_tags(v.get("tags")),
                 "ai_generated": v.get("isAiGenerated") is True,
             }
+            # The smallest rendition's still frame: the task's materials snapshot
+            # keeps it as the candidate preview.
+            preview = _safe_public_url(
+                next(
+                    (
+                        video_files[size].get("thumbnail")
+                        for size in ("tiny", "small", "medium", "large")
+                        if isinstance(video_files.get(size), dict)
+                        and video_files[size].get("thumbnail")
+                    ),
+                    None,
+                )
+            )
+            if preview:
+                item.source_info["preview"] = preview
             video_items.append(item)
         return video_items
     except Exception as e:
@@ -2990,6 +3028,7 @@ def download_videos(
     合并候选池把各关键词（来自不同素材源）的候选合并后统一排序。
     """
     anchors = [str(anchor) for anchor in (anchors or ()) if str(anchor).strip()]
+    task_materials.started(search_terms, anchors)
     source_options = {
         "crop_to_aspect": crop_to_aspect,
         "tag_relevance": tag_relevance,
