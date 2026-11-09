@@ -188,6 +188,77 @@ def get_ffmpeg_binary() -> str:
     return "ffmpeg"
 
 
+def _ffmpeg_binary_source(binary: str) -> str:
+    """Describe where get_ffmpeg_binary() found ``binary``, following its priority order."""
+    configured_ffmpeg = os.environ.get("IMAGEIO_FFMPEG_EXE")
+    if configured_ffmpeg:
+        try:
+            from app.config import config
+
+            configured_path = str(config.app.get("ffmpeg_path", "") or "")
+        except Exception:
+            configured_path = ""
+        if configured_path and os.path.normcase(
+            os.path.expanduser(os.path.expandvars(configured_path))
+        ) == os.path.normcase(configured_ffmpeg):
+            # config.py copies a valid app.ffmpeg_path into IMAGEIO_FFMPEG_EXE.
+            return "set by app.ffmpeg_path"
+        return "set by IMAGEIO_FFMPEG_EXE"
+    if binary == "ffmpeg":
+        return "not found, relying on the system to resolve it"
+    if binary == shutil.which("ffmpeg"):
+        return "found on PATH"
+    return "bundled with imageio-ffmpeg"
+
+
+def ffmpeg_version_line(binary: str, timeout: int = 10) -> str:
+    """Return the first line of ``ffmpeg -version`` without its copyright notice."""
+    completed = subprocess.run(
+        [binary, "-version"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+    first_line = (completed.stdout or "").strip().splitlines()[:1]
+    if completed.returncode != 0 or not first_line:
+        raise RuntimeError(f"ffmpeg -version exited with code {completed.returncode}")
+    return first_line[0].split(" Copyright", 1)[0].strip()
+
+
+_ffmpeg_version_logged = False
+_ffmpeg_version_lock = threading.Lock()
+
+
+def log_ffmpeg_version() -> None:
+    """
+    Log once per process which ffmpeg the application uses and its version.
+
+    The WebUI, the API server and the CLI call this at startup, so their logs
+    show whether a user-provided build (IMAGEIO_FFMPEG_EXE or app.ffmpeg_path)
+    or the one bundled with imageio-ffmpeg is in use. A missing or broken
+    binary is only reported here; check_ffmpeg_ready() still guards each task.
+    """
+    global _ffmpeg_version_logged
+    with _ffmpeg_version_lock:
+        if _ffmpeg_version_logged:
+            return
+        _ffmpeg_version_logged = True
+    binary = get_ffmpeg_binary()
+    source = _ffmpeg_binary_source(binary)
+    try:
+        version = ffmpeg_version_line(binary)
+    except Exception as exc:
+        logger.warning(
+            f"using ffmpeg {binary} ({source}), but its version could not be read: "
+            f"{exc}. {_FFMPEG_INSTALL_HINT}"
+        )
+        return
+    logger.info(f"using ffmpeg {binary} ({source}): {version}")
+
+
 _FFMPEG_INSTALL_HINT = (
     "Install FFmpeg on your system, or set app.ffmpeg_path in config.toml to "
     "the full path of an ffmpeg executable (e.g. downloaded from "

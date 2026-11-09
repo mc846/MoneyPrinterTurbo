@@ -2022,6 +2022,9 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
     # 配置模块默认把终端日志发往 stdout。CLI 的 stdout 是机器可读 JSON，
     # 必须在素材预处理等步骤开始前切到 stderr，帮助和参数错误仍保持延迟导入。
     configure_terminal_logger(sys.stderr, level=get_logging_options()[0], colorize=False)
+    from app.utils import utils as app_utils
+
+    app_utils.log_ffmpeg_version()
     try:
         apply_llm_overrides(args)
     except ValueError as exc:
