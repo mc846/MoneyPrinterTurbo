@@ -266,9 +266,10 @@ def test_pixabay_is_used_only_when_it_has_more_qualified_candidates():
     result = _run(["white dwarf", "stellar core"], nasa_results, pixabay_results, 9,
                   settings={"video_source_fallback_min_candidates": 2}, **ORDERED)
 
-    # 两个关键词都到 Pixabay 搜索过，但 Pixabay 合格候选不比 NASA 多：都保留 NASA
+    # 两个关键词都到 Pixabay 搜索过。"white dwarf"：Pixabay 合格候选不比 NASA 多，保留 NASA。
+    # "stellar core"：两边都没有合格候选，关键词留空（素材源链的新规则），时长分给其它关键词。
     assert result.calls["pixabay"] == ["white dwarf", "stellar core"]
-    assert result.by_term == {"white dwarf": {"nasa"}, "stellar core": {"nasa"}}
+    assert result.by_term == {"white dwarf": {"nasa"}}
 
 
 def test_relevance_off_counts_only_candidates():
@@ -330,7 +331,9 @@ def test_pixabay_clips_are_not_face_screened_and_nasa_images_still_are():
     result = _run(["galaxy", "comet"], nasa_results, pixabay_results, 9, faces={"face"}, **ORDERED)
 
     assert result.paths == ["g", "c"]
-    assert result.screened == ["face", "g"]
+    # The chain screens the suitable NASA images before its decision ("face" rejected, "g"
+    # passes); the download screens "g" again (from the cache). Pixabay clips are never screened.
+    assert result.screened == ["face", "g", "g"]
 
 
 def test_pixabay_uses_its_own_ai_setting():
@@ -345,8 +348,10 @@ def test_search_errors_fall_through_to_the_other_source():
     pixabay_results = {"comet": [_pixabay("comet", "c", ["comet"])]}
     assert _run(["comet"], {}, pixabay_results, 4, nasa_error=True, **ORDERED).paths == ["c"]
 
-    nasa_results = {"comet": [_nasa("comet", "n", ["moon"])]}
-    assert _run(["comet"], nasa_results, {}, 4, pixabay_error=True, **ORDERED).paths == ["n"]
+    # NASA has one suitable image, fewer than the minimum: Pixabay is asked, fails, NASA's stays.
+    nasa_results = {"comet": [_nasa("comet", "n", ["comet"])]}
+    assert _run(["comet"], nasa_results, {}, 4, pixabay_error=True,
+                settings={"video_source_fallback_min_candidates": 2}, **ORDERED).paths == ["n"]
 
 
 @pytest.mark.parametrize("options", [{}, {"fallback_source": ""}, {"fallback_source": "none"}])
