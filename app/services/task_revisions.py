@@ -408,7 +408,7 @@ class _Fetcher:
         self.count = 0
 
     def __call__(self, candidate: timing.Candidate) -> timing.Scene | None:
-        from app.services import material, nasa
+        from app.services import material, nasa, nasa_video
 
         entry, term = self.entries[candidate.key]
         item = _candidate_item(entry, term["term"])
@@ -420,7 +420,18 @@ class _Fetcher:
         roles, kind, duration = {}, timing.VIDEO, None
         self.downloads += 1
         try:
-            if item.provider == "nasa":
+            if nasa_video.is_video(item):
+                # The clean window of the video, decided and read as in the first run.
+                fit = nasa_video.effective_fit_mode(item, aspect, self.params.video_fit_mode,
+                                                    self.params.crop_materials_to_aspect)
+                path = nasa_video.save_clip(item, cache, clip_seconds=float(self.params.video_clip_duration),
+                                            video_aspect=aspect, fit_mode=fit)
+                if not path:
+                    self.skipped.append({"candidate": candidate.key, "reason": "no clean video window"})
+                    return None
+                roles, footage = {"video": path}, path
+                duration = _media_duration(Path(path))
+            elif item.provider == "nasa":
                 if nasa.text_filter_active() and not nasa.screen_text([item], aspect, term["term"]):
                     self.skipped.append({"candidate": candidate.key, "reason": "text in the crop area"})
                     return None

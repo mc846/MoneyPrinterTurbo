@@ -57,6 +57,27 @@ def _safe_public_url(value) -> str | None:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
 
 
+_VIDEO_COPIES = ("orig", "large", "medium", "small", "preview", "mobile")
+
+
+def _cached_video(raw: dict) -> dict | None:
+    """NASA 视频信息的白名单副本：数字尺寸和时长，副本只保留公开 https 地址。"""
+    copies = {}
+    raw_copies = raw.get("renditions") if isinstance(raw.get("renditions"), dict) else {}
+    for name in _VIDEO_COPIES:
+        url = _safe_public_url(raw_copies.get(name))
+        if url and url.startswith("https://"):
+            copies[name] = url
+    if not copies:
+        return None
+    video: dict = {"renditions": copies}
+    for field in ("duration", "width", "height"):
+        value = raw.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            video[field] = value
+    return video
+
+
 def _cached_source_info(item: MaterialInfo) -> dict | None:
     """
     按白名单构造可落盘的来源信息。
@@ -122,6 +143,12 @@ def _cached_source_info(item: MaterialInfo) -> dict | None:
     credit = source.get("credit")
     if isinstance(credit, str) and credit.strip():
         cached["credit"] = credit.strip()[:200]
+    # NASA 视频：类型、时长、原始尺寸和各个公开副本（干净片段从中读取）。
+    if source.get("media_type") == "video" and isinstance(source.get("video"), dict):
+        video = _cached_video(source["video"])
+        if video:
+            cached["media_type"] = "video"
+            cached["video"] = video
     # NASA 素材的公开预览图（文字过滤在下载原图之前检查它）。
     preview = _safe_public_url(source.get("preview"))
     if preview:

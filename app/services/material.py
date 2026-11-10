@@ -30,6 +30,7 @@ from app.models.schema import (
     MaterialTagRelevance,
     VideoAspect,
     VideoConcatMode,
+    VideoFitMode,
 )
 from app.services import (
     codex_image,
@@ -41,6 +42,7 @@ from app.services import (
     metaso_minimax,
     muapi,
     nasa,
+    nasa_video,
     ofox,
     source_chain,
     task_artifacts,
@@ -145,6 +147,31 @@ def _creator_info(value: Any) -> dict[str, str] | None:
     return creator or None
 
 
+_SEGMENT_NUMBERS = ("start", "duration", "cuts", "analysed_seconds", "analysis_bytes", "window_bytes")
+_SEGMENT_TEXTS = ("rendition", "analysis_rendition", "fit")
+
+
+def _segment_record(segment: Any) -> dict[str, Any] | None:
+    """NASA 视频片段判定的白名单副本（数字、短文本和按原因计数的字典）。"""
+    if not isinstance(segment, dict):
+        return None
+    record: dict[str, Any] = {}
+    for field in _SEGMENT_NUMBERS:
+        value = segment.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+            record[field] = value
+    for field in _SEGMENT_TEXTS:
+        value = segment.get(field)
+        if isinstance(value, str) and value:
+            record[field] = value[:40]
+    for field in ("rejected", "problem_samples"):
+        counts = segment.get(field)
+        if isinstance(counts, dict):
+            record[field] = {str(key)[:40]: value for key, value in counts.items()
+                             if isinstance(value, int) and not isinstance(value, bool)}
+    return record or None
+
+
 def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, Any]:
     """
     为成功下载的素材生成轻量来源记录。
@@ -187,6 +214,12 @@ def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, An
                 rendition[field] = str(value) if field == "id" else value
         if rendition:
             record["rendition"] = rendition
+    # NASA 视频：类型和所用的干净片段（起点、时长、跳过的镜头及原因、读取的字节数）。
+    if record["provider"] == "nasa" and source.get("media_type") in ("image", "video"):
+        record["media_type"] = source["media_type"]
+    segment = _segment_record(source.get("segment")) if record["provider"] == "nasa" else None
+    if segment:
+        record["segment"] = segment
     # Every successful download gets this record; the task's materials snapshot
     # keeps the full path and the item next to it (see task_materials).
     task_materials.downloaded(item, local_path, record)
@@ -614,16 +647,25 @@ def _order_material_candidates(
     anchor_word_sets = [
         set(words) for words in (_relevance_words(anchor) for anchor in anchors) if words
     ]
+    # NASA 素材源内的类型优先级（nasa_media_types 的顺序，见 nasa_video.media_type_rank）：
+    # 够格（相关度达到后备阈值）的候选里先按类型、再按相关度排；不够格的排在后面。
+    # 其它素材源的类型都是 0，只看相关度，顺序与以前相同。
+    typed = any(nasa_video.is_video(item) for item in items)
+    min_relevance = fallback_thresholds()[0] if typed and relevance != MaterialTagRelevance.off else None
 
     groups: dict[tuple, List[MaterialInfo]] = {}
     for item in items:
         priority = ()
         if relevance != MaterialTagRelevance.off:
             ratio, hits = term_relevance(item)
+            if typed:
+                priority += (ratio < min_relevance, nasa_video.media_type_rank(item))
             priority += (-ratio, -hits)
             if anchor_word_sets:
                 tag_words = _material_tag_words(item) or set()
                 priority += (-sum(1 for words in anchor_word_sets if words <= tag_words),)
+        elif typed:
+            priority += (nasa_video.media_type_rank(item),)
         if crop_to_aspect:
             native_items, _ = _split_by_native_orientation([item], video_aspect)
             priority += (0 if native_items else 1,)
@@ -778,8 +820,9 @@ def _stock_source_search(
         provider = "coverr"
         remote_search_videos = search_videos_coverr
     elif source == "nasa":
+        # 图片和视频（nasa_media_types 的顺序）；只设置 "image" 时与 nasa.search_images 相同。
         provider = "nasa"
-        remote_search_videos = nasa.search_images
+        remote_search_videos = nasa_video.search_media
 
     def search_videos(
         search_term: str,
@@ -992,6 +1035,11 @@ def _filter_materials_by_aspect(
         source_info = item.source_info if isinstance(item.source_info, dict) else {}
         rendition = source_info.get("rendition")
         rendition = rendition if isinstance(rendition, dict) else {}
+        if nasa_video.is_video(item):
+            # NASA 视频几乎都是横屏：怎样填满竖屏由画面适配方式决定（blur 显示整个画面），
+            # 搜索时已按最小分辨率筛选。
+            filtered_items.append(item)
+            continue
         if crop_to_aspect:
             try:
                 width = int(rendition.get("width"))
@@ -3121,9 +3169,13 @@ def download_videos(
     exclude_ai_generated: bool = False,
     anchors: Sequence[str] | None = None,
     fallback_source: str = "",
+    video_fit_mode: VideoFitMode | str = VideoFitMode.cover,
 ) -> List[str]:
     """
     搜索并下载覆盖配音时长所需的素材，返回本地文件路径。
+
+    ``video_fit_mode`` 只用于 NASA 视频：决定检查文字的画面范围（blur/contain 看整个
+    画面，cover 看居中裁剪的部分）和读取哪个副本（见 ``nasa_video``）。
 
     ``progress_callback`` 可选：库存素材（Pexels、Pixabay、Coverr）每下完一个
     文件就以 0~1 的完成比例调用一次，供任务层推进进度条。按需生成的付费
@@ -3159,11 +3211,13 @@ def download_videos(
     if fallback_chain:
         # 因缺少 API Key 被跳过的素材源也写进每个判定（materials.json 能看到整条链）。
         unavailable = [name for name in source_chain.parse_lenient(fallback_source) if name not in fallback_chain]
-        # NASA 的人脸检查要下载图片：在判定前对够格候选依次运行（下面的 screen_material，
-        # 调用时才取值），被拒绝的候选不计入，够格候选用完时换到链中的下一个素材源。
+        # NASA 的人脸检查要下载图片，视频要找干净片段：在判定前对够格候选依次运行（下面的
+        # screen_material，调用时才取值），被拒绝的候选不计入，够格候选用完时换到链中的
+        # 下一个素材源。
         screens = (
             {"nasa": lambda item: screen_material(item) if screen_material is not None else True}
-            if "nasa" in (source, *fallback_chain) and nasa.face_filter_active() else None
+            if "nasa" in (source, *fallback_chain)
+            and (nasa.face_filter_active() or "video" in nasa.configured_media_types()) else None
         )
         search_videos, order_options = chain_source_search(
             source, fallback_chain, unavailable=unavailable, screens=screens, **source_options
@@ -3181,18 +3235,32 @@ def download_videos(
     save_material = None
     screen_material = None
     if "nasa" in (source, *fallback_chain):
+        # NASA 视频的干净片段按它在成片里的适配方式检查和读取（见 video._clip_fit_mode）。
+        def video_options(item: MaterialInfo) -> dict:
+            return {
+                "clip_seconds": float(max_clip_duration),
+                "video_aspect": video_aspect,
+                "fit_mode": nasa_video.effective_fit_mode(item, video_aspect, video_fit_mode, crop_to_aspect),
+            }
 
         def save_material(item: MaterialInfo, save_dir: str) -> str:
             if fallback_source and item.provider != "nasa":
                 return save_video(video_url=item.url, save_dir=save_dir)
+            if nasa_video.is_video(item):
+                generation_progress.downloading()
+                return nasa_video.save_clip(item, save_dir, **video_options(item))
             return nasa.save_image_clip(
                 item, save_dir, video_aspect=video_aspect,
                 clip_duration=max_clip_duration, image_motion=image_motion,
             )
 
-        if nasa.face_filter_active():
+        if nasa.face_filter_active() or "video" in nasa.configured_media_types():
             def screen_material(item: MaterialInfo) -> bool:
                 if fallback_source and item.provider != "nasa":
+                    return True
+                if nasa_video.is_video(item):
+                    return nasa_video.screen(item, **video_options(item))
+                if not nasa.face_filter_active():
                     return True
                 return nasa.screen_image(
                     item, material_directory, video_aspect=video_aspect,

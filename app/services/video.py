@@ -1568,17 +1568,24 @@ def _clip_fit_mode(
     开启 crop_materials_to_aspect 后，素材源会接受居中裁剪后满足目标分辨率的
     另一方向素材。这类片段必须按 cover 裁剪；按 contain 处理会把横屏素材缩成
     竖屏画面中间的一条窄带。与目标同方向的片段仍沿用用户选择的方式。
-    blur 不改成 cover：在竖屏里完整显示横屏画面、用模糊背景填满四周正是它的用途。
+    blur 只在裁剪需要放大时保留（在竖屏里完整显示横屏画面、用模糊背景填满四周）；
+    裁剪后仍不小于画布的片段（4K 横屏素材）按 cover 裁剪，不放大、铺满画面。测量
+    （NASA 视频，1080x1920）：cover 让 1080p 素材放大 1.78 倍、720p 放大 2.67 倍，只显示
+    画面宽度的 31.6%；4K 和 4000x3000 素材缩小到 0.89、0.64 倍。
     """
     if not crop_cross_orientation_clips or target_width == target_height:
-        return fit_mode
-    if VideoFitMode(fit_mode) == VideoFitMode.blur:
         return fit_mode
     if target_height > target_width:
         matches_orientation = clip_height > clip_width
     else:
         matches_orientation = clip_width > clip_height
-    return fit_mode if matches_orientation else VideoFitMode.cover
+    if matches_orientation:
+        return fit_mode
+    if VideoFitMode(fit_mode) == VideoFitMode.blur and max(
+        target_width / max(1, clip_width), target_height / max(1, clip_height)
+    ) > 1:
+        return VideoFitMode.blur
+    return VideoFitMode.cover
 
 
 def combine_videos(

@@ -218,8 +218,13 @@ def test_portrait_clip_is_resized_without_a_background_in_moviepy(tmp_path):
 # ---------------------------------------------------------------- crop_materials_to_aspect
 
 @pytest.mark.parametrize(("clip_size", "target_size", "fit_mode", "expected"), [
-    ((3840, 2160), (1080, 1920), VideoFitMode.blur, VideoFitMode.blur),
-    ((2160, 3840), (1920, 1080), VideoFitMode.blur, VideoFitMode.blur),
+    # Blur when the crop would enlarge; a crop that still covers the canvas is used as is.
+    ((1920, 1080), (1080, 1920), VideoFitMode.blur, VideoFitMode.blur),
+    ((1280, 720), (1080, 1920), VideoFitMode.blur, VideoFitMode.blur),
+    ((1080, 1920), (1920, 1080), VideoFitMode.blur, VideoFitMode.blur),
+    ((3840, 2160), (1080, 1920), VideoFitMode.blur, VideoFitMode.cover),
+    ((4000, 3000), (1080, 1920), VideoFitMode.blur, VideoFitMode.cover),
+    ((2160, 3840), (1920, 1080), VideoFitMode.blur, VideoFitMode.cover),
     ((1440, 1920), (1080, 1920), VideoFitMode.blur, VideoFitMode.blur),
     ((3840, 2160), (1080, 1920), VideoFitMode.contain, VideoFitMode.cover),
     ((2160, 3840), (1920, 1080), VideoFitMode.contain, VideoFitMode.cover),
