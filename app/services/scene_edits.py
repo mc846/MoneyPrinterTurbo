@@ -150,9 +150,11 @@ def candidate_key(candidate: dict) -> str:
 def candidate_choices(manifest: dict, materials: dict, scene: dict, scenes: list[dict] | None = None) -> list[dict]:
     """Candidates the scene can take: its term's saved candidates and the searches made for it.
 
-    Each has ``selectable`` and, when false, ``reason``. A filtered or failed candidate
-    cannot be chosen; neither can one without a download address (older manifests keep
-    none for Pixabay; NASA's is rebuilt) nor one another scene of ``scenes`` uses."""
+    Each has ``selectable`` and, when false, ``reason`` (English, for logs and the CLI)
+    and ``reason_code`` (filtered, failed, current, other_scene with ``used_by``,
+    no_address; the WebUI translates it). A filtered or failed candidate cannot be
+    chosen; neither can one without a download address (older manifests keep none for
+    Pixabay; NASA's is rebuilt) nor one another scene of ``scenes`` uses."""
     in_use = {}
     for other in scenes or []:
         used = materials.get(other.get("material") or "", {})
@@ -174,18 +176,26 @@ def candidate_choices(manifest: dict, materials: dict, scene: dict, scenes: list
             if candidate.get("status") in UNUSABLE:
                 entry["selectable"] = False
                 entry["reason"] = candidate.get("reason") or candidate.get("status")
+                entry["reason_code"] = "filtered" if candidate.get("status") == "rejected" else "failed"
+                entry["filters_rejected"] = sorted({f.get("filter") for f in candidate.get("filters") or []
+                                                    if f.get("result") == "rejected" and f.get("filter")})
             elif identity == (current.get("provider"), str(current.get("asset_id"))):
                 entry["selectable"] = False
                 entry["reason"] = "the scene uses it now"
+                entry["reason_code"] = "current"
             elif identity in in_use:
                 entry["selectable"] = False
                 entry["reason"] = f"used by another scene ({in_use[identity]})"
+                entry["reason_code"] = "other_scene"
+                entry["used_by"] = in_use[identity]
             elif not (candidate.get("item") or {}).get("url") and candidate.get("provider") != "nasa":
                 entry["selectable"] = False
                 entry["reason"] = "no download address recorded"
+                entry["reason_code"] = "no_address"
             else:
                 entry["selectable"] = True
                 entry["reason"] = None
+                entry["reason_code"] = None
             choices.append(entry)
     return choices
 

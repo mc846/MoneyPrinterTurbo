@@ -499,8 +499,7 @@ def test_panel_replace_dialog_shows_candidates_and_adds_the_choice(storage, pane
     key = f"revision_replace_{task_id}_v1-s02"
     choose = {name: app.button(key=f"{key}_choose_{name}") for name in ("pixabay:A2", "pixabay:R2", "pixabay:C2")}
     assert choose["pixabay:R2"].disabled and choose["pixabay:A2"].disabled and not choose["pixabay:C2"].disabled
-    captions = " ".join(c.value for c in app.caption)
-    assert "rejected" in captions and "the scene uses it now" in captions
+    assert len([c for c in app.caption if c.value.startswith(":orange[")]) == 2  # the two reasons
     choose["pixabay:C2"].click().run()
     app.button(key=f"{key}_add").click().run()
     assert _pending(app) == ["- v1-s02: replace with pixabay:C2"]
@@ -535,6 +534,30 @@ def test_panel_crop_dialog_moves_the_frame_with_the_slider(storage, panel, monke
     app.button(key="revision_generate").click().run()
     assert panel["started"] == [["--temel-revizyon=r001", "--kirpma=v1-s01=0.200,0.500"]]
     assert panel["saves"] == [] and _config_file_hash() == panel["config"]
+
+
+def test_reasons_are_shown_in_the_ui_language(storage):
+    from webui import revision_page
+
+    task_id = _make_task(storage)
+    base = task_revisions.ensure_first(task_id)
+    manifest, materials = task_revisions._materials(task_id)
+    manifest["terms"][1]["candidates"][1]["filters"] = [{"filter": "text", "result": "rejected", "detail": ""},
+                                                        {"filter": "face", "result": "rejected", "detail": ""}]
+    choices = {c["key"]: c for c in scene_edits.candidate_choices(manifest, materials, base["scenes"][1],
+                                                                  base["scenes"])}
+    assert (choices["pixabay:R2"]["reason_code"], choices["pixabay:R2"]["filters_rejected"]) == (
+        "filtered", ["face", "text"])
+    assert choices["pixabay:A2"]["reason_code"] == "current" and choices["pixabay:C2"]["reason_code"] is None
+
+    def tr(key):
+        return {"revision.reason.filtered": "elendi: {filters}", "revision.filter.text": "yazı",
+                "revision.filter.face": "yüz", "revision.reason.other_scene": "{scene} kullanıyor"}.get(key, key)
+
+    assert revision_page._reason(tr, choices["pixabay:R2"]) == "elendi: yüz, yazı"
+    assert revision_page._reason(tr, choices["pixabay:A2"]) == "revision.reason.current"
+    assert revision_page._reason(tr, {"reason_code": "other_scene", "used_by": "v1-s05"}) == "v1-s05 kullanıyor"
+    assert revision_page._reason(tr, {"reason_code": "no_address"}) == "revision.reason.no_address"
 
 
 def test_framed_preview_marks_the_crop_window(storage):
