@@ -227,9 +227,9 @@ def _transition_mode(value: str) -> str | None:
 
 def _video_fit_mode(value: str) -> str:
     normalized = value.strip().lower()
-    if normalized not in {"cover", "contain"}:
+    if normalized not in {"cover", "contain", "blur"}:
         raise argparse.ArgumentTypeError(
-            "video-fit-mode must be one of: cover, contain"
+            "video-fit-mode must be one of: cover, contain, blur"
         )
     return normalized
 
@@ -521,11 +521,13 @@ Batch manifests:
     video_group.add_argument(
         "--video-fit-mode",
         type=_video_fit_mode,
-        choices=["cover", "contain"],
+        choices=["cover", "contain", "blur"],
         default=None,
         help=(
-            "fit mismatched source clips by filling and center-cropping (cover) "
-            "or preserving the full frame with black bars (contain); default: cover"
+            "fit mismatched source clips by filling and center-cropping (cover), "
+            "preserving the full frame with black bars (contain), or preserving "
+            "the full frame over a blurred copy that fills the canvas (blur); "
+            "default: cover"
         ),
     )
     video_group.add_argument(

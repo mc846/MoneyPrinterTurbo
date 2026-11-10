@@ -6618,6 +6618,7 @@ def _render_video_settings(panel, params):
             video_fit_modes = [
                 (tr("Fill and Crop"), VideoFitMode.cover.value),
                 (tr("Fit with Black Bars"), VideoFitMode.contain.value),
+                (tr("Fit with Blurred Background"), VideoFitMode.blur.value),
             ]
             selected_fit_mode = stable_selectbox(
                 tr("Video Fit Mode"),

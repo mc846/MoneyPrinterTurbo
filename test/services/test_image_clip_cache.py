@@ -206,7 +206,7 @@ def _legacy_frames(source, duration, target, fit_mode, times):
 
 
 @pytest.mark.parametrize("aspect", list(_SMALL_RESOLUTIONS))
-@pytest.mark.parametrize("fit_mode", [VideoFitMode.cover, VideoFitMode.contain])
+@pytest.mark.parametrize("fit_mode", [VideoFitMode.cover, VideoFitMode.contain, VideoFitMode.blur])
 @pytest.mark.parametrize("source_size", [(240, 160), (160, 240)])
 def test_output_size_matches_the_native_render_fitted_by_combine(tmp_path, aspect, fit_mode, source_size):
     target = _SMALL_RESOLUTIONS[aspect]
