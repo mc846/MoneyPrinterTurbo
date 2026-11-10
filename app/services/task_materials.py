@@ -554,7 +554,7 @@ def add_material(task_id: str, item, roles: dict[str, str], source_record: dict,
     provider = _provider(item)
     stem = f"{number:02d}-{_name_part(provider, 20)}-{_name_part(info.get('asset_id') or number)}"
     files = {}
-    for role in ("original", "prepared", "clip", "video"):
+    for role in ("original", "prepared", "clip", "video", "local"):
         if roles.get(role) and os.path.isfile(roles[role]):
             target = folder_path / f"{stem}-{role}{Path(roles[role]).suffix.lower()}"
             how = store_file(roles[role], target)
@@ -584,6 +584,53 @@ def add_material(task_id: str, item, roles: dict[str, str], source_record: dict,
     return material
 
 
+def add_search_results(task_id: str, recorder: _Recorder, words: str, scene_id: str, limit: int) -> dict:
+    """Write a revision search (scene_edits.search) to materials.json as a candidate list.
+
+    ``recorder`` captured the search: ranked results, filter rejections and the fallback
+    decision. The new ``terms`` entry has ``scene`` (the scene it was searched for); its
+    candidates are "available" or "rejected", with small previews like the task's own."""
+    path = manifest_path(task_id)
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    decision = recorder.fallbacks.get(words) or {}
+    provider = decision.get("used") or next((p for p, term in recorder.searches if term == words), "")
+    search = recorder.searches.get((provider, words)) or {"ordered": [], "dropped": []}
+    index = max([term.get("index", 0) for term in manifest.get("terms") or []] or [0]) + 1
+    entries, previews = [], []
+    for rank, item in enumerate(search["ordered"][:limit], start=1):
+        key = _key(item)
+        info = _info(item)
+        filters = list(recorder.rejections.get(key, []))
+        rejected = [f["filter"] for f in filters if f["result"] == "rejected"]
+        entry = {
+            "rank": rank, "provider": _provider(item), "asset_id": info.get("asset_id"),
+            "source_page": info.get("source_page"), "duration": getattr(item, "duration", None),
+            "relevance": _relevance(item, words, recorder.anchors), "filters": filters,
+            "status": "rejected" if rejected else "available",
+            "reason": "filtered: " + ", ".join(sorted(set(rejected))) if rejected else None,
+            "item": _item_record(item), "preview": None,
+        }
+        url = _preview_url(item)
+        if url:
+            name = f"{index:02d}-{rank:02d}-{_name_part(entry['provider'], 20)}-{_name_part(entry['asset_id'] or rank)}"
+            previews.append((key, url, name, entry))
+        entries.append(entry)
+    _save_previews(recorder, folder(task_id), previews)
+    term_entry = {
+        "index": index, "term": words, "provider": provider or None, "scene": scene_id,
+        "searched_at": _now(), "fallback": decision or None,
+        "source_filters": recorder.source_filters.get((provider, words)),
+        "candidates_found": len(search["ordered"]), "candidates": entries,
+        "dropped": [{"provider": _provider(item), "asset_id": _info(item).get("asset_id"), "reason": reason}
+                    for item, reason in search["dropped"][:limit]],
+        "dropped_count": len(search["dropped"]),
+    }
+    manifest.setdefault("terms", []).append(term_entry)
+    manifest["updated_at"] = _now()
+    task_artifacts._write_json_atomic(path, manifest)
+    return term_entry
+
+
 def _settings(params) -> dict:
     names = (
         "video_source", "video_source_fallback", "video_aspect", "video_concat_mode",
@@ -596,7 +643,22 @@ def _settings(params) -> dict:
         value = getattr(params, name, None)
         settings[name] = getattr(value, "value", value)
     settings["candidates_per_term"] = CANDIDATES_PER_TERM
+    settings["performance"] = performance_settings(params)
     return settings
+
+
+PERFORMANCE_FIELDS = ("final_render_engine", "material_concurrency", "video_clip_concurrency", "video_codec",
+                      "n_threads")
+
+
+def performance_settings(params) -> dict:
+    """Settings that change only how fast a video is made, as this task used them.
+
+    The batch process applies its preset's values to config.app before the task runs, so a
+    batch task records its preset's settings. Revisions start from these (task_revisions)."""
+    recorded = {name: config.app.get(name) for name in PERFORMANCE_FIELDS if name != "n_threads"}
+    recorded["n_threads"] = getattr(params, "n_threads", None)
+    return recorded
 
 
 def _task_status(task_id: str) -> str:

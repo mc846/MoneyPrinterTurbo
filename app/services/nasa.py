@@ -837,11 +837,22 @@ def _download_image(url: str, save_dir: str) -> str:
             os.remove(temp_path)
 
 
+def crop_position_suffix(crop_position: tuple[float, float] | None) -> str:
+    """File name part of a crop position; empty for the centre, so default crops keep their names."""
+    if crop_position is None:
+        return ""
+    x, y = (min(1.0, max(0.0, float(value))) for value in crop_position)
+    if round(x * 100) == 50 and round(y * 100) == 50:
+        return ""
+    return f"-x{round(x * 100):03d}y{round(y * 100):03d}"
+
+
 def prepare_image(
     image_path: str,
     video_aspect: VideoAspect,
     clip_duration: float,
     image_motion: ImageMotion = ImageMotion.zoom,
+    crop_position: tuple[float, float] | None = None,
 ) -> str:
     """
     把图片居中裁剪到目标比例，并缩小到 目标尺寸 × 放大余量，返回处理后的路径。
@@ -849,8 +860,16 @@ def prepare_image(
     只缩小不放大：裁剪区域比所需尺寸小（但不小于目标分辨率）时保持原样；比目标
     分辨率还小时返回空字符串。JPEG 先用 draft 按 2 的幂降采样解码，避免把上亿像素的
     原图完整读入内存。
+
+    ``crop_position`` (x, y), each 0-1, moves the crop window from the centre (0.5, 0.5)
+    towards the left/top (0) or right/bottom (1) on the axis the image has room on. The
+    window keeps its size, so the resolution check is the same; the position is part of
+    the file name, which is also the zoom clip's cache key.
     """
     aspect = VideoAspect(video_aspect)
+    suffix = crop_position_suffix(crop_position)
+    x_position, y_position = (0.5, 0.5) if not suffix else (
+        min(1.0, max(0.0, float(value))) for value in crop_position)
     target_width, target_height = aspect.to_resolution()
     margin = zoom_margin(clip_duration, image_motion)
     desired_width = math.ceil(target_width * margin)
@@ -866,7 +885,7 @@ def prepare_image(
             out_width = min(crop_width, desired_width)
             out_height = out_width * target_height // target_width
             root, _ = os.path.splitext(image_path)
-            prepared_path = f"{root}-{aspect.name}-{out_width}x{out_height}.jpg"
+            prepared_path = f"{root}-{aspect.name}-{out_width}x{out_height}{suffix}.jpg"
             # 人脸检查和渲染会先后用到同一张处理后的图片。
             if os.path.isfile(prepared_path) and os.path.getsize(prepared_path) > 0:
                 return prepared_path
@@ -876,7 +895,8 @@ def prepare_image(
             image = image.convert("RGB")
             width, height = image.size
             crop_width, crop_height = _center_crop_size(width, height, aspect)
-            left, top = (width - crop_width) // 2, (height - crop_height) // 2
+            left = round((width - crop_width) * x_position)
+            top = round((height - crop_height) * y_position)
             image = image.crop((left, top, left + crop_width, top + crop_height))
             if image.size != (out_width, out_height):
                 image = image.resize((out_width, out_height), Image.LANCZOS)

@@ -32,7 +32,8 @@ _GENERATED_CACHE_FILE_PATTERNS = (
     # NASA 图片（原图和 ~small 预览图按地址的 MD5 命名）、按目标比例处理后的图片，
     # 以及预览图的文字检查结果。
     re.compile(r"^nasa-[0-9a-f]{32}\.[a-z0-9]{1,5}$"),
-    re.compile(r"^nasa-[0-9a-f]{32}-(?:portrait|landscape|square)-\d+x\d+\.jpg$"),
+    # A crop moved from the centre (revisions) adds -xNNNyNNN.
+    re.compile(r"^nasa-[0-9a-f]{32}-(?:portrait|landscape|square)-\d+x\d+(?:-x\d{3}y\d{3})?\.jpg$"),
     re.compile(r"^nasa-text-[0-9a-f]{64}\.json$"),
 )
 # 上面这些文件发布前的临时文件（tempfile.mkstemp 的随机后缀）。
@@ -41,7 +42,7 @@ _GENERATED_CACHE_TEMP_FILE_PATTERNS = (
     re.compile(r"^\.image-sanitize-[a-z0-9_]+\.png$"),
     re.compile(r"^\.nasa-[a-z0-9_]+\.[a-z0-9]{1,5}$"),
     re.compile(r"^\.nasa-text-[a-z0-9_]+\.json$"),
-    re.compile(r"^nasa-[0-9a-f]{32}-(?:portrait|landscape|square)-\d+x\d+\.jpg\.part$"),
+    re.compile(r"^nasa-[0-9a-f]{32}-(?:portrait|landscape|square)-\d+x\d+(?:-x\d{3}y\d{3})?\.jpg\.part$"),
 )
 _SECONDS_PER_DAY = 24 * 60 * 60
 
