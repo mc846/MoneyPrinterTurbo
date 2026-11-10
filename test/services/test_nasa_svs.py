@@ -252,6 +252,15 @@ def test_the_task_record_keeps_the_svs_window_for_the_credits():
     assert "[NASA SVS] NASA's Scientific Visualization Studio (video, 4-9 s)" in nasa.credits_text([record])
 
 
+def test_the_quality_report_asks_only_for_the_unlabelled_data_visualizations():
+    svs = {"provider": "nasa_svs", "asset_id": "5415", "vision": {"label": "data_visualization"},
+           "scene_label": {"tr": "NASA SVS · LRO verisinden görselleştirme"}}
+    viper = {"provider": "nasa", "asset_id": "VIPER", "vision": {"label": "data_visualization"}}
+    checks = batch_package.label_checks([svs, viper, {"provider": "pixabay", "asset_id": "1"}])
+    assert checks == {"etiketli": ["5415"], "etiket_gerekli": ["VIPER"]}
+    assert batch_package.check_warnings(checks) == ["etiket gerekli: VIPER (veri görselleştirmesi)"]
+
+
 def test_the_label_comes_from_the_source_not_from_the_screening():
     """A NASA archive clip the screening calls a data visualization gets no label (the VIPER case)."""
     nasa_item = MaterialInfo(provider="nasa", url="https://images-assets.nasa.gov/x.mp4", duration=5, source_info={
