@@ -147,9 +147,12 @@ def test_long_caption_is_shortened_to_keep_credits_and_hashtags():
     assert len(caption) <= bpk.CAPTION_MAX and caption.endswith("(images.nasa.gov)\n\n#uzay")
 
 
-def test_no_credit_line_without_nasa_or_pixabay_material():
-    texts = bpk.social_texts("k", "Metin.", [{"provider": "pexels"}], ask=asker(("social", json.dumps(SOCIAL))))
+def test_no_credit_line_without_nasa_or_stock_material():
+    texts = bpk.social_texts("k", "Metin.", [{"provider": "local"}], ask=asker(("social", json.dumps(SOCIAL))))
     assert texts["krediler"] == [] and "Görüntüler" not in texts["tiktok"]["caption"]
+    # Every stock source used is named (the fallback chain may bring Pexels or Coverr).
+    texts = bpk.social_texts("k", "Metin.", [{"provider": "pexels"}], ask=asker(("social", json.dumps(SOCIAL))))
+    assert texts["krediler"] == ["Ek görüntüler: Pexels (pexels.com)"]
 
 
 @pytest.mark.parametrize("phrase", ["NASA'ya göre bu yıldızlar", "NASA açıkladı:", "NASA sunar", "according to NASA"])

@@ -34,6 +34,9 @@ FLAGGED_RATINGS = ("Y", "X")
 COVER_SIZE = (1080, 1920)
 SHEET_FRAMES = 5
 PIXABAY_CREDIT = "Ek görüntüler: Pixabay (pixabay.com)"
+# Paylaşım metninde stok kaynakların adı ve sitesi (credit_lines).
+STOCK_CREDITS = {"pixabay": "Pixabay (pixabay.com)", "coverr": "Coverr (coverr.co)",
+                 "pexels": "Pexels (pexels.com)"}
 # YouTube Shorts başlığı ≤ 100 karakter; TikTok ve Instagram açıklaması (hashtag'ler ve kredi
 # satırı dahil) ≤ 2200 karakter; Instagram'da en çok 30 hashtag.
 YOUTUBE_TITLE_MAX = 100
@@ -190,12 +193,32 @@ def audit_script(subject: str, script: str, ask=_ask) -> dict:
 # ---------------------------------------------------------------- paylaşım metni
 
 def credit_lines(material_sources) -> list[str]:
+    """Paylaşım metninin atıf satırları: NASA (kullanım yönergesi), ek stok kaynaklar.
+
+    Coverr'ın ücretsiz (Demo) API katmanı Coverr'ı ve varsa üreticiyi coverr.co bağlantısıyla
+    anmayı şart koşar (https://coverr.co/license); Pixabay ve Pexels atıf istemez, kaynak
+    yine yazılır (Pexels API yönergesi Pexels'e görünür bağlantı ister)."""
     lines = []
     attribution = nasa.social_attribution(material_sources, "tr-TR")
     if attribution:
         lines.append(attribution)
-    if any(str((record or {}).get("provider") or "").lower() == "pixabay" for record in material_sources or []):
+    providers = [str((record or {}).get("provider") or "").lower() for record in material_sources or []]
+    others = []
+    for provider in ("pixabay", "coverr", "pexels"):
+        if provider not in providers:
+            continue
+        label = STOCK_CREDITS[provider]
+        if provider == "coverr":
+            creators = sorted({str(((record or {}).get("creator") or {}).get("name") or "").strip()
+                               for record in material_sources or []
+                               if str((record or {}).get("provider") or "").lower() == "coverr"} - {""})
+            if creators:
+                label = f"{label}: {', '.join(creators)}"
+        others.append(label)
+    if others == [STOCK_CREDITS["pixabay"]]:
         lines.append(PIXABAY_CREDIT)
+    elif others:
+        lines.append("Ek görüntüler: " + "; ".join(others))
     return lines
 
 
@@ -352,6 +375,9 @@ _SEARCH_LINE = re.compile(r"nasa image search: term=(?P<term>'(?:[^'\\]|\\.)*'|\
 _FALLBACK_LINE = re.compile(r"material fallback: term=(?P<term>'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"), "
                             r"(?P<primary>\w+)=\d+/(?P<primary_count>\d+) qualified, "
                             r"(?P<fallback>\w+)=\d+/(?P<fallback_count>\d+) qualified, .*using=(?P<using>\w+)")
+# Kaynak zincirinin satırı (source_chain): tried=<kaynak>:<aday>/<uygun|->[:429|:skipped],...
+_CHAIN_LINE = re.compile(r"material source chain: term=(?P<term>'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"), "
+                         r"tried=(?P<tried>\S+), using=(?P<using>\w+), reason=(?P<reason>\w+)")
 # nasa.search_images 的 skipped 计数键 → 报告里的淘汰原因。
 _SKIP_REASONS = {
     "person": "kisi", "text_graphic": "yazi_metaveri", "copyright": "telif",
@@ -370,6 +396,14 @@ def log_summary(log_lines: list[str], terms: list[str]) -> dict:
             searched[term] = int(match["kept"])
             for reason, count in ast.literal_eval(match["skipped"]).items():
                 eliminations[_SKIP_REASONS.get(reason, "diger")] += int(count)
+        elif match := _CHAIN_LINE.search(line):
+            term = ast.literal_eval(match["term"])
+            tried = [part.split(":") for part in match["tried"].split(",")]
+            counts = {part[0]: int(part[1].split("/")[0]) for part in tried if len(part) > 1}
+            primary = tried[0][0] if tried else ""
+            using = match["using"]
+            fallback[term] = {"using": using, "fallback": using not in ("None", primary),
+                              "count": counts.get(using, 0)}
         elif match := _FALLBACK_LINE.search(line):
             term = ast.literal_eval(match["term"])
             chosen = match["fallback_count"] if match["using"] == match["fallback"] else match["primary_count"]

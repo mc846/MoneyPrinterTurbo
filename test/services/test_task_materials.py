@@ -242,8 +242,11 @@ def test_manifest_records_scenes_materials_and_candidates(storage, monkeypatch):
     assert lower["reason"] == "a higher-ranked candidate was used"
     assert chosen["relevance"] == {"score": 1.0, "tag_hits": 2, "anchors": ["moon"]}
     assert satellite["provider"] == "pixabay"
-    assert satellite["fallback"]["used"] == "pixabay"
-    assert satellite["fallback"]["primary_qualified"] == 0
+    # The chain's decision: every source tried with its counts, the chosen one and why.
+    chain = satellite["source_chain"]
+    assert (chain["chosen"], chain["reason"], chain["chain"]) == ("pixabay", "met", ["nasa", "pixabay"])
+    assert [(e["source"], e["suitable"]) for e in chain["tried"]] == [("nasa", 0), ("pixabay", 2)]
+    assert moon["source_chain"]["tried"][0]["source"] == "nasa" and moon["source_chain"]["chosen"] == "nasa"
     assert [(c["asset_id"], c["status"]) for c in satellite["candidates"]] == [
         ("px-1", "selected"), ("px-2", "not_selected"),
     ]

@@ -193,12 +193,25 @@ def searched(provider: str, term: str, ordered: Sequence, dropped: Sequence = ()
             }
 
 
-def fallback(term: str, **decision) -> None:
-    """Which stock source a term's candidates came from (see material._search_with_fallback)."""
+def source_decision(term: str, decision: dict) -> None:
+    """Which stock source of the fallback chain a term's candidates came from and why
+    (source_chain.chain_search): the sources tried with their candidate and suitable
+    counts, the chosen source and the reason. materials.json → terms[].source_chain."""
     recorder = _current.get()
     if recorder:
         with recorder.lock:
             recorder.fallbacks[str(term)] = dict(decision)
+
+
+def fallback(term: str, **decision) -> None:
+    """The older name of ``source_decision`` (keyword arguments)."""
+    source_decision(term, decision)
+
+
+def _decided_source(decision: dict | None) -> str:
+    """The source a recorded decision chose ("chosen"; the single fallback wrote "used")."""
+    decision = decision or {}
+    return str(decision.get("chosen") or decision.get("used") or "")
 
 
 def source_filtered(provider: str, term: str, skipped: dict, unchecked: int = 0) -> None:
@@ -378,9 +391,9 @@ def _relevance(item, term: str, anchors: Sequence[str]) -> dict | None:
 
 
 def _term_provider(recorder: _Recorder, term: str) -> str:
-    decision = recorder.fallbacks.get(term)
-    if decision and decision.get("used"):
-        return str(decision["used"])
+    decided = _decided_source(recorder.fallbacks.get(term))
+    if decided:
+        return decided
     params_source = str(getattr(recorder.params, "video_source", "") or "")
     if (params_source, term) in recorder.searches:
         return params_source
@@ -593,7 +606,7 @@ def add_search_results(task_id: str, recorder: _Recorder, words: str, scene_id: 
     path = manifest_path(task_id)
     manifest = json.loads(path.read_text(encoding="utf-8"))
     decision = recorder.fallbacks.get(words) or {}
-    provider = decision.get("used") or next((p for p, term in recorder.searches if term == words), "")
+    provider = _decided_source(decision) or next((p for p, term in recorder.searches if term == words), "")
     search = recorder.searches.get((provider, words)) or {"ordered": [], "dropped": []}
     index = max([term.get("index", 0) for term in manifest.get("terms") or []] or [0]) + 1
     entries, previews = [], []
@@ -618,7 +631,7 @@ def add_search_results(task_id: str, recorder: _Recorder, words: str, scene_id: 
     _save_previews(recorder, folder(task_id), previews)
     term_entry = {
         "index": index, "term": words, "provider": provider or None, "scene": scene_id,
-        "searched_at": _now(), "fallback": decision or None,
+        "searched_at": _now(), "source_chain": decision or None,
         "source_filters": recorder.source_filters.get((provider, words)),
         "candidates_found": len(search["ordered"]), "candidates": entries,
         "dropped": [{"provider": _provider(item), "asset_id": _info(item).get("asset_id"), "reason": reason}
@@ -772,7 +785,9 @@ def _write_manifest(recorder: _Recorder, final: bool) -> None:
             "index": term_index,
             "term": term,
             "provider": provider or None,
-            "fallback": recorder.fallbacks.get(term),
+            # The fallback chain's decision for the term (sources tried, candidate and
+            # suitable counts, chosen source, reason); None without a chain.
+            "source_chain": recorder.fallbacks.get(term),
             "source_filters": recorder.source_filters.get((provider, term)),
             "candidates_found": len(ordered),
             "candidates": _candidate_entries(

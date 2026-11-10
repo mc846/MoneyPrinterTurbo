@@ -60,6 +60,7 @@ from app.services import (
     jalapeno_video,
     nasa,
     ofox,
+    source_chain,
     subtitle,
     video,
     volcengine_seedance,
@@ -3783,17 +3784,64 @@ def _render_nasa_settings(app_settings):
         on_change=_save_settings_change,
         args=("app", "nasa_credit_overlay", "nasa_credit_overlay_input", bool),
     )
-    fallback_enabled = st.checkbox(
-        tr("NASA Fallback Pixabay"),
-        value=app_settings.get("video_source_fallback", "") == "pixabay",
-        help=tr("NASA Fallback Pixabay Help"),
+    st.markdown(
+        f"{tr('NASA Usage Terms Note')} [{tr('NASA Usage Guidelines')}]({nasa.USAGE_GUIDELINES_URL})"
+    )
+
+
+# 素材源链（video_source_fallback）里各素材源的显示名称；多选框用名称列表而不用
+# format_func（AppTest 找不到 format_func 选项的原始值）。
+FALLBACK_SOURCE_LABELS = {"pexels": "Pexels", "pixabay": "Pixabay", "coverr": "Coverr", "nasa": "NASA"}
+
+
+def _configured_fallback_chain(app_settings, primary: str) -> list[str]:
+    """config 里保存的后备素材源链，去掉主素材源和无法识别的值（保存值可能是旧的单个名称）。"""
+    try:
+        chain = source_chain.parse(app_settings.get("video_source_fallback", ""))
+    except source_chain.SourceChainError:
+        return []
+    seen = []
+    for source in chain:
+        if source in FALLBACK_SOURCE_LABELS and source != primary and source not in seen:
+            seen.append(source)
+    return seen
+
+
+def _fallback_chain_value(labels):
+    """多选框的值（按选择顺序的名称）→ 保存的设置：空、一个名称或列表。"""
+    by_label = {label: source for source, label in FALLBACK_SOURCE_LABELS.items()}
+    return source_chain.compact([by_label[label] for label in labels or [] if label in by_label])
+
+
+def _render_fallback_chain_settings(provider, app_settings):
+    """库存素材源的后备链：按顺序选择其它库存素材源，以及判定阈值。"""
+    st.markdown(f"**{tr('Fallback Chain')}**")
+    configured = source_chain.parse_lenient(app_settings.get("video_source_fallback", ""))
+    chain = _configured_fallback_chain(app_settings, provider)
+    options = [FALLBACK_SOURCE_LABELS[source] for source in source_chain.STOCK_SOURCES if source != provider]
+    selected = st.multiselect(
+        tr("Fallback Chain Sources"),
+        options,
+        default=[FALLBACK_SOURCE_LABELS[source] for source in chain],
+        help=tr("Fallback Chain Help"),
         key="video_source_fallback_input",
         on_change=_save_settings_change,
-        args=("app", "video_source_fallback", "video_source_fallback_input", _pixabay_fallback_value),
+        args=("app", "video_source_fallback", "video_source_fallback_input", _fallback_chain_value),
     )
-    if fallback_enabled:
-        if not _get_material_api_keys("pixabay_api_keys").strip():
-            st.warning(tr("NASA Fallback Missing Key"))
+    if provider in configured:
+        st.info(tr("Fallback Chain Primary Removed").format(source=FALLBACK_SOURCE_LABELS[provider]))
+    by_label = {label: source for source, label in FALLBACK_SOURCE_LABELS.items()}
+    chosen = [by_label[label] for label in selected]
+    if chosen:
+        st.caption(tr("Fallback Chain Order").format(
+            chain=" → ".join([FALLBACK_SOURCE_LABELS.get(provider, provider), *selected])))
+    for source in chosen:
+        key = source_chain.API_KEYS.get(source)
+        if key and not _get_material_api_keys(key).strip():
+            st.warning(tr("Fallback Chain Missing Key").format(source=FALLBACK_SOURCE_LABELS[source]))
+    if "pexels" in chosen:
+        st.caption(tr("Fallback Chain Untagged"))
+    if chosen:
         min_relevance, min_candidates = material.fallback_thresholds()
         relevance_column, candidates_column = st.columns(2)
         relevance_column.number_input(
@@ -3820,20 +3868,13 @@ def _render_nasa_settings(app_settings):
             args=("app", "video_source_fallback_min_candidates",
                   "video_source_fallback_min_candidates_input", int),
         )
-    st.markdown(
-        f"{tr('NASA Usage Terms Note')} [{tr('NASA Usage Guidelines')}]({nasa.USAGE_GUIDELINES_URL})"
-    )
-
-
-def _pixabay_fallback_value(checked):
-    """NASA 设置里的复选框：勾选时以 Pixabay 作后备素材源，否则不用后备。"""
-    return "pixabay" if checked else ""
 
 
 def _render_material_provider_settings(provider):
     app_settings = config.snapshot_config_with_pending(config.app)
     if provider == "nasa":
         _render_nasa_settings(app_settings)
+        _render_fallback_chain_settings(provider, app_settings)
     elif provider in VIDEO_SOURCE_GROUPS["stock_video"]:
         labels = {
             "pexels": "Pexels API Key",
@@ -3850,6 +3891,8 @@ def _render_material_provider_settings(provider):
             args=(config_key, f"{config_key}_input"),
         )
         _save_material_api_keys(config_key, value)
+        if provider in source_chain.STOCK_SOURCES:
+            _render_fallback_chain_settings(provider, app_settings)
     elif provider == "metaso_minimax":
         st.markdown(f"**{tr('Metaso MiniMax H3')}**")
         metaso_api_key = st.text_input(
@@ -6371,12 +6414,11 @@ def _render_video_settings(panel, params):
             params.nasa_credit_overlay = params.video_source == "nasa" and bool(
                 config.snapshot_config_with_pending(config.app).get("nasa_credit_overlay", False)
             )
-            # Pixabay 后备同样在 NASA 设置里开关，只用于 NASA 素材源。
+            # 后备素材源链在素材设置窗口里编辑，只用于库存素材源；链里的主素材源去掉。
             params.video_source_fallback = (
-                "pixabay"
-                if params.video_source == "nasa"
-                and config.snapshot_config_with_pending(config.app).get("video_source_fallback", "")
-                == "pixabay"
+                source_chain.compact(_configured_fallback_chain(
+                    config.snapshot_config_with_pending(config.app), params.video_source))
+                if params.video_source in source_chain.STOCK_SOURCES
                 else ""
             )
 
