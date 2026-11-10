@@ -284,6 +284,9 @@ def _get_json(url: str, params: dict | None = None) -> Any:
     content_type = str((getattr(response, "headers", {}) or {}).get("content-type", "")) or "unknown"
     if status == 429:
         logger.error("nasa API rate limit exceeded: status=429")
+        from app.services import source_chain
+
+        source_chain.note_rate_limited("nasa")
         return None
     if status >= 400:
         logger.error(f"nasa request failed: status={status}, content_type={content_type}")
@@ -1045,43 +1048,64 @@ def _credited_sources(material_sources: Any) -> list[dict]:
     return sources
 
 
+# 需要署名的素材源：NASA 图片按其使用指南署名；Coverr 的免费（Demo）API 应用必须
+# 署名 Coverr 和作者并链接 coverr.co（https://coverr.co/license，"Using the API →
+# Attribution"；Pro 及以上不需要，这里无法知道 API 等级，因此一律署名）。Pixabay 和
+# Pexels 的许可不要求署名：它们只在已有 credits.txt 时列出，Pexels 按其 API 指南写
+# "Video by … on Pexels"（https://www.pexels.com/api/documentation/）。
+ATTRIBUTION_REQUIRED_SOURCES = frozenset({"nasa", "coverr"})
+COVERR_SITE = "https://coverr.co"
+
+
 def _credit_line(record: dict) -> str:
-    """一条署名：NASA 图片用署名；Pixabay 等不要求署名的素材源写作者名（没有时写素材源）。"""
+    """一条署名：NASA 图片用署名；Coverr 和 Pexels 写 "Video by 作者 on 素材源"；Pixabay 写作者名。"""
     provider = str(record.get("provider") or "").lower()
     label = CREDIT_SOURCE_LABELS[provider]
     if provider == "nasa":
         return f"[{label}] {record.get('credit') or DEFAULT_CREDIT}"
     creator = record.get("creator") if isinstance(record.get("creator"), dict) else {}
-    return f"[{label}] {str(creator.get('name') or '').strip() or label}"
+    name = str(creator.get("name") or "").strip()
+    if provider in {"coverr", "pexels"}:
+        return f"[{label}] Video by {name} on {label}" if name else f"[{label}] Video on {label}"
+    return f"[{label}] {name or label}"
 
 
 def credits_text(material_sources: Any) -> str:
     """
-    credits.txt 的内容；没有 NASA 图片时为空。
+    credits.txt 的内容；没有需要署名的素材（NASA 图片、Coverr 视频）时为空。
 
-    每行写明素材源（[NASA]、[Pixabay]…）和署名，下一行是素材页面。有后备素材源时
-    它的视频也列出，结尾的来源行加上该素材源。
+    每行写明素材源（[NASA]、[Pixabay]、[Coverr]…）和署名，下一行是素材页面；Coverr
+    视频没有页面时链接 coverr.co。结尾的来源行列出用到的素材源，用到 NASA 图片时
+    另加 NASA 的免责声明。
     """
-    if not used_sources(material_sources):
+    credited = _credited_sources(material_sources)
+    providers = {str(record.get("provider") or "").lower() for record in credited}
+    if not providers & ATTRIBUTION_REQUIRED_SOURCES:
         return ""
     lines = [CREDITS_HEADING, "=" * len(CREDITS_HEADING), ""]
     other_labels = []
-    for index, record in enumerate(_credited_sources(material_sources), start=1):
+    for index, record in enumerate(credited, start=1):
         provider = str(record.get("provider") or "").lower()
         asset_id = str(record.get("asset_id") or "")
         page = record.get("source_page") or (
-            DETAILS_PAGE.format(nasa_id=quote(asset_id)) if asset_id and provider == "nasa" else ""
+            DETAILS_PAGE.format(nasa_id=quote(asset_id)) if asset_id and provider == "nasa"
+            else COVERR_SITE if provider == "coverr" else ""
         )
         lines.append(f"{index}. {_credit_line(record)}")
         if page:
             lines.append(f"   {page}")
         if provider != "nasa" and CREDIT_SOURCE_LABELS[provider] not in other_labels:
             other_labels.append(CREDIT_SOURCE_LABELS[provider])
-    footer = CREDITS_FOOTER
-    if other_labels:
-        others = ", ".join(other_labels)
-        footer = f"Görüntüler: NASA ve ortakları, {others} / Images: NASA and partners, {others}"
-    lines += ["", footer, CREDITS_DISCLAIMER, ""]
+    others = ", ".join(other_labels)
+    if "nasa" in providers:
+        footer = CREDITS_FOOTER if not others else (
+            f"Görüntüler: NASA ve ortakları, {others} / Images: NASA and partners, {others}"
+        )
+        lines += ["", footer, CREDITS_DISCLAIMER, ""]
+    else:
+        lines += ["", f"Görüntüler: {others} / Footage: {others}", ""]
+    if "coverr" in providers:
+        lines.insert(-1, f"Coverr: {COVERR_SITE}")
     return "\n".join(lines)
 
 

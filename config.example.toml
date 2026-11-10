@@ -149,23 +149,28 @@ nasa_face_filter = true
 # 结尾 2 秒显示图片来源；任务目录中的 credits.txt 不受此开关影响。
 nasa_credit_overlay = false
 
-# Fallback stock source per search term: "pexels", "pixabay", "coverr" or "nasa"
-# (another one than video_source, which must be a stock source too); empty means
-# no fallback. A term whose video_source candidates, after filtering, include
-# fewer than video_source_fallback_min_candidates with a tag relevance of at
+# Fallback stock sources per search term, tried in order after video_source
+# (which must be a stock source too): one of "pexels", "pixabay", "coverr" or
+# "nasa", or an ordered list such as ["pixabay", "coverr"]; empty means no
+# fallback. A repeated source or the primary source in the list is an error.
+# A source is suitable for a term when, after filtering, it has at least
+# video_source_fallback_min_candidates candidates with a tag relevance of at
 # least video_source_fallback_min_relevance (the share of the term's words found
-# in a candidate's tags, 0-1) is searched on the fallback source, and all of its
-# clips then come from the fallback when it has more qualifying candidates; the
-# two sources are never mixed within one term. With material_tag_relevance =
-# "off", or for sources without tags (Pexels, Coverr), only the number of
-# candidates counts. The fallback uses its own search cache and the same crop,
-# tag relevance and AI settings, and is skipped with a warning when its API key
-# is missing. The WebUI sets it in the NASA settings ("pixabay"); the CLI and the
-# API take --video-source-fallback / video_source_fallback per task instead.
+# in a candidate's tags, 0-1). The first suitable source is used and later
+# sources get no request; when none is suitable, the one with the most suitable
+# candidates is used (ties: the earlier one), never one without candidates. The
+# sources are never mixed within one term. Pexels has no tags: as a fallback it
+# is only asked when no tagged source has a single suitable candidate. With
+# material_tag_relevance = "off" only the number of candidates counts. A source
+# without an API key is skipped with one warning per task, one answering HTTP
+# 429 for the rest of the task. Each source uses its own search cache (Coverr's
+# signed links are not cached) and the same crop, tag relevance and AI settings.
+# The WebUI sets the chain in the material settings; the CLI and the API take
+# --video-source-fallback / video_source_fallback per task instead.
 # The defaults were measured on 54 space terms (NASA, Pixabay fallback): with 1
 # candidate 17 terms switched (9 better, 3 worse first clips), with 2 it was 24
 # (9 worse), because a single matching NASA image is usually the right one.
-# 某个关键词在主素材源里合格候选太少时，改到后备素材源搜索；同一关键词不混用两个来源。
+# 某个关键词在前一个素材源里合格候选太少时，按顺序到下一个后备素材源搜索；同一关键词不混用来源。
 video_source_fallback = ""
 video_source_fallback_min_relevance = 0.5
 video_source_fallback_min_candidates = 1
@@ -348,13 +353,15 @@ crop_materials_to_aspect = false
 # candidates. Tag relevance comes before orientation (crop_materials_to_aspect)
 # and provider order. In the default pooled mode each candidate is scored
 # against the term that found it.
-# Pexels and Coverr return no tags, so the setting has no effect for them.
+# Coverr results are scored by their tags and title (as NASA's by keywords and
+# title). Pexels returns no tags, so the setting has no effect for it.
 # Accepted values: "off", "rank", "strict".
 # 默认关闭；rank 按标签与搜索词的匹配程度排序，strict 另外剔除未完全匹配的素材。
 material_tag_relevance = "off"
 
-# Skip Pixabay footage that Pixabay flags as AI-generated (isAiGenerated). Other
-# sources provide no such flag, so the setting has no effect for them.
+# Skip Pixabay footage that Pixabay flags as AI-generated (isAiGenerated), and
+# Coverr footage flagged with is_ai_generated. Other sources provide no such
+# flag, so the setting has no effect for them.
 # 默认关闭；开启后跳过 Pixabay 标记为 AI 生成的素材。
 exclude_ai_generated_materials = false
 

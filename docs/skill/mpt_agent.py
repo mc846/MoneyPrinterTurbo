@@ -400,6 +400,21 @@ def has_cli_option(cli_args: list[str], option: str) -> bool:
     return any(item == option or item.startswith(f"{option}=") for item in cli_args)
 
 
+def _last_cli_values(cli_args: list[str], option: str) -> list[str]:
+    """The values of the last ``option`` taking several (``--opt a b`` or ``--opt=a,b``)."""
+    values: list[str] = []
+    for index, item in enumerate(cli_args):
+        if item == option:
+            values = []
+            for value in cli_args[index + 1:]:
+                if value.startswith("-"):
+                    break
+                values.append(value)
+        elif item.startswith(f"{option}="):
+            values = [item.split("=", 1)[1]]
+    return [part.strip() for value in values for part in value.split(",") if part.strip()]
+
+
 def _last_cli_value(cli_args: list[str], option: str) -> str:
     value = ""
     for index, item in enumerate(cli_args):
@@ -539,18 +554,25 @@ def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[st
         value = _plain_config_value(text, f"{source}_api_keys")
         if not _has_configured_value(value):
             missing.append(f"{source}_api_keys")
-    fallback = _last_cli_value(cli_args, "--video-source-fallback").lower()
-    if fallback and fallback != "none":
-        if fallback not in FALLBACK_SOURCES or source not in FALLBACK_SOURCES or fallback == source:
-            raise SkillError(
-                "--video-source-fallback must be another stock source ("
-                + ", ".join(sorted(FALLBACK_SOURCES)) + f") than --video-source {source}"
-            )
-        # 后备素材源缺少 Key 时运行时会禁用后备并继续，这里只提示，不索取 Key。
-        if fallback != "nasa" and not _has_configured_value(
-            _plain_config_value(text, f"{fallback}_api_keys")
+    # --video-source-fallback takes one or more stock sources, tried in order.
+    chain = [value.lower() for value in _last_cli_values(cli_args, "--video-source-fallback")]
+    if chain and chain != ["none"]:
+        if (
+            any(fallback not in FALLBACK_SOURCES for fallback in chain)
+            or source not in FALLBACK_SOURCES
+            or source in chain
+            or len(set(chain)) != len(chain)
         ):
-            log(f"{fallback}_api_keys is not set; the {fallback} fallback will be skipped")
+            raise SkillError(
+                "--video-source-fallback must list other stock sources ("
+                + ", ".join(sorted(FALLBACK_SOURCES)) + f"), each once, than --video-source {source}"
+            )
+        # 后备素材源缺少 Key 时运行时会跳过它并继续，这里只提示，不索取 Key。
+        for fallback in chain:
+            if fallback != "nasa" and not _has_configured_value(
+                _plain_config_value(text, f"{fallback}_api_keys")
+            ):
+                log(f"{fallback}_api_keys is not set; the {fallback} fallback will be skipped")
     return provider, missing
 
 

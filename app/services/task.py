@@ -37,6 +37,7 @@ from app.services import (
     nasa,
     ofox,
     sonilo,
+    source_chain,
     subtitle,
     task_artifacts,
     twelvelabs,
@@ -112,14 +113,24 @@ _SUPPORTED_VIDEO_SOURCES = frozenset({
 })
 
 
-def _video_source_fallback(params) -> str:
-    """任务的后备库存素材源（video_source_fallback）；旧任务记录和其它请求没有该字段。"""
-    return str(getattr(params, "video_source_fallback", "") or "").strip().lower()
+def _video_source_fallback(params) -> list[str]:
+    """任务的后备库存素材源链（video_source_fallback，一个或多个，按顺序）；旧任务记录和
+    其它请求没有该字段。无效的写法在预检里报错（_preflight），这里只解析。"""
+    try:
+        return source_chain.parse(getattr(params, "video_source_fallback", "") or "")
+    except source_chain.SourceChainError:
+        return []
 
 
 def _may_use_nasa(params) -> bool:
     """主素材源或后备素材源是 NASA：文案署名规则、credits.txt 和屏幕署名都要考虑 NASA 图片。"""
-    return "nasa" in (params.video_source, _video_source_fallback(params))
+    return "nasa" in (params.video_source, *_video_source_fallback(params))
+
+
+def _may_need_credits(params) -> bool:
+    """可能用到需要署名的素材（NASA 图片、Coverr 视频）：素材下载完要写 credits.txt。"""
+    sources = (params.video_source, *_video_source_fallback(params))
+    return any(source in nasa.ATTRIBUTION_REQUIRED_SOURCES for source in sources)
 
 
 def _get_video_music_prompt(params: VideoParams) -> str:
@@ -872,7 +883,7 @@ def get_video_materials(
         if params.exclude_ai_generated_materials:
             generation_options["exclude_ai_generated"] = True
         if _video_source_fallback(params):
-            generation_options["fallback_source"] = _video_source_fallback(params)
+            generation_options["fallback_source"] = list(_video_source_fallback(params))
         # 顺序匹配模式只在用户显式开启时生效。这里强制素材下载按关键词顺序
         # 轮询，避免某个早期关键词下载太多素材，把后续脚本主题挤出最终时间线。
         try:
@@ -1048,7 +1059,7 @@ def _load_material_sources(task_id: str) -> list:
 
 
 def _write_material_credits(task_id: str) -> None:
-    """用到 NASA 图片时在任务目录写入 credits.txt（署名和图片页面）。"""
+    """用到 NASA 图片或 Coverr 视频时在任务目录写入 credits.txt（署名和素材页面）。"""
     credits_path = nasa.write_credits_file(utils.task_dir(task_id), _load_material_sources(task_id))
     if credits_path:
         logger.info(f"wrote material credits: {credits_path}")
@@ -1147,7 +1158,7 @@ def generate_final_videos(
         # 跨方向裁剪接受的素材必须居中裁剪，即使用户选择了 contain 也不能留黑边。
         if params.crop_materials_to_aspect and (
             params.video_source in material.CROP_TO_ASPECT_SOURCES
-            or _video_source_fallback(params) in material.CROP_TO_ASPECT_SOURCES
+            or any(source in material.CROP_TO_ASPECT_SOURCES for source in _video_source_fallback(params))
         ):
             combine_options["crop_cross_orientation_clips"] = True
         video.combine_videos(
@@ -1671,17 +1682,12 @@ def _run_pipeline(
         return _mark_task_failed(
             task_id, "preflight", f"unsupported video source: {params.video_source!r}"
         )
-    fallback_source = _video_source_fallback(params)
-    if (
-        stop_at in {"materials", "video"}
-        and fallback_source not in {"", "none", "off"}
-        and fallback_source not in material.FALLBACK_VIDEO_SOURCES
-    ):
-        return _mark_task_failed(
-            task_id, "preflight",
-            f"unsupported video source fallback: {fallback_source!r}; choose one of "
-            + ", ".join(material.FALLBACK_VIDEO_SOURCES),
-        )
+    fallback_value = getattr(params, "video_source_fallback", "") or ""
+    if stop_at in {"materials", "video"} and source_chain.is_set(fallback_value):
+        try:
+            source_chain.validate(params.video_source, fallback_value)
+        except source_chain.SourceChainError as exc:
+            return _mark_task_failed(task_id, "preflight", f"unsupported video source fallback: {exc}")
 
     if (
         stop_at in {"materials", "video"}
@@ -1971,7 +1977,7 @@ def _run_pipeline(
             "materials",
             "failed to prepare video materials",
         )
-    if _may_use_nasa(params):
+    if _may_need_credits(params):
         _write_material_credits(task_id)
 
     if stop_at == "materials":

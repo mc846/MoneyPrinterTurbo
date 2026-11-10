@@ -401,14 +401,18 @@ Batch manifests:
     material_group.add_argument(
         "--video-source-fallback",
         default=None,
-        choices=(*_FALLBACK_VIDEO_SOURCES, "none"),
+        nargs="+",
+        type=_fallback_source_value,
+        metavar="SOURCE",
         help=(
-            "second stock source for search terms whose --video-source candidates are "
-            "too few after filtering (thresholds: video_source_fallback_min_relevance and "
-            "video_source_fallback_min_candidates in config.toml); each term takes all "
-            "of its clips from one source; the fallback uses the same crop, tag relevance "
-            "and AI settings and is skipped with a warning when its API key is missing "
-            "(default: none)"
+            "stock sources tried in order (" + ", ".join(_FALLBACK_VIDEO_SOURCES) + ", or none) "
+            "for search terms whose --video-source candidates are too few after filtering "
+            "(thresholds: video_source_fallback_min_relevance and "
+            "video_source_fallback_min_candidates in config.toml), e.g. "
+            "--video-source-fallback pixabay coverr; the first source with enough suitable "
+            "candidates is used and later sources are not searched; each term takes all "
+            "of its clips from one source; a source without an API key is skipped with a "
+            "warning (default: none)"
         ),
     )
     material_group.add_argument(
@@ -1111,9 +1115,7 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         if value is not None:
             params_kwargs[name] = value
     if args.video_source_fallback is not None:
-        params_kwargs["video_source_fallback"] = (
-            "" if args.video_source_fallback == "none" else args.video_source_fallback
-        )
+        params_kwargs["video_source_fallback"] = _fallback_setting_from_args(args.video_source_fallback)
 
     # 没有显式传入命令行参数时，使用 WebUI 保存的值。只补充上面尚未由命令行
     # 设置的字段；若保存值缺失，则继续沿用 VideoParams 的默认值。
@@ -1193,22 +1195,32 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
     return VideoParams(**params_kwargs)
 
 
+def _fallback_source_value(text: str) -> list[str]:
+    """argparse type of --video-source-fallback: one name or comma-separated names."""
+    names = [part.strip().lower() for part in str(text).split(",") if part.strip()]
+    unknown = [name for name in names if name not in (*_FALLBACK_VIDEO_SOURCES, "none")]
+    if not names or unknown:
+        raise argparse.ArgumentTypeError(
+            f"invalid choice: {text!r} (choose from {', '.join((*_FALLBACK_VIDEO_SOURCES, 'none'))})"
+        )
+    return names
+
+
+def _fallback_setting_from_args(values: list) -> str | list[str]:
+    """The flag's values as the setting: "" for none, a name, or an ordered list."""
+    names = [name for value in values for name in (value if isinstance(value, list) else [value])]
+    if names and all(name == "none" for name in names):
+        return ""
+    return names[0] if len(names) == 1 else names
+
+
 def _validate_video_source_fallback(params: VideoParams) -> None:
-    """后备素材源只能是另一个库存素材源，主素材源也必须是库存素材源。"""
-    fallback = str(params.video_source_fallback or "").strip().lower()
-    if fallback in {"", "none"}:
+    """后备素材源链：另外的库存素材源，不重复，不含主素材源；主素材源也必须是库存素材源。"""
+    from app.services import source_chain
+
+    if not source_chain.is_set(params.video_source_fallback):
         return
-    if fallback not in _FALLBACK_VIDEO_SOURCES:
-        raise ValueError(
-            "video_source_fallback must be one of: " + ", ".join(_FALLBACK_VIDEO_SOURCES)
-        )
-    if params.video_source not in _FALLBACK_VIDEO_SOURCES:
-        raise ValueError(
-            "video_source_fallback needs a stock video_source: "
-            + ", ".join(_FALLBACK_VIDEO_SOURCES)
-        )
-    if fallback == params.video_source:
-        raise ValueError("video_source_fallback must differ from video_source")
+    source_chain.validate(params.video_source, params.video_source_fallback)
 
 
 def _load_batch_manifest(raw_path: str) -> tuple[str, list[dict[str, Any]]]:

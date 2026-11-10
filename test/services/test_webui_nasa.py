@@ -18,7 +18,8 @@ NASA_KEYS = (
     "NASA Images (no key)", "NASA Source Info", "NASA Face Filter", "NASA Face Filter Help",
     "NASA Face Filter Missing Extra", "NASA Face Filter Unavailable", "NASA Credit Overlay",
     "NASA Credit Overlay Help", "NASA Usage Terms Note", "NASA Usage Guidelines",
-    "NASA Fallback Pixabay", "NASA Fallback Pixabay Help", "NASA Fallback Missing Key",
+    "Fallback Chain", "Fallback Chain Sources", "Fallback Chain Help", "Fallback Chain Order",
+    "Fallback Chain Missing Key", "Fallback Chain Untagged", "Fallback Chain Primary Removed",
     "Fallback Min Relevance", "Fallback Min Relevance Help", "Fallback Min Candidates",
     "Fallback Min Candidates Help",
 )
@@ -139,15 +140,16 @@ def test_nasa_settings_switch_on_the_pixabay_fallback_and_its_thresholds(pixabay
         app.session_state["settings_material_providers"] = {"stock_video": "nasa"}
         app.run()
 
-        assert app.checkbox(key="video_source_fallback_input").value is False
+        chain = app.multiselect(key="video_source_fallback_input")
+        assert chain.value == [] and "NASA" not in chain.options  # the primary is not offered
         assert not any("fallback_min" in str(item.key) for item in app.number_input)
 
-        app.checkbox(key="video_source_fallback_input").check().run()
+        chain.set_value(["Pixabay"]).run()
         assert [str(item.value) for item in app.exception] == []
         assert config.snapshot_config_with_pending(config.app)["video_source_fallback"] == "pixabay"
         assert app.number_input(key="video_source_fallback_min_relevance_input").value == 0.5
         assert app.number_input(key="video_source_fallback_min_candidates_input").value == 1
-        missing_key = any("No Pixabay API key" in str(item.value) for item in app.warning)
+        missing_key = any("Pixabay has no API key" in str(item.value) for item in app.warning)
         assert missing_key is (not pixabay_keys)
 
         app.number_input(key="video_source_fallback_min_candidates_input").set_value(2).run()
@@ -156,7 +158,7 @@ def test_nasa_settings_switch_on_the_pixabay_fallback_and_its_thresholds(pixabay
         assert pending["video_source_fallback_min_candidates"] == 2
         assert pending["video_source_fallback_min_relevance"] == 0.75
 
-        app.checkbox(key="video_source_fallback_input").uncheck().run()
+        app.multiselect(key="video_source_fallback_input").set_value([]).run()
         assert config.snapshot_config_with_pending(config.app)["video_source_fallback"] == ""
 
 

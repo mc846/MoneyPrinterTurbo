@@ -460,12 +460,13 @@ def test_task_passes_the_fallback_source_only_when_set():
                                                 video_source_fallback="pixabay"))
     without = _materials_call(VideoParams(video_subject="t", video_source="nasa"))
 
-    assert with_fallback["fallback_source"] == "pixabay"
+    # The task passes the chain as a list (one source or several, in order).
+    assert with_fallback["fallback_source"] == ["pixabay"]
     assert "fallback_source" not in without
 
 
 def test_task_helpers_tolerate_params_without_the_field():
-    assert tm._video_source_fallback(SimpleNamespace(video_source="nasa")) == ""
+    assert tm._video_source_fallback(SimpleNamespace(video_source="nasa")) == []
     assert tm._may_use_nasa(VideoParams(video_subject="t", video_source="pixabay", video_source_fallback="nasa"))
     assert not tm._may_use_nasa(VideoParams(video_subject="t", video_source="pixabay"))
 
