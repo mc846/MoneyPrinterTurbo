@@ -134,11 +134,13 @@ def has_api_key(config_app: dict, source: str) -> bool:
     return False
 
 
-def available(primary: str, value: Any, config_app: dict) -> list[str]:
+def available(primary: str, value: Any, config_app: dict,
+              has_key: Callable[[str], bool] | None = None) -> list[str]:
     """The task's chain without sources that have no API key (one warning each).
 
     An invalid chain is ignored with a warning, as the single fallback was: the task
-    still runs on its primary source (the CLI, API and presets reject it earlier)."""
+    still runs on its primary source (the CLI, API and presets reject it earlier).
+    ``has_key(source)`` overrides the key check (material passes its own)."""
     try:
         chain = validate(primary, value)
     except SourceChainError as exc:
@@ -146,7 +148,7 @@ def available(primary: str, value: Any, config_app: dict) -> list[str]:
         return []
     usable = []
     for source in chain:
-        if has_api_key(config_app, source):
+        if (has_key(source) if has_key is not None else has_api_key(config_app, source)):
             usable.append(source)
         else:
             logger.warning(
@@ -242,8 +244,12 @@ def chain_search(
     relevance_on: bool,
     state: ChainState | None = None,
     on_decision: Callable[[str, dict], None] | None = None,
+    unavailable: Sequence[str] = (),
 ) -> Callable[..., list]:
-    """A search function trying ``links`` (the primary first) per term by the rules above."""
+    """A search function trying ``links`` (the primary first) per term by the rules above.
+
+    ``unavailable``: chain sources left out for the task (no API key); each decision
+    names them so the record shows the whole chain."""
     state = state or ChainState()
     links = list(links)
 
@@ -305,6 +311,7 @@ def chain_search(
             "chosen": chosen,
             "reason": reason,
             "chain": [link.source for link in links],
+            "unavailable": [{"source": source, "reason": "no_api_key"} for source in unavailable],
             "min_relevance": min_relevance,
             "min_candidates": min_candidates,
         }

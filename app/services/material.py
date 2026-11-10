@@ -668,7 +668,10 @@ def resolve_fallback_chain(source: str, fallback_source) -> list[str]:
     与主素材源相同、主素材源不是库存素材源）忽略并警告；缺少 API Key 的素材源
     跳过并警告一次（每个任务一次，而不是每个关键词）。见 ``source_chain.available``。
     """
-    return source_chain.available(source, fallback_source, config.app)
+    return source_chain.available(
+        source, fallback_source, config.app,
+        has_key=lambda name: name not in _FALLBACK_API_KEYS or _has_api_key(_FALLBACK_API_KEYS[name]),
+    )
 
 
 def resolve_fallback_source(source: str, fallback_source: str | None) -> str:
@@ -814,7 +817,8 @@ def _count_for_chain(search_term, items, tag_relevance, min_relevance, primary: 
     return _suitable_count(search_term, items, tag_relevance, min_relevance)
 
 
-def _chain_search_function(links: list, relevance_on: bool) -> Callable[..., List[MaterialInfo]]:
+def _chain_search_function(links: list, relevance_on: bool,
+                           unavailable: Sequence[str] = ()) -> Callable[..., List[MaterialInfo]]:
     min_relevance, min_candidates = fallback_thresholds()
     return source_chain.chain_search(
         links,
@@ -823,6 +827,7 @@ def _chain_search_function(links: list, relevance_on: bool) -> Callable[..., Lis
         count_suitable=_count_for_chain,
         relevance_on=relevance_on,
         on_decision=_record_source_decision,
+        unavailable=unavailable,
     )
 
 
@@ -834,13 +839,15 @@ def chain_source_search(
     tag_relevance: MaterialTagRelevance,
     exclude_ai_generated: bool,
     anchors: Sequence[str],
+    unavailable: Sequence[str] = (),
 ) -> tuple[Callable[..., List[MaterialInfo]], dict[str, Any]]:
     """
     主素材源加后备素材源链的（关键词搜索函数, 合并的排序选项）。
 
     每个素材源用自己的缓存和自己支持的裁剪、相关度、AI 排除设置（``_stock_source_search``）；
     每个关键词的候选只来自一个素材源（``source_chain.chain_search``）。合并候选池里
-    多个素材源的候选一起排序，任一素材源支持的选项都要生效。
+    多个素材源的候选一起排序，任一素材源支持的选项都要生效。``unavailable`` 是因缺少
+    API Key 被跳过的素材源，写进每个判定。
     """
     options = {
         "crop_to_aspect": crop_to_aspect, "tag_relevance": tag_relevance,
@@ -849,7 +856,7 @@ def chain_source_search(
     built = [_stock_source_search(name, **options) for name in (source, *chain)]
     links = _chain_links(source, chain, [(search, order["tag_relevance"]) for search, order in built])
     relevance_on = MaterialTagRelevance(tag_relevance or MaterialTagRelevance.off) != MaterialTagRelevance.off
-    search_videos = _chain_search_function(links, relevance_on)
+    search_videos = _chain_search_function(links, relevance_on, unavailable)
     return search_videos, source_chain.merged_options([order for _search, order in built], anchors)
 
 
@@ -3058,7 +3065,11 @@ def download_videos(
     search_videos, order_options = _stock_source_search(source, **source_options)
     fallback_chain = resolve_fallback_chain(source, fallback_source)
     if fallback_chain:
-        search_videos, order_options = chain_source_search(source, fallback_chain, **source_options)
+        # 因缺少 API Key 被跳过的素材源也写进每个判定（materials.json 能看到整条链）。
+        unavailable = [name for name in source_chain.parse_lenient(fallback_source) if name not in fallback_chain]
+        search_videos, order_options = chain_source_search(
+            source, fallback_chain, unavailable=unavailable, **source_options
+        )
     # 后备素材源（可能有多个）的候选和主素材源的候选按候选自己的素材源分别处理。
     fallback_source = fallback_chain
     crop_enabled = order_options["crop_to_aspect"]
