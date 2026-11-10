@@ -202,6 +202,19 @@ def crop_axes(path: str, aspect: VideoAspect) -> tuple[bool, bool]:
     return crop_width < width, crop_height < height
 
 
+def _describe(tr, op: scene_edits.SceneOp) -> str:
+    """A pending scene operation in the UI language (SceneOp.describe is the English one)."""
+    if op.op == scene_edits.REMOVE:
+        return tr("revision.op.remove").format(scene=op.scene)
+    if op.op == scene_edits.CROP:
+        return tr("revision.op.crop").format(scene=op.scene, x=f"{op.position[0]:.2f}", y=f"{op.position[1]:.2f}")
+    if op.candidate:
+        return tr("revision.op.replace_candidate").format(scene=op.scene, candidate=op.candidate)
+    if op.search:
+        return tr("revision.op.replace_search").format(scene=op.scene, words=op.search)
+    return tr("revision.op.replace_file").format(scene=op.scene, name=os.path.basename(op.path))
+
+
 FILTER_NAMES = ("text", "face")
 
 
@@ -348,7 +361,7 @@ def _render_scenes(tr, task_id: str, base: dict, busy: bool) -> None:
                 if row["id"] in removed:
                     st.caption(f":red-badge[{tr('revision.scene.removed')}]")
                 elif row["id"] in changed:
-                    st.caption(f":orange-badge[{changed[row['id']].describe()}]")
+                    st.caption(f":orange-badge[{_describe(tr, changed[row['id']])}]")
                 buttons = st.columns(3)
                 opened = {"task": task_id, "base": base["revision"], "scene": row["id"]}
                 if buttons[0].button(tr("revision.scene.replace"), key=f"revision_replace_btn_{row['id']}",
@@ -383,7 +396,7 @@ def _render_pending(tr, task_id: str, base_name: str) -> None:
     st.markdown(f"**{tr('revision.pending')}**")
     for index, op in enumerate(ops):
         columns = st.columns([6, 1], vertical_alignment="center")
-        columns[0].markdown(f"- {op.describe()}")
+        columns[0].markdown(f"- {_describe(tr, op)}")
         if columns[1].button(tr("revision.pending.undo"), key=f"revision_undo_{index}_{op.scene}_{op.op}"):
             _set_ops(task_id, base_name, [other for other in ops if other != op])
             st.rerun()
@@ -446,7 +459,9 @@ def _summary(tr, record: dict) -> str:
         if name == "script":
             parts.append(tr("revision.change.script").format(before=change.get("from_words"), after=change.get("to_words")))
         elif name == "scenes":
-            parts.append(tr("revision.change.scenes").format(changes="; ".join(change)))
+            # revision.json keeps the English descriptions; the page names each scene and what was done.
+            done = [f"{c['scene']} {tr('revision.op.name.' + c['op'])}" for c in record.get("scene_changes") or []]
+            parts.append(tr("revision.change.scenes").format(changes=", ".join(done) or "; ".join(change)))
         else:
             parts.append(f"{name}: {change.get('from')} → {change.get('to')}")
     return " · ".join(parts) or tr("revision.change.none")
@@ -486,8 +501,9 @@ def _render_history(tr, task_id: str, records: list[dict], busy: bool) -> None:
                         else change.get("from")
                     after = (change.get("to") or {}).get("asset_id") if isinstance(change.get("to"), dict) \
                         else change.get("to")
-                    st.caption(tr("revision.scene_change").format(scene=change["scene"], op=change["op"],
-                                                                  before=before, after=after or "—"))
+                    st.caption(tr("revision.scene_change").format(
+                        scene=change["scene"], op=tr(f"revision.op.name.{change['op']}"), before=before,
+                        after=after or "—"))
                 clips = record.get("clips") or {}
                 if clips:
                     st.caption(tr("revision.clips").format(rendered=len(clips.get("rendered") or []),

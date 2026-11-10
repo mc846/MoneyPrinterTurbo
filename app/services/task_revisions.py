@@ -373,11 +373,17 @@ def _candidate_item(candidate: dict, search_term: str) -> MaterialInfo | None:
                         source_info=info)
 
 
-def _candidates(manifest: dict, materials: dict) -> tuple[list[timing.Candidate], dict]:
-    """Unused candidates that passed the filters, in rank order, keyed for the planner."""
+def _candidates(manifest: dict, materials: dict, blocked_terms=()) -> tuple[list[timing.Candidate], dict]:
+    """Unused candidates that passed the filters, in rank order, keyed for the planner.
+
+    Not added on their own: a scene search's results (``terms[]`` with ``scene``; they are
+    a choice for the user) and the candidates of ``blocked_terms``, terms whose scene the
+    user replaced with something from outside the term (scene_edits)."""
     used = {(m.get("provider"), str(m.get("asset_id"))) for m in materials.values()}
     found, entries = [], {}
     for term in manifest.get("terms") or []:
+        if term.get("scene") or term.get("index") in blocked_terms:
+            continue
         for candidate in term.get("candidates") or []:
             key = (candidate.get("provider"), str(candidate.get("asset_id")))
             if candidate.get("status") in ("selected", "rejected", "failed") or key in used:
@@ -693,7 +699,11 @@ def _apply_scene_ops(task_id: str, name: str, ops: list, records: list[dict], ma
         changes.append({"scene": op.scene, "op": "remove", "from": _material_summary(materials[record["material"]])})
     for op in [o for o in ops if o.op == scene_edits.REPLACE]:
         record = by_id[op.scene]
-        change = {"scene": op.scene, "op": "replace", "from": _material_summary(materials[record["material"]])}
+        change = {"scene": op.scene, "op": "replace", "from": _material_summary(materials[record["material"]]),
+                  "term_index": record.get("term_index")}
+        # A replacement from outside the scene's term (a search, a file, another term's
+        # candidate) turns the term down: its other candidates are not added on their own.
+        change["blocks_term"] = True
         if op.path:
             added, file_warnings = scene_edits.add_local_file(
                 task_id, name, record, op.path, aspect, params.video_clip_duration, params.image_motion)
@@ -712,6 +722,7 @@ def _apply_scene_ops(task_id: str, name: str, ops: list, records: list[dict], ma
                 change["search"] = op.search
             choice = next(c for c in scene_edits.candidate_choices(manifest, materials, record, list(by_id.values()))
                           if c["key"] == key)
+            change["blocks_term"] = choice.get("term_index") != record.get("term_index")
             identity = (choice.get("provider"), str(choice.get("asset_id")))
             added = next((m for m in materials.values()
                           if (m.get("provider"), str(m.get("asset_id"))) == identity), None)
@@ -837,11 +848,14 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
         progress("scenes")
         scene_changes, edit_warnings = [], []
         excluded = set(parent.get("excluded") or [])
+        blocked_terms = set(parent.get("blocked_terms") or [])
         if ops:
             scene_records, scene_changes, edit_warnings, downloads = _apply_scene_ops(
                 task_id, name, ops, scene_records, manifest, materials, params)
             network["downloads"] += downloads
             excluded |= {change["scene"] for change in scene_changes if change["op"] == "remove"}
+            blocked_terms |= {change["term_index"] for change in scene_changes
+                              if change.get("blocks_term") and change.get("term_index") is not None}
             manifest, materials = _materials(task_id)
         crops = {record["id"]: tuple(record["crop"]) for record in scene_records if record.get("crop")}
         statuses = {record["id"]: record.get("status") for record in scene_records}
@@ -855,7 +869,7 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
         for record in ancestors.values():
             if record.get("crop") and record["id"] not in present:
                 crops[record["id"]] = tuple(record["crop"])
-        candidates, entries = _candidates(manifest, materials)
+        candidates, entries = _candidates(manifest, materials, blocked_terms)
         fetcher = _Fetcher(task_id, name, params, entries)
         plan = timing.plan(base_scenes, audio_duration, float(params.video_clip_duration),
                            reserve=reserve, candidates=candidates, fetch=fetcher)
@@ -963,6 +977,7 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
             ],
             "scene_changes": scene_changes,
             "excluded": sorted(excluded),
+            "blocked_terms": sorted(blocked_terms),
             "credits": _file_entry(work / "credits.txt", work) if (work / "credits.txt").is_file() else None,
             "performance": resolved_performance,
             "clips": {"rendered": rendered, "reused": reused},
