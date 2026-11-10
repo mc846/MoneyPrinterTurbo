@@ -204,6 +204,17 @@ def test_both_engines_draw_the_labels_alike(inputs):
     assert np.abs(_frame(ffmpeg_output, 0.2)[corner] - _frame(plain, 0.2)[corner]).mean() < 1  # not before
 
 
+def test_the_separator_dot_sits_in_a_narrow_slot():
+    # STHeiti gives "·" a full-em advance (a wide hole after it); the label draws its own dot.
+    font = str(Path(utils.font_dir()) / "STHeitiMedium.ttc")
+    dotted = video._label_image(LABEL, font, 1080)
+    spaced = video._label_image(LABEL.replace("·", " "), font, 1080)
+    white = [int(((np.asarray(im)[..., 0] > 200) & (np.asarray(im)[..., 3] == 255)).sum()) for im in (dotted, spaced)]
+    assert dotted.height == spaced.height
+    assert 0 < dotted.width - spaced.width <= round(1080 * 0.024) * 0.4
+    assert white[0] - white[1] >= 4
+
+
 def test_switched_off_draws_nothing(inputs):
     off = _render(inputs, "ffmpeg", "off", [{"start": 0.5, "end": 2.5, "text": LABEL}], enabled=False)
     plain = _render(inputs, "ffmpeg", "plain2", [])

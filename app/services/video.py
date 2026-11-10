@@ -2411,18 +2411,43 @@ def scene_label_text(label, language: str = "") -> str:
     return str(label or "").strip()
 
 
+LABEL_DOT = "·"
+
+
 def _label_image(text: str, font_path: str, video_width: int) -> Image.Image:
+    """
+    The label: white text with a dark outline on a rounded, half-transparent box. The
+    separator "·" is drawn as a small round dot in a narrow slot, because CJK fonts (the
+    default STHeiti) give it a full-em advance that leaves a wide hole after it.
+    """
     font_size = max(18, round(video_width * 0.024))
     font = ImageFont.truetype(font_path, font_size)
     stroke = max(1, font_size // 16)
-    left, top, right, bottom = font.getbbox(text, stroke_width=stroke)
+    pieces = text.split(LABEL_DOT)
+    slot = round(font_size * 0.3)
+    advances = [font.getlength(piece) for piece in pieces]
+    left, top, _, bottom = font.getbbox(text.replace(LABEL_DOT, ""), stroke_width=stroke)
+    last_right = font.getbbox(pieces[-1], stroke_width=stroke)[2] if pieces[-1] else stroke
+    ink_right = sum(advances[:-1]) + slot * (len(pieces) - 1) + last_right
     pad_x, pad_y = font_size // 2, font_size // 3
-    width, height = right - left + 2 * pad_x, bottom - top + 2 * pad_y
+    width, height = round(ink_right - left) + 2 * pad_x, bottom - top + 2 * pad_y
     image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle((0, 0, width - 1, height - 1), radius=pad_y, fill=(0, 0, 0, 140))
-    draw.text((pad_x - left, pad_y - top), text, font=font, fill=(255, 255, 255, 255),
-              stroke_width=stroke, stroke_fill=(0, 0, 0, 255))
+    x, y = pad_x - left, pad_y - top
+    _, x_top, _, x_bottom = font.getbbox("x")
+    radius = max(1.5, font_size * 0.075)
+    for index, piece in enumerate(pieces):
+        if piece:
+            draw.text((x, y), piece, font=font, fill=(255, 255, 255, 255),
+                      stroke_width=stroke, stroke_fill=(0, 0, 0, 255))
+        x += advances[index]
+        if index < len(pieces) - 1:
+            cx, cy = x + slot / 2, y + (x_top + x_bottom) / 2
+            outer = radius + stroke
+            draw.ellipse((cx - outer, cy - outer, cx + outer, cy + outer), fill=(0, 0, 0, 255))
+            draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=(255, 255, 255, 255))
+            x += slot
     return image
 
 
