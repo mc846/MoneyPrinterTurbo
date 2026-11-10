@@ -964,6 +964,8 @@
     "batch.history.counts_review": "{awaiting} awaiting review · {approved} approved · {skipped} skipped",
     "batch.history.review": "Review",
     "batch.resume.awaiting_review": "The subjects are awaiting review: approve them and use “Render approved”.",
+    "revision.returned": "Scenes back from an earlier revision: {scenes}",
+    "revision.warning.term_matching": "The text changed while materials follow the script order: scenes keep their terms and order, so a scene may no longer match its sentence.",
     "revision.button": "Improve",
     "revision.batch_tasks": "Videos (improve)",
     "revision.back": "Back",

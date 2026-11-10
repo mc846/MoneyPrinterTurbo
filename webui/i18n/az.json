@@ -706,6 +706,8 @@
     "batch.history.counts_review": "{awaiting} təsdiq gözləyir · {approved} təsdiqlənib · {skipped} atlanıb",
     "batch.history.review": "Yoxla",
     "batch.resume.awaiting_review": "Mövzular təsdiq gözləyir: təsdiqləyin və “Təsdiqlənənləri render et”dən istifadə edin.",
+    "revision.returned": "Geri qayıdan səhnələr: {scenes}",
+    "revision.warning.term_matching": "Mətn dəyişdi və materiallar mətn sırasını izləyir: səhnələr terminlərini və sırasını saxlayır, bir səhnə artıq öz cümləsinə uyğun gəlməyə bilər.",
     "revision.button": "Təkmilləşdir",
     "revision.batch_tasks": "Videolar (təkmilləşdir)",
     "revision.back": "Geri",

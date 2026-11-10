@@ -706,6 +706,8 @@
     "batch.history.counts_review": "{awaiting} warten auf Prüfung · {approved} genehmigt · {skipped} übersprungen",
     "batch.history.review": "Prüfen",
     "batch.resume.awaiting_review": "Die Themen warten auf Prüfung: genehmigen Sie sie und nutzen Sie „Genehmigte rendern“.",
+    "revision.returned": "Zurückgeholte Szenen: {scenes}",
+    "revision.warning.term_matching": "Der Text hat sich geändert, das Material folgt der Textreihenfolge: Szenen behalten Begriffe und Reihenfolge, eine Szene passt eventuell nicht mehr zu ihrem Satz.",
     "revision.button": "Überarbeiten",
     "revision.batch_tasks": "Videos (überarbeiten)",
     "revision.back": "Zurück",

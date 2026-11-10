@@ -706,6 +706,8 @@
     "batch.history.counts_review": "검토 대기 {awaiting} · 승인 {approved} · 건너뜀 {skipped}",
     "batch.history.review": "검토",
     "batch.resume.awaiting_review": "주제가 검토를 기다립니다. 승인한 뒤 “승인된 항목 렌더링”을 사용하세요.",
+    "revision.returned": "다시 들어온 장면: {scenes}",
+    "revision.warning.term_matching": "대본이 바뀌었고 소재는 대본 순서를 따릅니다. 장면은 검색어와 순서를 유지하므로 장면이 해당 문장과 맞지 않을 수 있습니다.",
     "revision.button": "개선",
     "revision.batch_tasks": "동영상(개선)",
     "revision.back": "뒤로",

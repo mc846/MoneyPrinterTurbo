@@ -706,6 +706,8 @@
     "batch.history.counts_review": "{awaiting} ждут проверки · {approved} утверждено · {skipped} пропущено",
     "batch.history.review": "Проверить",
     "batch.resume.awaiting_review": "Темы ждут проверки: утвердите их и нажмите «Рендерить утверждённые».",
+    "revision.returned": "Возвращённые сцены: {scenes}",
+    "revision.warning.term_matching": "Текст изменился, а материалы идут в порядке текста: сцены сохраняют свои термины и порядок, поэтому сцена может больше не соответствовать своему предложению.",
     "revision.button": "Доработать",
     "revision.batch_tasks": "Видео (доработать)",
     "revision.back": "Назад",

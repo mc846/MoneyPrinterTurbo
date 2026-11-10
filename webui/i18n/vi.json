@@ -706,6 +706,8 @@
     "batch.history.counts_review": "{awaiting} chờ duyệt · {approved} đã duyệt · {skipped} bỏ qua",
     "batch.history.review": "Duyệt",
     "batch.resume.awaiting_review": "Các chủ đề đang chờ duyệt: hãy duyệt rồi dùng “Kết xuất bản đã duyệt”.",
+    "revision.returned": "Cảnh được đưa lại: {scenes}",
+    "revision.warning.term_matching": "Văn bản đã thay đổi trong khi tư liệu theo thứ tự kịch bản: các cảnh giữ từ khóa và thứ tự, nên một cảnh có thể không còn khớp với câu của nó.",
     "revision.button": "Cải thiện",
     "revision.batch_tasks": "Video (cải thiện)",
     "revision.back": "Quay lại",

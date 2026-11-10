@@ -964,6 +964,8 @@
     "batch.history.counts_review": "{awaiting} 个待审核 · {approved} 个已批准 · {skipped} 个已跳过",
     "batch.history.review": "审核",
     "batch.resume.awaiting_review": "主题正在等待审核：请批准后使用“渲染已批准的”。",
+    "revision.returned": "恢复的场景：{scenes}",
+    "revision.warning.term_matching": "文案已修改，而素材按文案顺序匹配：场景保留原有搜索词和顺序，某个场景可能不再对应其句子。",
     "revision.button": "改进",
     "revision.batch_tasks": "视频（改进）",
     "revision.back": "返回",
