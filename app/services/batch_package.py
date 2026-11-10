@@ -495,6 +495,21 @@ def material_summary(material_sources) -> dict:
     return counts
 
 
+def label_checks(material_sources) -> dict:
+    """
+    ``etiketli``: ekranda kaynağının etiketiyle gösterilen klipler (kayıttaki scene_label; ör. NASA
+    SVS). ``etiket_gerekli``: görsel taramanın veri görselleştirmesi dediği, ekran etiketi olmayan
+    klipler; gözle bakılmalı (etiket taramaya göre değil kaynağa göre konur, VIPER'in teleskop
+    videosu gibi gerçek görüntü de olabilir).
+    """
+    records = [record for record in material_sources or [] if isinstance(record, dict)]
+    return {
+        "etiketli": [str(record.get("asset_id")) for record in records if record.get("scene_label")],
+        "etiket_gerekli": [str(record.get("asset_id")) for record in records
+                           if (record.get("vision") or {}).get("label") and not record.get("scene_label")],
+    }
+
+
 def technical_checks(task_dir: Path, final_video: Path, script: str, params: dict, terms: list[str],
                      material_sources, log_lines: list[str], preset) -> dict:
     duration = round(_media_duration(final_video), 1)
@@ -513,9 +528,7 @@ def technical_checks(task_dir: Path, final_video: Path, script: str, params: dic
         "yazi_tipi": font_name,
         "kredi_sorunlari": credit_problems(material_sources),
         "goruntuler": material_summary(material_sources),
-        # Görsel taramanın veri görselleştirmesi dediği klipler: ekranda etiket gerekir.
-        "etiket_gerekli": [str(record.get("asset_id")) for record in material_sources or []
-                           if isinstance(record, dict) and ((record.get("vision") or {}).get("label"))],
+        **label_checks(material_sources),
     }
     checks.update(log_summary(log_lines, terms))
     return checks
