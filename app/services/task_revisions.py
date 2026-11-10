@@ -37,7 +37,10 @@ from app import paths
 from app.models.schema import MaterialInfo, VideoAspect, VideoFitMode, VideoParams
 from app.services import revision_timing as timing
 from app.services import task_artifacts, task_materials
-from app.utils import utils
+from app.utils import ffmpeg_inputs, utils
+
+# MoviePy measures durations here with ffmpeg; its commands carry the protocol whitelist too.
+ffmpeg_inputs.guard_libraries()
 
 SCHEMA_VERSION = 1
 FOLDER = "revisions"
