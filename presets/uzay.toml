@@ -11,7 +11,9 @@ llm_provider = "claude_code"
 video_language = "tr-TR"
 script_accuracy_rules = true
 video_source = "nasa"
-video_source_fallback = "pixabay"
+# Yedek zinciri: NASA yetmeyen terim önce Pixabay'de, o da yetmezse Coverr'da aranır. Coverr anahtarı
+# (coverr_api_keys) yoksa Coverr görev başına bir uyarıyla atlanır; iş etkilenmez.
+video_source_fallback = ["pixabay", "coverr"]
 video_aspect = "9:16"
 crop_materials_to_aspect = true
 material_tag_relevance = "rank"

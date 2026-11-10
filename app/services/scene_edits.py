@@ -200,10 +200,30 @@ def candidate_choices(manifest: dict, materials: dict, scene: dict, scenes: list
     return choices
 
 
-def search(task_id: str, scene: dict, words: str) -> dict:
-    """Search ``words`` for a scene with the task's source, fallback, filters and relevance
-    settings; the results become a candidate list of materials.json (``terms[]`` with
-    ``scene``) and the entry is returned."""
+TASK_CHAIN = ""  # search_sources' value for "the task's source and fallback chain"
+
+
+def search_sources(task_id: str) -> dict:
+    """Where a new search can look: {"chain": [primary, *fallbacks], "sources": [...]}.
+
+    ``chain`` is the task's own (the default); ``sources`` are the stock sources a single
+    search can use: NASA, and the others whose API key is set."""
+    from app.config import config
+    from app.services import source_chain
+    from app.services import task_revisions as revisions
+
+    params = revisions.ensure_first(task_id)["params"]
+    primary = str(params.get("video_source") or "")
+    chain = [primary, *source_chain.parse_lenient(params.get("video_source_fallback"))]
+    sources = [source for source in source_chain.STOCK_SOURCES if source_chain.has_api_key(config.app, source)]
+    return {"chain": chain if primary in source_chain.STOCK_SOURCES else [], "sources": sources}
+
+
+def search(task_id: str, scene: dict, words: str, source: str = TASK_CHAIN) -> dict:
+    """Search ``words`` for a scene with the task's filters and relevance settings: on the
+    task's source and fallback chain (the default) or on one stock ``source``. The results
+    become a candidate list of materials.json (``terms[]`` with ``scene``; each candidate
+    keeps its provider) and the entry is returned."""
     from app.services import material
     from app.services import task_revisions as revisions
 
@@ -214,21 +234,25 @@ def search(task_id: str, scene: dict, words: str) -> dict:
     params = first["params"]
     manifest, _materials = revisions._materials(task_id)
     anchors = list(manifest.get("anchors") or [])
-    source = str(params.get("video_source") or "")
-    if source not in task_materials.STOCK_PROVIDERS:
-        raise SceneEditError(f"searching needs a stock source; the task used {source!r}")
     options = {
         "crop_to_aspect": bool(params.get("crop_materials_to_aspect")),
         "tag_relevance": params.get("material_tag_relevance") or "off",
         "exclude_ai_generated": bool(params.get("exclude_ai_generated_materials")),
         "anchors": anchors,
     }
-    search_videos, order = material._stock_source_search(source, **options)
-    fallback = material.resolve_fallback_source(source, params.get("video_source_fallback") or "")
-    if fallback:
-        fallback_search, fallback_order = material._stock_source_search(fallback, **options)
-        search_videos = material._search_with_fallback(source, search_videos, order["tag_relevance"],
-                                                       fallback, fallback_search, fallback_order["tag_relevance"])
+    if source:
+        source = str(source).strip().lower()
+        if source not in search_sources(task_id)["sources"]:
+            raise SceneEditError(f"{source!r} is not a stock source with an API key")
+        search_videos, _order = material._stock_source_search(source, **options)
+    else:
+        source = str(params.get("video_source") or "")
+        if source not in task_materials.STOCK_PROVIDERS:
+            raise SceneEditError(f"searching needs a stock source; the task used {source!r}")
+        search_videos, _order = material._stock_source_search(source, **options)
+        chain = material.resolve_fallback_chain(source, params.get("video_source_fallback") or "")
+        if chain:
+            search_videos, _order = material.chain_source_search(source, chain, **options)
     recorder = task_materials._Recorder(task_id, None)
     recorder.anchors = anchors
     token = task_materials._current.set(recorder)

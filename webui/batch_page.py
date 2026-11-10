@@ -25,7 +25,7 @@ from loguru import logger
 
 from app import paths
 from app.config import config
-from app.services import batch_package, batch_review, batch_runner, batch_subtitles, voice
+from app.services import batch_package, batch_review, batch_runner, batch_subtitles, source_chain, voice
 from app.services import batch_production as bp
 
 VIEW_PARAM = "view"
@@ -164,8 +164,10 @@ def preset_summary(preset: bp.Preset, tr) -> list[tuple[str, str]]:
     video = preset.video
     default = tr("batch.preset.default")
     source = video.get("video_source") or default
-    if video.get("video_source_fallback"):
-        source = f"{source} → {video['video_source_fallback']}"
+    chain = source_chain.parse_lenient(video.get("video_source_fallback"))
+    if chain:
+        # The preset's fallback chain in its order: nasa → pixabay → coverr.
+        source = " → ".join([source, *chain])
     words = f"{preset.target_words[0]}–{preset.target_words[1]}" if preset.target_words else default
     llm = video.get("llm_provider") or default
     if video.get("llm_model"):
