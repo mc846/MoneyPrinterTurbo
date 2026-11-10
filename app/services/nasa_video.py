@@ -569,6 +569,29 @@ def screen(item: MaterialInfo, *, clip_seconds: float, video_aspect: VideoAspect
     return True
 
 
+def window_frames(item: MaterialInfo, folder: str) -> list[str]:
+    """
+    Three frames of the chosen clean window (start, middle, end) from the analysis copy,
+    for the visual screening (``vision_screen``). Empty without a window.
+    """
+    info = item.source_info if isinstance(item.source_info, dict) else {}
+    segment = info.get("segment") or {}
+    copies = (info.get("video") or {}).get("renditions") or {}
+    url = next((copies[name] for name in ANALYSIS_RENDITIONS if name in copies), "")
+    if segment.get("start") is None or not url:
+        return []
+    start, length = float(segment["start"]), float(segment.get("duration") or 5)
+    frames = []
+    for index, second in enumerate((start + 0.3, start + length / 2, start + max(0.3, length - 0.3))):
+        target = os.path.join(folder, f"window-{index}.jpg")
+        result = _run_ffmpeg([utils.get_ffmpeg_binary(), "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+                              "-ss", f"{second:.3f}", *ffmpeg_inputs.remote_input(url, (ASSET_HOST,)),
+                              "-frames:v", "1", "-vf", f"scale={FRAME_WIDTH}:-2", "-q:v", "3", target], timeout=120)
+        if result.returncode == 0 and os.path.isfile(target):
+            frames.append(target)
+    return frames
+
+
 def save_clip(item: MaterialInfo, save_dir: str = "", *, clip_seconds: float, video_aspect: VideoAspect,
               fit_mode: str) -> str:
     """The clean window of the video, cut from a high resolution copy, as a local MP4 ("" when none)."""

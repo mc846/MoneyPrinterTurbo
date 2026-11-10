@@ -43,6 +43,7 @@ from app.services import (
     task_materials,
     twelvelabs,
     video,
+    vision_screen,
     volcengine_seedance,
     voice,
 )
@@ -896,6 +897,9 @@ def get_video_materials(
         if _may_use_nasa(params) and "video" in nasa.configured_media_types():
             # NASA 视频的干净片段按成片里的适配方式检查文字（blur 看整个画面）。
             generation_options["video_fit_mode"] = params.video_fit_mode
+        if vision_screen.enabled():
+            # 视觉检查的提示词写明视频主题。
+            generation_options["video_subject"] = params.video_subject or ""
         # 顺序匹配模式只在用户显式开启时生效。这里强制素材下载按关键词顺序
         # 轮询，避免某个早期关键词下载太多素材，把后续脚本主题挤出最终时间线。
         try:

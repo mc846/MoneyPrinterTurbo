@@ -1,0 +1,490 @@
+"""
+Visual screening of stock candidates with a vision LLM (``material_vision_screening``).
+
+A candidate that passed relevance, anchors and the source's own filters is shown to a
+vision model before it is used: a still for images (NASA's ``~small`` preview, the
+Pixabay thumbnail), three frames of the chosen clean window for NASA videos (its
+start, middle and end, one request). The model answers one JSON object
+(``PROMPT_VERSION``): image_type, subject, subject_matches_anchor, text_overlay,
+person, logo. The rules of a real-footage channel (``decide``) turn it down when it is
+an illustration, CGI or a diagram, when its subject is not one of the task's anchors,
+when it shows a recognizable person or a logo. A data visualization is accepted and
+marked ``label`` (it needs an on-screen label such as "NASA SVS · LRO data
+visualization" once that label exists).
+
+Backends (``material_vision_model`` = "<backend>:<model>"): ``claude`` runs the claude
+CLI headless with stream-json image input and no tools (the subscription login, like
+the claude_code LLM provider); ``ollama`` posts to /api/chat (e.g. gemma4:31b-cloud).
+
+Per task (``Session``): at most ``material_vision_max_per_term`` model calls per term and
+source (then the term moves on to the next source of the chain) and
+``material_vision_max_per_task`` in all. When the task limit is reached, or the
+backend fails (quota, session limit, login, timeout), screening stops for the task
+with a warning, the remaining candidates are used unscreened and the quality report
+says the screening did not complete. Decisions are cached on disk by provider, asset,
+frames, prompt version, model and anchors.
+"""
+
+from __future__ import annotations
+
+import base64
+import contextvars
+import io
+import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import threading
+import time
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import Any, Callable, Sequence
+
+import requests
+from loguru import logger
+from PIL import Image
+
+from app.config import config
+from app.services import task_materials
+from app.utils import utils
+
+PROMPT_VERSION = 1
+DEFAULT_MODEL = "claude:sonnet"
+DEFAULT_MAX_PER_TERM = 3
+DEFAULT_MAX_PER_TASK = 40
+LONG_EDGE = 768
+CALL_TIMEOUT = 180
+IMAGE_TYPES = ("observation", "photo", "data_visualization", "illustration", "cgi", "diagram")
+PERSON_VALUES = ("none", "unrecognizable", "recognizable")
+REJECT_TYPES = frozenset({"illustration", "cgi", "diagram"})
+LABEL_TYPES = frozenset({"data_visualization"})
+
+SYSTEM = ("You are an image screening assistant for a science video channel that uses real footage only. "
+          "Reply with one JSON object only.")
+PROMPT = """{count_text} of one candidate clip for a short vertical science video.
+Video topic: {subject}
+Search term the clip was found for: "{term}"
+Anchors (what the video is about; any one of them is enough): {anchors}
+The source's title and keywords (may be incomplete or wrong; trust the image): {context}
+
+Return only this JSON object, no other text:
+{{"image_type": "observation"|"photo"|"data_visualization"|"illustration"|"cgi"|"diagram", "subject": "<the main celestial body or object shown, a few words>", "subject_matches_anchor": true|false, "text_overlay": true|false, "person": "none"|"unrecognizable"|"recognizable", "logo": true|false}}
+
+Definitions:
+- image_type: "observation" real imagery of space, a celestial body or Earth taken by a telescope, a spacecraft or a camera (processed telescope images included); "photo" an ordinary real photograph or filmed footage of people, hardware, buildings or places; "data_visualization" a rendering computed from real measured data (a globe, map or animation made from spacecraft data); "illustration" an artist's concept, painting or drawing; "cgi" a computer-generated 3D render or animation of things that were not filmed (planned spacecraft, bases, rovers on other worlds, animated scenes); "diagram" a chart, plot, infographic or labeled schematic.
+- subject: the main thing shown, e.g. "the Moon", "Mars", "Mercury", "a rocket tank in a factory".
+- subject_matches_anchor: true if the main subject is any one of the anchors, a part of it or a view of it (a lunar crater, the lunar surface or the Moon seen from Earth all match "moon"); false if the main subject is another world or an unrelated object.
+- text_overlay: any readable text (titles, captions, labels, signs).
+- person: "recognizable" if a human face is visible clearly enough to identify the person; "unrecognizable" if people are present but cannot be identified (from behind, tiny, in a suit); otherwise "none".
+- logo: an organization logo, insignia, mission patch or brand name is visible.
+With several frames, describe the clip as a whole: a type or a problem visible in any frame counts."""
+
+
+def context_text(item) -> str:
+    """The candidate's title and keywords for the prompt (NASA's tags end with the title)."""
+    info = item.source_info if isinstance(item.source_info, dict) else {}
+    tags = [str(tag) for tag in info.get("tags") or [] if isinstance(tag, str) and tag.strip()]
+    if info.get("provider") == "nasa" and tags:
+        tags = [tags[-1], *tags[:-1]]
+    return "; ".join(tags)[:240] or "(none)"
+
+
+def build_prompt(frames: int, subject: str, term: str, anchors: Sequence[str], context: str) -> str:
+    return PROMPT.format(
+        count_text="The images are three frames (start, middle, end)" if frames > 1 else "The image is a frame",
+        subject=subject or term, term=term, anchors=", ".join(anchors) if anchors else "(none)",
+        context=context or "(none)")
+
+
+class VisionUnavailable(RuntimeError):
+    """The backend cannot answer for this task (quota, session limit, login, timeout, missing CLI)."""
+
+
+# ---------------------------------------------------------------- settings
+
+
+def _flag(key: str, default: bool) -> bool:
+    value = config.app.get(key, default)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _count(key: str, default: int) -> int:
+    value = config.app.get(key, default)
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        number = int(value)
+    except (TypeError, ValueError):
+        logger.warning(f"invalid {key}={value!r}, using {default}")
+        return default
+    return max(1, number)
+
+
+def enabled() -> bool:
+    """material_vision_screening, off by default."""
+    return _flag("material_vision_screening", False)
+
+
+def model_setting() -> tuple[str, str]:
+    """(backend, model) from material_vision_model ("claude:sonnet", "ollama:gemma4:31b-cloud")."""
+    value = str(config.app.get("material_vision_model") or DEFAULT_MODEL).strip()
+    backend, _, model = value.partition(":")
+    backend = backend.strip().lower()
+    if backend not in ("claude", "ollama"):
+        logger.warning(f"unknown material_vision_model backend {value!r}, using {DEFAULT_MODEL}")
+        backend, _, model = DEFAULT_MODEL.partition(":")
+    return backend, model.strip()
+
+
+# ---------------------------------------------------------------- the model's answer
+
+
+def parse(text: str) -> dict | None:
+    """The JSON object of an answer (code fences and surrounding text tolerated), validated."""
+    if not text:
+        return None
+    text = re.sub(r"^```(?:json)?|```$", "", str(text).strip(), flags=re.M).strip()
+    try:
+        data = json.loads(text)
+    except ValueError:
+        match = re.search(r"\{.*\}", text, re.S)
+        try:
+            data = json.loads(match.group(0)) if match else None
+        except ValueError:
+            data = None
+    if not isinstance(data, dict):
+        return None
+    image_type = str(data.get("image_type") or "").strip().lower()
+    person = str(data.get("person") or "").strip().lower()
+    if image_type not in IMAGE_TYPES or person not in PERSON_VALUES:
+        return None
+    flags = {}
+    for key in ("subject_matches_anchor", "text_overlay", "logo"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+            value = value.strip().lower() == "true"
+        if not isinstance(value, bool):
+            return None
+        flags[key] = value
+    return {"image_type": image_type, "subject": str(data.get("subject") or "").strip()[:80],
+            "person": person, **flags}
+
+
+def decide(result: dict, anchors: Sequence[str]) -> tuple[bool, list[str], str | None]:
+    """(use, reasons, label) under the real-footage rules."""
+    reasons = []
+    if result["image_type"] in REJECT_TYPES:
+        reasons.append(f"type:{result['image_type']}")
+    if anchors and not result["subject_matches_anchor"]:
+        reasons.append(f"subject:{result['subject'] or 'other'}")
+    if result["person"] == "recognizable":
+        reasons.append("person")
+    if result["logo"]:
+        reasons.append("logo")
+    label = result["image_type"] if result["image_type"] in LABEL_TYPES else None
+    return not reasons, reasons, label
+
+
+# ---------------------------------------------------------------- backends
+
+
+def _encode(path: str) -> str:
+    with Image.open(path) as image:
+        image = image.convert("RGB")
+        image.thumbnail((LONG_EDGE, LONG_EDGE), Image.LANCZOS)
+        buffer = io.BytesIO()
+        image.save(buffer, "JPEG", quality=85)
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+def _claude_cli() -> str:
+    configured = str(config.app.get("claude_code_cli_path") or "").strip() or "claude"
+    path = shutil.which(configured) or (configured if os.path.isfile(configured) else "")
+    if not path:
+        raise VisionUnavailable(f"claude CLI not found ({configured!r})")
+    return path
+
+
+def ask_claude(images: list[str], prompt: str, model: str) -> str:
+    """One headless claude CLI call: stream-json input with the images, no tools, safe mode."""
+    from app.services import llm
+
+    content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}
+               for data in images]
+    content.append({"type": "text", "text": prompt})
+    message = {"type": "user", "message": {"role": "user", "content": content}}
+    command = [_claude_cli(), "-p", "--input-format", "stream-json", "--output-format", "stream-json",
+               "--verbose", "--system-prompt", SYSTEM, "--tools", "", "--safe-mode"]
+    if model:
+        command += ["--model", model]
+    env, _removed = llm.build_claude_code_env()
+    # Started from inside a Claude Code session (e.g. a batch run from a terminal agent), the
+    # nested CLI would see itself as a sub-session; the screening is an independent call.
+    env.pop("CLAUDECODE", None)
+    with tempfile.TemporaryDirectory() as work_dir:
+        try:
+            completed = subprocess.run(command, input=json.dumps(message) + "\n", capture_output=True, text=True,
+                                       encoding="utf-8", errors="replace", timeout=CALL_TIMEOUT, cwd=work_dir,
+                                       env=env)
+        except subprocess.TimeoutExpired as exc:
+            raise VisionUnavailable(f"claude CLI timed out after {CALL_TIMEOUT}s") from exc
+    events = []
+    for line in (completed.stdout or "").splitlines():
+        if line.strip().startswith("{"):
+            try:
+                events.append(json.loads(line))
+            except ValueError:
+                pass
+    result = next((event for event in events if event.get("type") == "result"), None)
+    if result is None:
+        raise VisionUnavailable(f"claude CLI gave no result (exit {completed.returncode}): "
+                                f"{(completed.stderr or '').strip()[-200:]}")
+    if result.get("is_error"):
+        # Usage limits, session limits and login problems come back as an error result.
+        raise VisionUnavailable(f"claude CLI: {str(result.get('result') or '').strip()[:200]}")
+    return str(result.get("result") or "")
+
+
+def ask_ollama(images: list[str], prompt: str, model: str) -> str:
+    """One Ollama /api/chat call with the images (temperature 0, no thinking)."""
+    base = str(config.app.get("ollama_base_url") or "http://localhost:11434").rstrip("/")
+    base = base[:-3] if base.endswith("/v1") else base
+    body = {"model": model, "stream": False, "think": False, "options": {"temperature": 0},
+            "messages": [{"role": "system", "content": SYSTEM},
+                         {"role": "user", "content": prompt, "images": images}]}
+    try:
+        response = requests.post(f"{base}/api/chat", json=body, timeout=CALL_TIMEOUT)
+        payload = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise VisionUnavailable(f"ollama: {type(exc).__name__}: {exc}") from exc
+    if response.status_code != 200 or payload.get("error"):
+        raise VisionUnavailable(f"ollama {response.status_code}: {str(payload.get('error'))[:200]}")
+    return str((payload.get("message") or {}).get("content") or "")
+
+
+BACKENDS: dict[str, Callable[[list[str], str, str], str]] = {"claude": ask_claude, "ollama": ask_ollama}
+
+
+# ---------------------------------------------------------------- inputs and cache
+
+
+def _download(url: str, folder: str) -> str:
+    target = os.path.join(folder, f"preview-{utils.md5(url)}.jpg")
+    response = requests.get(url, timeout=30, proxies=config.proxy or None)
+    response.raise_for_status()
+    with open(target, "wb") as file:
+        file.write(response.content)
+    return target
+
+
+def _frames(item, folder: str) -> tuple[list[str], str]:
+    """Image files to show and a signature of what they are (the window for a NASA video)."""
+    from app.services import nasa_video
+
+    info = item.source_info if isinstance(item.source_info, dict) else {}
+    if nasa_video.is_video(item):
+        segment = info.get("segment") or {}
+        frames = nasa_video.window_frames(item, folder)
+        return frames, f"window:{segment.get('start')}:{segment.get('duration')}"
+    preview = info.get("preview")
+    if isinstance(preview, str) and preview.startswith(("http://", "https://")):
+        return [_download(preview, folder)], "preview"
+    return [], ""
+
+
+def cache_key(item, signature: str, backend: str, model: str, anchors: Sequence[str]) -> str:
+    info = item.source_info if isinstance(item.source_info, dict) else {}
+    parts = [str(PROMPT_VERSION), backend, model, str(getattr(item, "provider", "") or info.get("provider")),
+             str(info.get("asset_id") or getattr(item, "url", "")), signature,
+             ",".join(sorted(str(anchor).strip().lower() for anchor in anchors))]
+    return utils.md5("|".join(parts))
+
+
+def _cache_path(key: str) -> str:
+    return os.path.join(utils.storage_dir("cache_vision", create=True), f"{key}.json")
+
+
+def _load(key: str) -> dict | None:
+    try:
+        with open(_cache_path(key), encoding="utf-8") as file:
+            data = json.load(file)
+        return data if isinstance(data, dict) and data.get("prompt_version") == PROMPT_VERSION else None
+    except (OSError, ValueError):
+        return None
+
+
+def _store(key: str, data: dict) -> None:
+    path = _cache_path(key)
+    try:
+        with open(f"{path}.part", "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False)
+        os.replace(f"{path}.part", path)
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------- per task
+
+
+@dataclass
+class Session:
+    anchors: list
+    subject: str = ""
+    backend: str = "claude"
+    model: str = ""
+    max_per_term: int = DEFAULT_MAX_PER_TERM
+    max_per_task: int = DEFAULT_MAX_PER_TASK
+    calls: int = 0
+    cached: int = 0
+    accepted: int = 0
+    rejected: int = 0
+    unscreened: int = 0
+    seconds: float = 0.0
+    stopped: str = ""
+    per_term: Counter = field(default_factory=Counter)
+    decisions: dict = field(default_factory=dict)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    call_lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def stop(self, reason: str) -> None:
+        with self.lock:
+            if self.stopped:
+                return
+            self.stopped = reason
+        logger.warning(f"vision screening stopped: {reason}; the remaining candidates are used unscreened")
+
+    def screen(self, item) -> bool:
+        """True when the candidate may be used; the decision goes to source_info["vision"] and materials.json."""
+        info = item.source_info if isinstance(item.source_info, dict) else {}
+        term = str(info.get("search_term") or "")
+        provider = str(getattr(item, "provider", "") or info.get("provider") or "")
+        with tempfile.TemporaryDirectory(prefix="vision-") as folder:
+            try:
+                frames, signature = _frames(item, folder)
+            except Exception as exc:
+                logger.warning(f"vision screening: no image for {info.get('asset_id')}: {type(exc).__name__}: {exc}")
+                frames, signature = [], ""
+            if not frames:
+                return self._unscreened(item, "no_image")
+            key = cache_key(item, signature, self.backend, self.model, self.anchors)
+            with self.lock:
+                known = self.decisions.get(key)
+            known = known or _load(key)
+            if known is not None:
+                with self.lock:
+                    self.decisions[key] = known
+                    self.cached += 1
+                return self._apply(item, known, cached=True)
+            with self.lock:
+                if self.stopped:
+                    stopped = True
+                elif self.calls >= self.max_per_task:
+                    stopped = None
+                else:
+                    stopped = False
+                    if self.per_term[(term, provider)] >= self.max_per_term:
+                        limited = True
+                    else:
+                        limited = False
+                        self.per_term[(term, provider)] += 1
+                        self.calls += 1
+            if stopped is None:
+                self.stop(f"material_vision_max_per_task={self.max_per_task} reached")
+                return self._unscreened(item, "stopped")
+            if stopped:
+                return self._unscreened(item, "stopped")
+            if limited:
+                # This source has had its share for the term: the chain moves on.
+                task_materials.rejected(item, "vision", f"limit: {self.max_per_term} screened for {term!r}")
+                return False
+            prompt = build_prompt(len(frames), self.subject or term, term, self.anchors, context_text(item))
+            images = [_encode(frame) for frame in frames]
+        started = time.perf_counter()
+        result = None
+        try:
+            with self.call_lock:  # one model call at a time per task
+                for _attempt in range(2):
+                    result = parse(BACKENDS[self.backend](images, prompt, self.model))
+                    if result is not None:
+                        break
+        except VisionUnavailable as exc:
+            self.stop(str(exc))
+            return self._unscreened(item, "stopped")
+        except Exception as exc:  # the task never fails because of the screening
+            self.stop(f"{type(exc).__name__}: {exc}")
+            return self._unscreened(item, "stopped")
+        finally:
+            with self.lock:
+                self.seconds += time.perf_counter() - started
+        if result is None:
+            logger.warning(f"vision screening: unreadable answer for {info.get('asset_id')}; used unscreened")
+            return self._unscreened(item, "unreadable")
+        use, reasons, label = decide(result, self.anchors)
+        decision = {"prompt_version": PROMPT_VERSION, "model": f"{self.backend}:{self.model}", "result": result,
+                    "use": use, "reasons": reasons, "label": label, "frames": len(frames),
+                    "seconds": round(time.perf_counter() - started, 2)}
+        _store(key, decision)
+        with self.lock:
+            self.decisions[key] = decision
+        return self._apply(item, decision, cached=False)
+
+    def _apply(self, item, decision: dict, *, cached: bool) -> bool:
+        info = item.source_info if isinstance(item.source_info, dict) else {}
+        record = {**decision.get("result", {}), "decision": "use" if decision["use"] else "reject",
+                  "reasons": list(decision.get("reasons") or []), "model": decision.get("model"),
+                  "prompt_version": decision.get("prompt_version"), "cached": cached}
+        if decision.get("label"):
+            record["label"] = decision["label"]
+        if isinstance(item.source_info, dict):
+            item.source_info["vision"] = record
+        with self.lock:
+            if decision["use"]:
+                self.accepted += 1
+            else:
+                self.rejected += 1
+        if not decision["use"]:
+            logger.info(f"vision screening: skipped {info.get('asset_id')} for {info.get('search_term')!r} "
+                        f"({', '.join(record['reasons'])}; {record.get('subject') or ''})")
+            task_materials.rejected(item, "vision", ", ".join(record["reasons"]))
+        return bool(decision["use"])
+
+    def _unscreened(self, item, reason: str) -> bool:
+        if isinstance(item.source_info, dict):
+            item.source_info["vision"] = {"decision": "unscreened", "reasons": [reason]}
+        with self.lock:
+            self.unscreened += 1
+        return True
+
+    def summary(self) -> str:
+        return (f"vision screening: model={self.backend}:{self.model or 'default'}, calls={self.calls}, "
+                f"cached={self.cached}, accepted={self.accepted}, rejected={self.rejected}, "
+                f"unscreened={self.unscreened}, seconds={self.seconds:.1f}, "
+                f"status={'stopped: ' + self.stopped if self.stopped else 'complete'}")
+
+
+_current: contextvars.ContextVar[Session | None] = contextvars.ContextVar("vision_session", default=None)
+
+
+def start(anchors: Sequence[str], subject: str = "") -> Session | None:
+    """The screening session of a task (None when material_vision_screening is off)."""
+    if not enabled():
+        return None
+    backend, model = model_setting()
+    session = Session(anchors=[str(a) for a in anchors or () if str(a).strip()], subject=str(subject or ""),
+                      backend=backend, model=model,
+                      max_per_term=_count("material_vision_max_per_term", DEFAULT_MAX_PER_TERM),
+                      max_per_task=_count("material_vision_max_per_task", DEFAULT_MAX_PER_TASK))
+    _current.set(session)
+    logger.info(f"vision screening on: {backend}:{model or 'default'}, at most {session.max_per_term} per term "
+                f"and source, {session.max_per_task} per task")
+    return session
+
+
+def finish(session: Session | None) -> None:
+    """Log the task's screening summary (the batch report reads this line)."""
+    if session is not None:
+        logger.info(session.summary())

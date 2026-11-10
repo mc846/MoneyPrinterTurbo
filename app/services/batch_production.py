@@ -73,6 +73,11 @@ APP_OPTIONS = {
     "nasa_exclude_illustrations": bool,
     # Görevin çapalarından en az biri etikette/başlıkta (NASA'da açıklamada) geçmeyen aday uygun değil.
     "material_require_anchor": bool,
+    # Görsel tarama (vision_screen): açık/kapalı, model ("claude:haiku", "ollama:gemma4:31b-cloud"), sınırlar.
+    "material_vision_screening": bool,
+    "material_vision_model": str,
+    "material_vision_max_per_term": int,
+    "material_vision_max_per_task": int,
     "video_source_fallback_min_relevance": float,
     "video_source_fallback_min_candidates": int,
     "video_codec": str,
