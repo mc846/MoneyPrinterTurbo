@@ -69,6 +69,8 @@ APP_OPTIONS = {
     "nasa_face_filter": bool,
     # NASA türleri ve sırası (tür önceliği), ör. ["video", "image"].
     "nasa_media_types": list,
+    # Sahne etiketleri ("NASA SVS · … verisinden görselleştirme"); varsayılan açık.
+    "scene_labels_enabled": bool,
     # NASA'da sanatçı çizimi, canlandırma, simülasyon ve görselleştirmeleri ele (gerçek görüntü kanalı).
     "nasa_exclude_illustrations": bool,
     # Görevin çapalarından en az biri etikette/başlıkta (NASA'da açıklamada) geçmeyen aday uygun değil.

@@ -1067,6 +1067,26 @@ def _record_loomloom_run_reference(
     return None
 
 
+def _labelled_material_files(task_id: str) -> dict:
+    """Material file name → its scene label ({"tr", "en"} or text) for the task's labelled materials."""
+    return {
+        str(record.get("local_file")): record["scene_label"]
+        for record in _load_material_sources(task_id)
+        if isinstance(record, dict) and record.get("local_file") and record.get("scene_label")
+    }
+
+
+def scene_labels_for(timeline: list, labelled: dict, language: str = "") -> list:
+    """The labels of the scenes (combine_videos' scene_timeline) whose material has one."""
+    labels = []
+    for scene in timeline:
+        label = labelled.get(path.basename(str(scene.get("source") or "")))
+        text = video.scene_label_text(label, language) if label else ""
+        if text:
+            labels.append({"start": scene["start"], "end": scene["end"], "text": text})
+    return labels
+
+
 def _load_material_sources(task_id: str) -> list:
     """读取任务清单中的素材来源记录；读取失败时返回空列表。"""
     try:
@@ -1181,6 +1201,12 @@ def generate_final_videos(
             or any(source in material.CROP_TO_ASPECT_SOURCES for source in _video_source_fallback(params))
         ):
             combine_options["crop_cross_orientation_clips"] = True
+        # Scenes whose material carries a label (e.g. NASA SVS data visualizations): their
+        # place in the combined video, on whole frames, for the labels of the final render.
+        labelled = _labelled_material_files(task_id) if video.scene_labels_enabled() else {}
+        scene_timeline = [] if labelled else None
+        if scene_timeline is not None:
+            combine_options["scene_timeline"] = scene_timeline
         video.combine_videos(
             combined_video_path=combined_video_path,
             video_paths=downloaded_videos,
@@ -1254,6 +1280,7 @@ def generate_final_videos(
                 warnings.append({"code": warning_code, "video_index": index})
 
         logger.info(f"\n\n## generating video: {index} => {final_video_path}")
+        scene_labels = scene_labels_for(scene_timeline or [], labelled, params.video_language)
         bgm_mix_succeeded = video.generate_video(
             video_path=combined_video_path,
             audio_path=audio_file,
@@ -1262,6 +1289,7 @@ def generate_final_videos(
             params=params,
             bgm_file_override=bgm_file_override,
             **({"credit_text": credit_text} if credit_text else {}),
+            **({"scene_labels": scene_labels} if scene_labels else {}),
         )
         if (
             video_music_provider is not None

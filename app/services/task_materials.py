@@ -827,6 +827,10 @@ def _write_manifest(recorder: _Recorder, final: bool) -> None:
                 "source_file": None if material else _source_label(source),
                 "start": round(float(segment.get("start") or 0.0), 3),
                 "duration": round(float(segment.get("duration") or 0.0), 3),
+                # Where the scene is in the video (whole frames) and its on-screen label.
+                **({"video_start": segment["video_start"], "video_end": segment["video_end"]}
+                   if "video_start" in segment else {}),
+                "label": ((material.get("source") or {}).get("scene_label") if material else None),
                 "relevance": material["relevance"] if material else None,
                 "filters": material["filters"] if material else [],
             })

@@ -238,6 +238,7 @@ def ensure_first(task_id: str) -> dict:
             "duration": scene.get("duration") or 0.0,
             "source_duration": _media_duration(_footage(task_id, material)) if kind == timing.VIDEO else None,
             "status": "kept",
+            **({"label": scene["label"]} if scene.get("label") else {}),
         })
     if not scenes:
         raise RevisionError("materials.json has no scenes for the task's video")
@@ -661,6 +662,26 @@ def _clip_key(material: dict, scene: timing.Scene, frames: int, crop, params: Vi
     return hashlib.sha256(json.dumps(payload).encode("utf-8")).hexdigest()[:32]
 
 
+def _revision_scene_labels(clips, scenes, combined, materials: dict, language: str) -> list[dict]:
+    """
+    The on-screen labels of a revision: a label belongs to the material (e.g. NASA SVS), so a
+    revision keeps it; the times come from the revision's own clips and combined video.
+    """
+    from app.services import video
+
+    if not video.scene_labels_enabled() or not any(
+            (materials[scene.material].get("source") or {}).get("scene_label") for scene in scenes):
+        return []
+    timeline = video.scene_timeline_from_clips(
+        [(str(clip), scene.material) for clip, scene in zip(clips, scenes)], str(combined))
+    labels = []
+    for scene in timeline:
+        text = video.scene_label_text((materials[scene["source"]].get("source") or {}).get("scene_label"), language)
+        if text:
+            labels.append({"start": scene["start"], "end": scene["end"], "text": text})
+    return labels
+
+
 def _frame_counts(durations: list[float], fps: int) -> list[int]:
     """Frames per clip with the boundaries rounded on the running total."""
     counts, previous, total = [], 0, 0.0
@@ -934,6 +955,8 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
         )
         used = list(dict.fromkeys(planned.scene.material for planned in plan.scenes))
         sources = [dict(materials[material_id]["source"]) for material_id in used]
+        scene_labels = _revision_scene_labels(clips, [planned.scene for planned in plan.scenes], combined,
+                                              materials, params.video_language)
         credit = ""
         if params.nasa_credit_overlay and any(s.get("provider") == "nasa" for s in sources):
             credit = nasa.overlay_credit_text(sources, params.video_language)
@@ -948,6 +971,7 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
             video_path=str(combined), audio_path=str(audio),
             subtitle_path=str(subtitle) if subtitle.is_file() else "", output_file=str(final),
             params=render_params, **({"credit_text": credit} if credit else {}),
+            **({"scene_labels": scene_labels} if scene_labels else {}),
         )
         if not final.is_file():
             raise RevisionError("the final video was not written")
@@ -989,6 +1013,8 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
                     "status": statuses.get(planned.scene.id) if planned.status == "kept"
                     and statuses.get(planned.scene.id) in ("replaced", "cropped") else planned.status,
                     **({"crop": list(crops[planned.scene.id])} if planned.scene.id in crops else {}),
+                    **({"label": (materials[planned.scene.material].get("source") or {})["scene_label"]}
+                       if (materials[planned.scene.material].get("source") or {}).get("scene_label") else {}),
                 }
                 for planned in plan.scenes
             ],

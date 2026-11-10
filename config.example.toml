@@ -179,6 +179,14 @@ nasa_text_filter = true
 # task folder when NASA images are used. CLI: --nasa-credit-overlay.
 # 结尾 2 秒显示图片来源；任务目录中的 credits.txt 不受此开关影响。
 nasa_credit_overlay = false
+# Scene labels: a small line in the corner on the credit's side (top left when
+# the subtitles are in the lower half), shown during the scenes whose material
+# carries one, e.g. "NASA SVS · LRO verisinden görselleştirme" for NASA SVS
+# data visualizations (Turkish for tr-* videos, English otherwise). While the
+# image credit shows, the label moves next to it so the two never overlap.
+# Scenes without a label show nothing. Both final render engines draw it.
+# 默认开启；只在素材带角标的场景显示。
+scene_labels_enabled = true
 
 # Keep a snapshot of the materials every task used in its folder
 # (storage/tasks/<task_id>/materials/): the files the video used (NASA original,
