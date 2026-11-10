@@ -1,0 +1,79 @@
+# Gerçek görüntü reçetesi: yalnız çekilmiş görüntülerden oluşan videolar (toplu üretim, batch.py).
+# Kullanım: uv run python batch.py konular.csv --preset presets/gercek.toml
+#
+# Uzay reçetesinin farkları:
+# - NASA videoları önce, uygun videosu olmayan terimde NASA görseli (nasa_media_types sırası = tür önceliği).
+#   Video yalnız temiz bölümüyle kullanılır: tek sahne, yazısız, yüzsüz, siyah karesiz (nasa_video).
+# - NASA'da sanatçı çizimi, canlandırma, simülasyon ve görselleştirmeler elenir (nasa_exclude_illustrations).
+# - Yedek kaynaklarda AI işaretli görüntüler elenir (exclude_ai_generated_materials).
+# - video_fit_mode = "blur": kırpma büyütme gerektirirse (1080p/720p yatay, ör. çoğu NASA videosu) kare bütün
+#   olarak bulanık arka planın ortasında; gerektirmezse (4K yatay) 9:16 kırpılır. Ölçüm: cover 1080p'yi 1,78,
+#   720p'yi 2,67 kat büyütüp karenin %31,6'sını gösterir; 4K'yı 0,89 kata küçültür.
+#
+# [video] anahtarları `uv run python cli.py --help` bayraklarının alt çizgili adıdır. Burada olmayan ayarlar
+# config.toml'dan gelir. Bilinmeyen anahtar ya da geçersiz değer üretim başlamadan hata verir.
+
+[video]
+llm_provider = "claude_code"
+# llm_model = ""                       # boşsa sağlayıcının config.toml'daki modeli
+video_language = "tr-TR"
+script_accuracy_rules = true
+video_source = "nasa"
+# NASA yetmeyen terim önce Pixabay'de, o da yetmezse Coverr'da aranır. Coverr anahtarı (coverr_api_keys)
+# yoksa Coverr görev başına bir uyarıyla atlanır.
+video_source_fallback = ["pixabay", "coverr"]
+video_aspect = "9:16"
+video_fit_mode = "blur"
+crop_materials_to_aspect = true
+material_tag_relevance = "rank"
+match_materials_to_script = true
+video_terms_style = "visual"
+exclude_ai_generated_materials = true
+nasa_credit_overlay = true
+nasa_text_filter = true
+voice_name = "tr-TR-EmelNeural-Female"
+voice_rate = 1.0
+font_name = "STHeitiMedium.ttc"
+stroke_width = 3
+video_clip_duration = 5
+final_render_engine = "ffmpeg"
+subtitle_enabled = true
+subtitle_position = "bottom"
+font_size = 60
+text_fore_color = "#FFFFFF"
+stroke_color = "#000000"
+
+# Yalnız bu süreçte geçerli config.app ayarları; config.toml'a yazılmaz.
+[app]
+material_concurrency = 3
+video_clip_concurrency = 3
+# Video temiz bölümü yüz ve yazı denetimine dayanır: ikisi de açık olmalı (uv sync --extra face).
+nasa_face_filter = true
+nasa_media_types = ["video", "image"]
+nasa_exclude_illustrations = true
+video_source_fallback_min_relevance = 0.5
+video_source_fallback_min_candidates = 1
+
+# Metin talimatı. Yer tutucular: {kelime_min}, {kelime_max} (target_words'ten), {konu}.
+# Girdideki "talimat" sütunu bu metnin sonuna eklenir.
+[script]
+target_words = [90, 100]
+prompt = """
+En az {kelime_min}, en çok {kelime_max} kelime yaz; {kelime_min} kelimenin altına inme. Merak \
+uyandıran bir soru veya şaşırtıcı bir gerçekle başla. Konuyu tek bir somut, gerçek örnekle anlat: adı \
+bilinen bir gök cismi, bir gözlem ya da bir ölçüm. Yalnız konunun adı bilimsel bir terim değil de bir \
+takma adsa (ör. "zombi yıldız"), takma ad olduğunu söyle ve gerçekte neyi kastettiğini açıkla; başka \
+hiçbir şeye takma ad deme. Akıcı, sade ve heyecanlı bir dil kullan. Görüntüleri anlatma ve görüntüler \
+hakkında iddiada bulunma ("bu görüntüde", "kameraya yansıyan" gibi): hangi klibin nereye düşeceği belli değil.
+"""
+
+# Kalite kontrolü: süre hedefi (saniye) ve bağımsız doğruluk denetimi. review_before_render: iki aşamalı
+# akış (önce metinler denetlenip onaylanır, sonra "batch.py render <klasör>").
+[quality]
+target_duration = [35, 60]
+audit = true
+review_before_render = true
+
+# Yükleme paketi: altyazi.tr.srt her zaman; burada listelenen diller için çeviri (altyazi.<dil>.srt).
+[package]
+subtitle_translations = ["en"]
