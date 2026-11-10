@@ -71,6 +71,8 @@ APP_OPTIONS = {
     "nasa_media_types": list,
     # NASA'da sanatçı çizimi, canlandırma, simülasyon ve görselleştirmeleri ele (gerçek görüntü kanalı).
     "nasa_exclude_illustrations": bool,
+    # Görevin çapalarından en az biri etikette/başlıkta (NASA'da açıklamada) geçmeyen aday uygun değil.
+    "material_require_anchor": bool,
     "video_source_fallback_min_relevance": float,
     "video_source_fallback_min_candidates": int,
     "video_codec": str,
