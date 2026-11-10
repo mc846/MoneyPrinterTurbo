@@ -179,6 +179,31 @@ def test_per_term_limit_moves_the_term_on_without_a_call(images, backend):
     assert other_term is False and other_source is False  # counted separately, both screened
 
 
+def test_a_warm_cache_decides_like_a_cold_one(images, backend):
+    """The term limit counts candidates, cached ones too: E2E 10.11, a warm run had screened past
+    the limit (only calls counted) and taken a different source for "moon phases"."""
+    calls, answers = backend
+    answers["next"] = lambda prompt: answer(image_type="cgi") if "title-bad" in prompt else answer()
+    items = lambda: [_item(f"c{i}", tags=["Moon", "title-bad"]) for i in range(3)] + [_item("good")]  # noqa: E731
+    with patch.object(vision_screen.task_materials, "rejected"):
+        cold_session = _session(max_per_term=3)
+        cold = [cold_session.screen(item) for item in items()]
+        warm_session = _session(max_per_term=3)
+        warm = [warm_session.screen(item) for item in items()]
+    assert cold == warm == [False, False, False, False]  # the fourth is past the limit both times
+    assert len(calls) == 3 and warm_session.calls == 0 and warm_session.cached == 3
+
+
+def test_a_candidate_asked_again_in_the_task_is_counted_once(images, backend):
+    calls, answers = backend
+    answers["next"] = answer()
+    session = _session(max_per_term=1)
+    item = _item("a")
+    assert session.screen(item) and session.screen(item) and session.screen(_item("a"))
+    assert (len(calls), session.calls, session.repeats, session.accepted) == (1, 1, 2, 1)
+    assert "cached=0, repeats=2, accepted=1" in session.summary()
+
+
 def test_the_task_limit_stops_the_screening_and_the_task_goes_on(images, backend):
     calls, answers = backend
     answers["next"] = answer()

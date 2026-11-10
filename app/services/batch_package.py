@@ -379,7 +379,7 @@ _FALLBACK_LINE = re.compile(r"material fallback: term=(?P<term>'(?:[^'\\]|\\.)*'
 # Görsel taramanın görev sonu satırı (vision_screen.Session.summary).
 _VISION_SUMMARY = re.compile(
     r"vision screening: model=(?P<model>\S+), calls=(?P<calls>\d+), cached=(?P<cached>\d+), "
-    r"accepted=(?P<accepted>\d+), rejected=(?P<rejected>\d+), unscreened=(?P<unscreened>\d+), "
+    r"(?:repeats=(?P<repeats>\d+), )?accepted=(?P<accepted>\d+), rejected=(?P<rejected>\d+), unscreened=(?P<unscreened>\d+), "
     r"seconds=(?P<seconds>[\d.]+), status=(?P<status>.+)$")
 _CHAIN_LINE = re.compile(r"material source chain: term=(?P<term>'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"), "
                          r"tried=(?P<tried>\S+), using=(?P<using>\w+), reason=(?P<reason>\w+)")
