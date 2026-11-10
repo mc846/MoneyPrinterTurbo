@@ -188,6 +188,7 @@ def test_replace_with_a_saved_candidate_keeps_the_scene_id_and_updates_credits(
     manifest = _manifest(storage, task_id)
     added = [m for m in manifest["materials"] if m.get("added_by") == "r002"]
     assert [m["asset_id"] for m in added] == ["C1"] and first["material"] == added[0]["id"]
+    assert record["blocked_terms"] == []  # a candidate of the scene's own term keeps the term
     # Credits come from the scenes the revision shows: C1 instead of A1, on screen and in credits.txt.
     assert [s["asset_id"] for s in record["material_sources"]] == ["C1", "A2", "A3", "A4"]
     assert overlay == [["C1", "A2", "A3", "A4"]]
@@ -264,6 +265,31 @@ def test_a_new_search_adds_candidates_and_replaces_with_the_first_usable(
     _manifest_now, materials = task_revisions._materials(task_id)
     keys = [c["key"] for c in scene_edits.candidate_choices(manifest, materials, dict(scene, term_index=3))]
     assert keys == ["nasa:A3", "nasa:TXT1", "nasa:ER2", "nasa:ER3"]
+    # A search's results are a choice for the user: never added on their own to fill time.
+    assert record["blocked_terms"] == [3]
+    added_on_their_own = [c.key for c in task_revisions._candidates(manifest, materials)[0]]
+    assert "nasa:ER3" not in added_on_their_own and "pixabay:C2" in added_on_their_own
+
+
+def test_a_term_replaced_from_outside_is_not_refilled_with_its_candidates(
+        storage, voice_seconds, audits, nasa_downloads, monkeypatch):
+    task_id = _make_task(storage)
+    cache = storage / "cache_videos"
+    monkeypatch.setattr(material, "save_video", lambda video_url, save_dir="": str(_video(cache / "vid-c2.mp4", 9)))
+    picture = storage / "kendi.png"
+    Image.new("RGB", (400, 700), "orange").save(picture)
+    voice_seconds["seconds"] = 16.0
+    record = task_revisions.create(task_id, script="daha uzun bir metin",
+                                   scene_ops=[SceneOp(REPLACE, "v1-s01", path=str(picture))])
+    # Term 1's scene was replaced by the user's file: its candidate C1 is not added back to
+    # fill the longer voiceover (the "rocket part" case); term 2's C2 still is.
+    assert record["blocked_terms"] == [1]
+    assert [a["candidate"] for a in record["added"]] == ["pixabay:C2"]
+    assert nasa_downloads == []
+    assert record["extended"] == "v1-s03"
+    # Later revisions keep the term turned down.
+    later = task_revisions.create(task_id, script="daha da uzun bir metin oldu")
+    assert later["blocked_terms"] == [1] and "nasa:C1" not in [a["candidate"] for a in later["added"]]
 
 
 def test_a_local_file_warns_about_faces_and_text_but_is_used(storage, voice_seconds, no_downloads, audits,
@@ -558,6 +584,13 @@ def test_reasons_are_shown_in_the_ui_language(storage):
     assert revision_page._reason(tr, choices["pixabay:A2"]) == "revision.reason.current"
     assert revision_page._reason(tr, {"reason_code": "other_scene", "used_by": "v1-s05"}) == "v1-s05 kullanıyor"
     assert revision_page._reason(tr, {"reason_code": "no_address"}) == "revision.reason.no_address"
+    # Pending operations are described in the UI language too.
+    assert revision_page._describe(lambda key: key + " {scene}", SceneOp(REMOVE, "v1-s02")) == \
+        "revision.op.remove v1-s02"
+    assert revision_page._describe(lambda key: "{scene} {x} {y}", SceneOp(CROP, "v1-s01", position=(0.2, 0.5))) == \
+        "v1-s01 0.20 0.50"
+    assert revision_page._describe(lambda key: key + " {words}", SceneOp(REPLACE, "v1-s03", search="earth rise")) == \
+        "revision.op.replace_search earth rise"
 
 
 def test_framed_preview_marks_the_crop_window(storage):
