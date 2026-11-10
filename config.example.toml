@@ -153,6 +153,14 @@ nasa_media_types = ["image"]
 # promises real footage only; off by default.
 # 默认关闭；开启后跳过艺术家构想图、插画、动画、模拟和数据可视化。
 nasa_exclude_illustrations = false
+# "nasa_svs" (in video_source_fallback, e.g. ["nasa_svs", "pixabay"]): NASA's
+# Scientific Visualization Studio, renders computed from mission data (LRO's
+# Moon maps, eclipse and libration sequences). No API key. Only data
+# "Visualization" pages are used (concept animations of the Conceptual Image
+# Lab and produced videos are skipped); a native 9:16 version is preferred;
+# the clip comes from a clean window as for NASA videos, without sound, and
+# its scenes carry an on-screen label ("NASA SVS · LRO data visualization",
+# scene_labels_enabled). credits.txt and the batch share text credit the Studio.
 # Also skip NASA images whose cropped, downscaled frame contains a face (the
 # bundled YuNet model via OpenCV, on top of the text filters). Needs the extra:
 # `uv sync --extra face`; without it a warning is logged once and only the text

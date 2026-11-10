@@ -77,6 +77,13 @@ EXTRACT_RENDITIONS = ("large", "orig", "medium")
 EXTRACT_RENDITIONS_FULL = ("orig", "large", "medium")
 EXTRACT_MAX_WIDTH = {"blur": 1920, "contain": 1920}
 ASSET_HOST = "images-assets.nasa.gov"
+# The hosts whose videos are read with range requests (ffmpeg_inputs.remote_input): NASA's
+# image and video library, and the Scientific Visualization Studio (nasa_svs), whose
+# renders are up to gigabytes and serve byte ranges as well.
+SVS_HOST = "svs.gsfc.nasa.gov"
+REMOTE_HOSTS = (ASSET_HOST, SVS_HOST)
+# Sources whose candidates are videos handled here (clean window, ranged window).
+VIDEO_PROVIDERS = ("nasa", "nasa_svs")
 _MAX_DETAILED = 12
 _DETAIL_WORKERS = 4
 _RENDITION = re.compile(r"~(orig|large|medium|small|preview|mobile)\.mp4$", re.I)
@@ -296,7 +303,7 @@ def search_media(
 
 def is_video(item: Any) -> bool:
     source_info = getattr(item, "source_info", None)
-    return (getattr(item, "provider", "") == "nasa" and isinstance(source_info, dict)
+    return (getattr(item, "provider", "") in VIDEO_PROVIDERS and isinstance(source_info, dict)
             and source_info.get("media_type") == "video")
 
 
@@ -342,7 +349,7 @@ def window_command(url: str, start: float, seconds: float, output: str, *, max_w
     command = [
         utils.get_ffmpeg_binary(), "-y", "-hide_banner", "-loglevel", "verbose", "-nostdin",
         "-ss", f"{max(0.0, float(start)):.3f}", "-t", f"{float(seconds):.3f}",
-        *ffmpeg_inputs.remote_input(url, (ASSET_HOST,)),
+        *ffmpeg_inputs.remote_input(url, REMOTE_HOSTS),
         "-map", "0:v:0", "-an",
     ]
     if max_width:
@@ -380,7 +387,7 @@ def chunk_command(url: str, start: float, seconds: float, pattern: str) -> list[
     return [
         utils.get_ffmpeg_binary(), "-y", "-hide_banner", "-loglevel", "verbose", "-nostdin",
         "-ss", f"{max(0.0, float(start)):.3f}", "-t", f"{float(seconds):.3f}",
-        *ffmpeg_inputs.remote_input(url, (ASSET_HOST,)),
+        *ffmpeg_inputs.remote_input(url, REMOTE_HOSTS),
         "-filter_complex", graph,
         "-map", "[frames]", "-q:v", "3", pattern,
         "-map", "[cuts]", "-f", "null", "-",
@@ -585,7 +592,7 @@ def window_frames(item: MaterialInfo, folder: str) -> list[str]:
     for index, second in enumerate((start + 0.3, start + length / 2, start + max(0.3, length - 0.3))):
         target = os.path.join(folder, f"window-{index}.jpg")
         result = _run_ffmpeg([utils.get_ffmpeg_binary(), "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
-                              "-ss", f"{second:.3f}", *ffmpeg_inputs.remote_input(url, (ASSET_HOST,)),
+                              "-ss", f"{second:.3f}", *ffmpeg_inputs.remote_input(url, REMOTE_HOSTS),
                               "-frames:v", "1", "-vf", f"scale={FRAME_WIDTH}:-2", "-q:v", "3", target], timeout=120)
         if result.returncode == 0 and os.path.isfile(target):
             frames.append(target)

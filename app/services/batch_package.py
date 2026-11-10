@@ -34,6 +34,8 @@ FLAGGED_RATINGS = ("Y", "X")
 COVER_SIZE = (1080, 1920)
 SHEET_FRAMES = 5
 PIXABAY_CREDIT = "Ek görüntüler: Pixabay (pixabay.com)"
+SVS_CREDIT = "Veri görselleştirmeleri: NASA's Scientific Visualization Studio (svs.gsfc.nasa.gov)"
+SVS_NOTE = "Not: bazı sahneler gerçek görev verisinden üretilmiş veri görselleştirmesidir."
 # Paylaşım metninde stok kaynakların adı ve sitesi (credit_lines).
 STOCK_CREDITS = {"pixabay": "Pixabay (pixabay.com)", "coverr": "Coverr (coverr.co)",
                  "pexels": "Pexels (pexels.com)"}
@@ -203,6 +205,10 @@ def credit_lines(material_sources) -> list[str]:
     if attribution:
         lines.append(attribution)
     providers = [str((record or {}).get("provider") or "").lower() for record in material_sources or []]
+    if "nasa_svs" in providers:
+        # NASA SVS: credit the Studio and say that some scenes are data visualizations, not footage.
+        lines.append(SVS_CREDIT)
+        lines.append(SVS_NOTE)
     others = []
     for provider in ("pixabay", "coverr", "pexels"):
         if provider not in providers:
@@ -470,7 +476,7 @@ def credit_problems(material_sources) -> list[str]:
     ]
 
 
-MATERIAL_LABELS = {"pixabay": "Pixabay", "coverr": "Coverr", "pexels": "Pexels"}
+MATERIAL_LABELS = {"pixabay": "Pixabay", "coverr": "Coverr", "pexels": "Pexels", "nasa_svs": "NASA SVS"}
 
 
 def material_summary(material_sources) -> dict:

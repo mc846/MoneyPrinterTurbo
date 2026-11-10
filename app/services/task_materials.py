@@ -516,7 +516,7 @@ def _candidate_entries(recorder, term_index, term, ordered, used_by_term, previe
     return entries
 
 
-STOCK_PROVIDERS = ("pexels", "pixabay", "coverr", "nasa")
+STOCK_PROVIDERS = ("pexels", "pixabay", "coverr", "nasa", "nasa_svs")
 
 
 def _item_record(item) -> dict | None:

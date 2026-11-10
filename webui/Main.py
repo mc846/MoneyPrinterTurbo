@@ -3791,7 +3791,8 @@ def _render_nasa_settings(app_settings):
 
 # 素材源链（video_source_fallback）里各素材源的显示名称；多选框用名称列表而不用
 # format_func（AppTest 找不到 format_func 选项的原始值）。
-FALLBACK_SOURCE_LABELS = {"pexels": "Pexels", "pixabay": "Pixabay", "coverr": "Coverr", "nasa": "NASA"}
+FALLBACK_SOURCE_LABELS = {"pexels": "Pexels", "pixabay": "Pixabay", "coverr": "Coverr", "nasa": "NASA",
+                          "nasa_svs": "NASA SVS"}
 
 
 def _configured_fallback_chain(app_settings, primary: str) -> list[str]:

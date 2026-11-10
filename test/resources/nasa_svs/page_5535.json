@@ -1,0 +1,96 @@
+{
+ "id": 5535,
+ "url": "http://svs.gsfc.nasa.gov/5535/",
+ "page_type": "Visualization",
+ "title": "What Apollo Saw in Sunlight While in Orbit",
+ "studio": "svs",
+ "missions": [
+  "Artemis Program (Human Spaceflight — Moon to Mars) (Artemis)",
+  "LRO (Lunar Reconnaissance Orbiter)"
+ ],
+ "keywords": [
+  "Apollo Missions",
+  "Artemis",
+  "Lunar Surface",
+  "Moon"
+ ],
+ "credits": [
+  {
+   "role": "Visualizer",
+   "people": [
+    {
+     "name": "Ernie Wright",
+     "employer": "STC"
+    }
+   ]
+  },
+  {
+   "role": "Scientist",
+   "people": [
+    {
+     "name": "Noah Petro",
+     "employer": "NASA/GSFC"
+    }
+   ]
+  },
+  {
+   "role": "Graphics",
+   "people": [
+    {
+     "name": "Dan Gallagher",
+     "employer": "eMITS"
+    }
+   ]
+  }
+ ],
+ "main_image": {
+  "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005535/apollo_saw.jpg"
+ },
+ "description": "A map showing the sunlit parts of the lunar surface that the Apollo astronauts could see from orbit. The darkened parts of the map were either never in sunlight or were beyond the horizon of the spacecraft.",
+ "media_groups": [
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005535/Apollo_Visibility_Map_V5_720.mp4",
+      "filename": "Apollo_Visibility_Map_V5_720.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005535/Apollo_Visibility_Map_V5_1080.mp4",
+      "filename": "Apollo_Visibility_Map_V5_1080.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005535/Apollo_Visibility_Map_V5_4K.mp4",
+      "filename": "Apollo_Visibility_Map_V5_4K.mp4",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005535/Apollo_Visibility_Map_V5.mov",
+      "filename": "Apollo_Visibility_Map_V5.mov",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,338 @@
+{
+ "id": 5587,
+ "url": "http://svs.gsfc.nasa.gov/5587/",
+ "page_type": "Visualization",
+ "title": "Moon Phase and Libration, 2026",
+ "studio": "svs",
+ "missions": [
+  "LRO (Lunar Reconnaissance Orbiter)"
+ ],
+ "keywords": [
+  "Albedo",
+  "Elevation data",
+  "Laser Altimeter",
+  "LOLA",
+  "LRO",
+  "LROC",
+  "Lunar",
+  "Lunar Reconnaissance Orbiter",
+  "Lunar Surface",
+  "Lunar Topography",
+  "Moon"
+ ],
+ "credits": [
+  {
+   "role": "Visualizer",
+   "people": [
+    {
+     "name": "Ernie Wright",
+     "employer": "STC"
+    }
+   ]
+  },
+  {
+   "role": "Planetary scientist",
+   "people": [
+    {
+     "name": "Noah Petro",
+     "employer": "NASA/GSFC"
+    }
+   ]
+  },
+  {
+   "role": "Producer",
+   "people": [
+    {
+     "name": "James Tralie",
+     "employer": "eMITS"
+    }
+   ]
+  }
+ ],
+ "main_image": {
+  "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/preview_fancy.jpg"
+ },
+ "description": "The animation archived on this page shows the geocentric phase, libration, position angle of the axis, and apparent diameter of the Moon throughout the year 2026, at hourly intervals.",
+ "media_groups": [
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_fancy_1080p30.mp4",
+      "filename": "phases_2026_fancy_1080p30.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_fancy_2160p30.mp4",
+      "filename": "phases_2026_fancy_2160p30.mp4",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_fancy_2160p30.mov",
+      "filename": "phases_2026_fancy_2160p30.mov",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_fancy_720p30.mp4",
+      "filename": "phases_2026_fancy_720p30.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_fancy_360p30.mp4",
+      "filename": "phases_2026_fancy_360p30.mp4",
+      "media_type": "Movie",
+      "width": 640,
+      "height": 360
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phasesYT_2026_fancy_1080p30.mp4",
+      "filename": "phasesYT_2026_fancy_1080p30.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phasesYT_2026_fancy_2160p30.mp4",
+      "filename": "phasesYT_2026_fancy_2160p30.mp4",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_fancy_v1_1920p30.mp4",
+      "filename": "phases_2026_fancy_v1_1920p30.mp4",
+      "media_type": "Movie",
+      "width": 1080,
+      "height": 1920
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_fancy_v2_1920p30.mp4",
+      "filename": "phases_2026_fancy_v2_1920p30.mp4",
+      "media_type": "Movie",
+      "width": 1080,
+      "height": 1920
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_fancy_v2_music_1920p30.mp4",
+      "filename": "phases_2026_fancy_v2_music_1920p30.mp4",
+      "media_type": "Movie",
+      "width": 1080,
+      "height": 1920
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_plain_v_1920p30.mp4",
+      "filename": "phases_2026_plain_v_1920p30.mp4",
+      "media_type": "Movie",
+      "width": 1080,
+      "height": 1920
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_plain_1080p30.mp4",
+      "filename": "phases_2026_plain_1080p30.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_plain_2160p30.mp4",
+      "filename": "phases_2026_plain_2160p30.mp4",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_plain_2160p30.mov",
+      "filename": "phases_2026_plain_2160p30.mov",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_plain_720p30.mp4",
+      "filename": "phases_2026_plain_720p30.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/phases_2026_plain_360p30.mp4",
+      "filename": "phases_2026_plain_360p30.mp4",
+      "media_type": "Movie",
+      "width": 640,
+      "height": 360
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/moon_orbit_2026_1080p30.mp4",
+      "filename": "moon_orbit_2026_1080p30.mp4",
+      "media_type": "Movie",
+      "width": 1080,
+      "height": 1080
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/moon_subpts_2026_960p30.mp4",
+      "filename": "moon_subpts_2026_960p30.mp4",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 960
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/moon_distance_2026_1080p30.mp4",
+      "filename": "moon_distance_2026_1080p30.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/moon_distance_2026_2160p30.mp4",
+      "filename": "moon_distance_2026_2160p30.mp4",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/moon_distance_2026_360p30.mp4",
+      "filename": "moon_distance_2026_360p30.mp4",
+      "media_type": "Movie",
+      "width": 640,
+      "height": 360
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/moon_distance_2026_720p30.mp4",
+      "filename": "moon_distance_2026_720p30.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/moon_labels_2026_1080p30.mp4",
+      "filename": "moon_labels_2026_1080p30.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/moon_labels_2026_2160p30.mp4",
+      "filename": "moon_labels_2026_2160p30.mp4",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    }
+   ]
+  }
+ ]
+}

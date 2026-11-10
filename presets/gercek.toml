@@ -19,9 +19,10 @@ llm_provider = "claude_code"
 video_language = "tr-TR"
 script_accuracy_rules = true
 video_source = "nasa"
-# NASA yetmeyen terim önce Pixabay'de, o da yetmezse Coverr'da aranır. Coverr anahtarı (coverr_api_keys)
-# yoksa Coverr görev başına bir uyarıyla atlanır.
-video_source_fallback = ["pixabay", "coverr"]
+# NASA yetmeyen terim önce NASA SVS'de (veri görselleştirmeleri; sahnede "NASA SVS · LRO verisinden
+# görselleştirme" etiketiyle), sonra Pixabay'de, o da yetmezse Coverr'da aranır. Coverr anahtarı
+# (coverr_api_keys) yoksa Coverr görev başına bir uyarıyla atlanır.
+video_source_fallback = ["nasa_svs", "pixabay", "coverr"]
 video_aspect = "9:16"
 video_fit_mode = "blur"
 crop_materials_to_aspect = true
