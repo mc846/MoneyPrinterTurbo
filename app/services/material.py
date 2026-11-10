@@ -247,10 +247,11 @@ def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, An
                 rendition[field] = str(value) if field == "id" else value
         if rendition:
             record["rendition"] = rendition
-    # NASA 视频：类型和所用的干净片段（起点、时长、跳过的镜头及原因、读取的字节数）。
-    if record["provider"] == "nasa" and source.get("media_type") in ("image", "video"):
+    # NASA 和 NASA SVS 视频：类型和所用的干净片段（起点、时长、跳过的镜头及原因、读取的字节数）。
+    nasa_provider = record["provider"] in nasa_video.VIDEO_PROVIDERS
+    if nasa_provider and source.get("media_type") in ("image", "video"):
         record["media_type"] = source["media_type"]
-    segment = _segment_record(source.get("segment")) if record["provider"] == "nasa" else None
+    segment = _segment_record(source.get("segment")) if nasa_provider else None
     if segment:
         record["segment"] = segment
     # 视觉检查的判定（material_vision_screening）：类型、主体、结论和原因。

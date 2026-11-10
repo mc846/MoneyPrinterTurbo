@@ -240,6 +240,18 @@ def test_credits_and_the_share_text_name_the_studio():
     assert batch_package.material_summary([record]) == {"NASA SVS": 1}
 
 
+def test_the_task_record_keeps_the_svs_window_for_the_credits():
+    """The record written at download keeps the clean window, so credits.txt names the range read."""
+    item = _svs_item("x.mp4")
+    item.source_info["segment"] = {"start": 4.0, "duration": 5.0, "rendition": "large", "window_bytes": 2_500_000,
+                                   "analysis_bytes": 900_000}
+    with patch.object(material.task_materials, "downloaded"):
+        record = material._material_source_record(item, "C:/x/svs.mp4")
+    assert record["media_type"] == "video"
+    assert record["segment"]["start"] == 4.0 and record["segment"]["window_bytes"] == 2_500_000
+    assert "[NASA SVS] NASA's Scientific Visualization Studio (video, 4-9 s)" in nasa.credits_text([record])
+
+
 def test_the_label_comes_from_the_source_not_from_the_screening():
     """A NASA archive clip the screening calls a data visualization gets no label (the VIPER case)."""
     nasa_item = MaterialInfo(provider="nasa", url="https://images-assets.nasa.gov/x.mp4", duration=5, source_info={
