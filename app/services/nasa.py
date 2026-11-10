@@ -38,8 +38,9 @@ USAGE_GUIDELINES_URL = "https://www.nasa.gov/nasa-brand-center/images-and-media/
 # 过滤规则（人物、标志、版权、规格选择）的版本，写入 24 小时搜索缓存的键：规则改变后
 # 必须加 1，否则旧规则选出的候选还会被使用一整天。1 = 首个版本，2 = 活动用语、NHQ 编号、
 # 人名关键词和人脸检查，3 = 署名去掉话题标签，署名里没有 NASA 或核实过的合作方时淘汰，
-# 4 = 候选带预览图地址（文字检查用），nasa_text_filter 写入缓存键。
-FILTER_VERSION = 4
+# 4 = 候选带预览图地址（文字检查用），nasa_text_filter 写入缓存键，5 = 候选带描述标签
+# （description_tags，相关度的低权重部分）。
+FILTER_VERSION = 5
 DETAILS_PAGE = "https://images.nasa.gov/details/{nasa_id}"
 DEFAULT_CREDIT = "NASA"
 # 将来可加入 "video"；目前只实现图片。
@@ -526,7 +527,8 @@ def relevance_tags(data: dict) -> List[str]:
     """
     生成供 material_tag_relevance 使用的标签：短关键词加去掉机构名的标题。
 
-    只用关键词和标题，不用描述：描述通常很长，几乎任何词都能命中。
+    描述不在这里：它很长，几乎任何词都能命中；描述开头的句子另外作为低权重标签
+    （description_tags）。
     """
     tags = []
     title_like = [_text(data.get("title"))]
@@ -548,6 +550,36 @@ def relevance_tags(data: dict) -> List[str]:
         if re.search(r"\w", cleaned):
             tags.append(cleaned[:100])
     return list(dict.fromkeys(tags))[:50]
+
+
+# 描述也计入相关度，但权重低于关键词和标题（material.DESCRIPTION_TAG_WEIGHT）：描述
+# 很长，几乎什么词都可能出现，只用开头的说明部分（DESCRIPTION_TAG_WORDS 个词以内），
+# 去掉署名行、链接和机构名（与关键词、标题同一规则），连字符复合词合成一个词。
+DESCRIPTION_TAG_WORDS = 80
+_DESCRIPTION_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"“(])")
+
+
+def description_tags(data: dict) -> List[str]:
+    """描述开头部分的句子（去掉署名、链接、机构名），作为低权重的相关度标签。"""
+    text = _plain_text(data.get("description"))
+    match = _CREDIT_LINE.search(text)
+    if match:
+        text = text[: match.start()]
+    text = _CREDIT_SOCIAL_TAIL.split(text, maxsplit=1)[0]
+    words = text.split()[:DESCRIPTION_TAG_WORDS]
+    text = _strip_institutions(_HYPHEN_COMPOUND.sub("", " ".join(words)))
+    phrases = []
+    for sentence in _DESCRIPTION_SENTENCE.split(text):
+        # 缓存只保存 100 个字符以内的标签：长句按词切开，不切断单词。
+        phrase = ""
+        for word in sentence.split():
+            if phrase and len(phrase) + 1 + len(word) > 100:
+                phrases.append(phrase)
+                phrase = ""
+            phrase = f"{phrase} {word}".strip()[:100]
+        if phrase:
+            phrases.append(phrase)
+    return [phrase for phrase in phrases if re.search(r"\w", phrase)][:30]
 
 
 def image_size(metadata: dict | None) -> tuple[int, int] | None:
@@ -728,6 +760,8 @@ def _detailed_candidate(
         "preview": variants.get("small") or variants.get("medium") or "",
         "rendition": {"id": variant, "width": width, "height": height},
         "tags": relevance_tags(data),
+        # 低权重的相关度标签：描述开头的句子（见 description_tags）。
+        "description_tags": description_tags(data),
         # NASA 不提供 AI 生成标记；保留字段以便 exclude_ai_generated_materials 一致处理。
         "ai_generated": False,
     }

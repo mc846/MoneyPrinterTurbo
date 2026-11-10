@@ -497,18 +497,46 @@ def _material_tag_words(item: MaterialInfo) -> set[str] | None:
     return {word for tag in tags for word in _relevance_words(tag)}
 
 
+# 只出现在描述里（source_info["description_tags"]，目前只有 NASA 提供）的搜索词按这个
+# 权重计分，低于标签和标题里的命中。1/2 让单词搜索词只在描述里命中时恰好达到默认的
+# 后备阈值 0.5（"tortilla"：国际空间站上的墨西哥薄饼照片，关键词和标题里都没有这个词）。
+DESCRIPTION_TAG_WEIGHT = Fraction(1, 2)
+
+
+def _description_hits(missing: list[str], item: MaterialInfo) -> int:
+    """
+    标签里没有的搜索词（``missing``）在描述里的命中数：描述只能补上一个缺少的词。
+
+    只缺一个词时，它出现在描述里算一次命中；缺两个及以上时描述不计分。描述是长段
+    文字，几个词在里面凑齐时说的往往是背景而不是画面："laser beam … flash of light"
+    是实验室里的人，"US Flag- Floating … released by astronaut" 里没有宇航员。56 个
+    关键词的测量（按预览判断首选候选，与后备素材源的结果比较）：描述可以补多个词时
+    7 个关键词换了素材，1 个变好、2 个变差；要求这些词在一句里相邻时 4 个换了，1 个
+    变好、3 个一样；只补一个词时只有 "tortilla" 换了（变好）。
+    """
+    source_info = item.source_info if isinstance(item.source_info, dict) else {}
+    tags = source_info.get("description_tags")
+    if len(missing) != 1 or not isinstance(tags, list):
+        return 0
+    return int(any(missing[0] in _relevance_words(tag) for tag in tags))
+
+
 def _tag_relevance(search_term: str, item: MaterialInfo) -> tuple[Fraction, int]:
     """
     返回素材相对搜索词的（命中比例, 命中数）。
 
-    命中数是搜索词的内容词中出现在素材标签里的个数，比例是它占全部内容词的
-    份额。同一关键词内两者给出相同的顺序；合并候选池里不同长度的关键词之间
-    按比例比较。没有内容词的搜索词视为全部命中。
+    命中数是搜索词的内容词中出现在素材标签（或描述）里的个数，比例是加权命中占
+    全部内容词的份额：标签和标题里的命中算 1，只在描述里的命中算
+    ``DESCRIPTION_TAG_WEIGHT``（规则见 ``_description_hits``）。同一关键词内比例决定
+    顺序；合并候选池里不同长度的关键词之间按比例比较。没有内容词的搜索词视为全部命中。
     """
     term_words = _relevance_words(search_term)
     tag_words = _material_tag_words(item) or set()
-    hits = sum(1 for word in term_words if word in tag_words)
-    return (Fraction(hits, len(term_words)) if term_words else Fraction(1)), hits
+    strong = sum(1 for word in term_words if word in tag_words)
+    weak = _description_hits([word for word in term_words if word not in tag_words], item)
+    if not term_words:
+        return Fraction(1), 0
+    return Fraction(strong) / len(term_words) + DESCRIPTION_TAG_WEIGHT * Fraction(weak, len(term_words)), strong + weak
 
 
 # 每次搜索请求的结果数：（默认值, 下限, 上限）。上下限来自 Pixabay（3-200）和

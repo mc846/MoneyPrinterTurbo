@@ -110,6 +110,12 @@ def _cached_source_info(item: MaterialInfo) -> dict | None:
         cached["tags"] = [
             str(tag)[:100] for tag in raw_tags[:50] if isinstance(tag, str) and tag.strip()
         ]
+    # NASA 描述开头的句子，作为低权重的相关度标签（同样是公开短文本）。
+    raw_description_tags = source.get("description_tags")
+    if isinstance(raw_description_tags, list):
+        cached["description_tags"] = [
+            str(tag)[:100] for tag in raw_description_tags[:30] if isinstance(tag, str) and tag.strip()
+        ]
     if isinstance(source.get("ai_generated"), bool):
         cached["ai_generated"] = source["ai_generated"]
     # NASA 素材的来源标注（公开文字，写入任务的 material_sources）。
