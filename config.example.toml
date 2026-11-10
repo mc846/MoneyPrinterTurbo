@@ -135,8 +135,24 @@ coverr_api_keys = []
 # are written to material_sources in the task's script.json.
 # Usage guidelines (NASA insignia and identifiable people are restricted):
 # https://www.nasa.gov/nasa-brand-center/images-and-media/
-# 不需要 API Key；目前只使用图片。
+# No API key. nasa_media_types = ["video", "image"] adds NASA videos; the order
+# is the type priority within the source (a term uses a video first and an
+# image when none of its videos has a clean window). A video is used only for
+# a clean window of the clip length: one shot without text (in the part the
+# fit mode shows), faces or black frames, found in the first two minutes of
+# the low resolution copy (~preview); only that window is then read from the
+# high resolution copy with HTTP range requests (no full download). Talks,
+# briefings and hosted shows are skipped by title, and so are videos longer
+# than 15 minutes or below 720p. Needs the face and text filters (both on, and
+# `uv sync --extra face`); without them videos are skipped with a warning.
+# 不需要 API Key；默认只用图片，["video", "image"] 先用视频（干净片段），没有时用图片。
 nasa_media_types = ["image"]
+# Skip NASA results that are not photographed or filmed: artist's concepts,
+# illustrations, renderings, animations, simulations and data visualizations
+# (title, keywords and the opening of the description). For a channel that
+# promises real footage only; off by default.
+# 默认关闭；开启后跳过艺术家构想图、插画、动画、模拟和数据可视化。
+nasa_exclude_illustrations = false
 # Also skip NASA images whose cropped, downscaled frame contains a face (the
 # bundled YuNet model via OpenCV, on top of the text filters). Needs the extra:
 # `uv sync --extra face`; without it a warning is logged once and only the text
@@ -367,8 +383,10 @@ video_terms_style = "legacy"
 # only after a search term runs out of native candidates; otherwise only when
 # the native candidates of all terms cannot cover the voiceover. The smallest
 # qualifying rendition is downloaded, and cropped clips are always
-# center-cropped, even when video_fit_mode is "contain". With "blur" they are
-# not cropped: the whole frame is shown over a blurred copy of the clip.
+# center-cropped, even when video_fit_mode is "contain". With "blur" a clip is
+# cropped only when the crop still covers the canvas without enlarging (4K
+# landscape footage); others (1080p and 720p, e.g. NASA videos) are shown whole
+# over a blurred copy of themselves instead of being enlarged 1.78x or 2.67x.
 # 默认关闭；开启后同方向素材不够用时，才用居中裁剪后满足目标分辨率的另一方向素材。
 crop_materials_to_aspect = false
 

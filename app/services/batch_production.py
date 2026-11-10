@@ -67,6 +67,10 @@ APP_OPTIONS = {
     "material_concurrency": int,
     "video_clip_concurrency": int,
     "nasa_face_filter": bool,
+    # NASA türleri ve sırası (tür önceliği), ör. ["video", "image"].
+    "nasa_media_types": list,
+    # NASA'da sanatçı çizimi, canlandırma, simülasyon ve görselleştirmeleri ele (gerçek görüntü kanalı).
+    "nasa_exclude_illustrations": bool,
     "video_source_fallback_min_relevance": float,
     "video_source_fallback_min_candidates": int,
     "video_codec": str,

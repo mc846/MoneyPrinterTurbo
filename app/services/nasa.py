@@ -43,8 +43,9 @@ USAGE_GUIDELINES_URL = "https://www.nasa.gov/nasa-brand-center/images-and-media/
 FILTER_VERSION = 5
 DETAILS_PAGE = "https://images.nasa.gov/details/{nasa_id}"
 DEFAULT_CREDIT = "NASA"
-# 将来可加入 "video"；目前只实现图片。
-SUPPORTED_MEDIA_TYPES = ("image",)
+# 图片（本模块）和视频（nasa_video）。nasa_media_types 的顺序同时是素材源内的类型
+# 优先级：["video", "image"] 时先用有干净片段的视频，没有时再用图片。
+SUPPORTED_MEDIA_TYPES = ("image", "video")
 # 每次搜索的结果数和逐条查询资产清单/元数据的候选上限：搜索响应已经带有标题、
 # 关键词和描述，文字过滤在本地完成，只有通过过滤的前若干条才需要额外请求。
 _SEARCH_PAGE_SIZE = 50
@@ -341,16 +342,16 @@ def _get_json(url: str, params: dict | None = None) -> Any:
 
 
 def configured_media_types() -> tuple[str, ...]:
-    """读取 nasa_media_types；未实现的类型给出警告并忽略。"""
-    value = config.app.get("nasa_media_types", list(SUPPORTED_MEDIA_TYPES))
+    """读取 nasa_media_types（按顺序、去重）；未实现的类型给出警告并忽略。默认只用图片。"""
+    value = config.app.get("nasa_media_types", ["image"])
     if isinstance(value, str):
         value = [value]
     if not isinstance(value, (list, tuple)):
-        value = list(SUPPORTED_MEDIA_TYPES)
-    requested = [str(media_type).strip().lower() for media_type in value if str(media_type).strip()]
+        value = ["image"]
+    requested = list(dict.fromkeys(str(media_type).strip().lower() for media_type in value if str(media_type).strip()))
     unsupported = [media_type for media_type in requested if media_type not in SUPPORTED_MEDIA_TYPES]
     if unsupported:
-        logger.warning(f"nasa_media_types {unsupported} are not supported yet; only images are used")
+        logger.warning(f"nasa_media_types {unsupported} are not supported; using {SUPPORTED_MEDIA_TYPES} only")
     return tuple(media_type for media_type in requested if media_type in SUPPORTED_MEDIA_TYPES)
 
 
@@ -366,6 +367,8 @@ def search_cache_variant() -> dict[str, Any]:
         "face_filter": face_filter_enabled(),
         "text_filter": text_filter_enabled(),
         "media_types": list(configured_media_types()),
+        # 只在开启时写入：关闭时的键与之前相同，已有缓存继续有效。
+        **({"exclude_illustrations": True} if exclude_illustrations_enabled() else {}),
     }
 
 
@@ -460,6 +463,33 @@ def text_graphic_risk(data: dict) -> str | None:
     if match:
         return match.group(0).strip().lower()
     match = _TEXT_GRAPHIC_DESCRIPTION.search(_plain_text(data.get("description")))
+    return match.group(0).lower() if match else None
+
+
+# 不是拍摄的画面：艺术家构想图、插画、动画、模拟和数据可视化（nasa_exclude_illustrations，
+# 只用真实画面的频道用；默认关闭）。看标题、关键词和描述开头（DESCRIPTION_TAG_WORDS 个词）。
+_ILLUSTRATION = re.compile(
+    r"\bartist(?:'s|’s|s)?\s+(?:concept|conception|impression|illustration|rendering|depiction)\b"
+    r"|\billustrat(?:ion|ed)\b|\brender(?:ing|ed)\b|\banimat(?:ion|ed)\b|\bsimulat(?:ion|ed)\b"
+    r"|\bvisuali[sz]ation\b|\bcomputer[- ]generated\b|\bcgi\b|\bconceptual image\b|\bconcept art\b",
+    re.I,
+)
+
+
+def exclude_illustrations_enabled() -> bool:
+    """读取 nasa_exclude_illustrations，默认关闭。"""
+    value = config.app.get("nasa_exclude_illustrations", False)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def illustration_risk(data: dict) -> str | None:
+    """nasa_exclude_illustrations 开启且标题、关键词或描述开头说明不是拍摄的画面时，返回命中的词。"""
+    if not exclude_illustrations_enabled():
+        return None
+    opening = " ".join(_plain_text(data.get("description")).split()[:DESCRIPTION_TAG_WORDS])
+    match = _ILLUSTRATION.search(f"{_text(data.get('title'))} {_text(data.get('keywords'))} {opening}")
     return match.group(0).lower() if match else None
 
 
@@ -804,6 +834,8 @@ def search_images(
             skipped["person"] += 1
         elif text_graphic_risk(data):
             skipped["text_graphic"] += 1
+        elif illustration_risk(data):
+            skipped["illustration"] += 1
         elif third_party_copyright(data):
             skipped["copyright"] += 1
         else:
@@ -1208,10 +1240,11 @@ def text_filter_active() -> bool:
     return text_filter_enabled() and _text_detector() is not None
 
 
-def crop_text_lines(image_path: str, video_aspect: VideoAspect) -> list[dict] | None:
+def crop_text_lines(image_path: str, video_aspect: VideoAspect | None) -> list[dict] | None:
     """
     返回图片上与居中裁剪区域相交的文字行 [{"score", "height"}]（height 是占裁剪高度的比例）；
-    检测器不可用或读取失败时返回 None。
+    检测器不可用或读取失败时返回 None。``video_aspect`` 为 None 时检查整张图（NASA 视频
+    完整显示时，见 nasa_video.text_area）。
 
     只计置信度不低于 TEXT_SCORE_THRESHOLD、外接矩形宽高比不低于 TEXT_MIN_ASPECT 的文字行。
     裁剪区域按图片自身尺寸计算，因此预览图和原图给出相同的区域。
@@ -1221,9 +1254,9 @@ def crop_text_lines(image_path: str, video_aspect: VideoAspect) -> list[dict] | 
         return None
     cv2, numpy, model = loaded
     try:
-        aspect = VideoAspect(video_aspect)
+        aspect = VideoAspect(video_aspect) if video_aspect is not None else None
         stat = os.stat(image_path)
-        key = (os.path.abspath(image_path), stat.st_mtime, stat.st_size, aspect.value)
+        key = (os.path.abspath(image_path), stat.st_mtime, stat.st_size, aspect.value if aspect else "whole")
         if key in _text_lines:
             return _text_lines[key]
         image = cv2.imdecode(numpy.fromfile(image_path, dtype=numpy.uint8), cv2.IMREAD_COLOR)
@@ -1235,7 +1268,7 @@ def crop_text_lines(image_path: str, video_aspect: VideoAspect) -> list[dict] | 
         with _text_lock:
             model.setInputSize(size)
             polygons, scores = model.detect(image)
-        crop_width, crop_height = _center_crop_size(width, height, aspect)
+        crop_width, crop_height = _center_crop_size(width, height, aspect) if aspect else (width, height)
         left, top = (width - crop_width) // 2, (height - crop_height) // 2
         lines = []
         for polygon, score in zip(polygons, scores):
@@ -1436,7 +1469,13 @@ def _credit_line(record: dict) -> str:
     provider = str(record.get("provider") or "").lower()
     label = CREDIT_SOURCE_LABELS[provider]
     if provider == "nasa":
-        return f"[{label}] {record.get('credit') or DEFAULT_CREDIT}"
+        line = f"[{label}] {record.get('credit') or DEFAULT_CREDIT}"
+        segment = record.get("segment") if isinstance(record.get("segment"), dict) else {}
+        if record.get("media_type") == "video" and isinstance(segment.get("start"), (int, float)):
+            # 视频写明用到的片段，便于对照原视频。
+            start, length = float(segment["start"]), float(segment.get("duration") or record.get("duration") or 0)
+            line += f" (video, {start:g}-{start + length:g} s)"
+        return line
     creator = record.get("creator") if isinstance(record.get("creator"), dict) else {}
     name = str(creator.get("name") or "").strip()
     if provider in {"coverr", "pexels"}:

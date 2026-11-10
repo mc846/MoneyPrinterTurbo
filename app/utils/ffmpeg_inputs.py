@@ -11,7 +11,9 @@ pipe, so such a file fails with "Protocol 'http' not on whitelist" instead.
 The protocol lists live here and nowhere else:
 - commands the application builds use ffmpeg_input() / input_options();
 - commands MoviePy and pydub build are rewritten by restrict_ffmpeg_inputs(),
-  installed by guard_libraries() on the subprocess module those libraries use.
+  installed by guard_libraries() on the subprocess module those libraries use;
+- the one remote input, a window of a NASA video read with HTTP range requests,
+  uses remote_input() (see there why it may open https and nothing else).
 """
 
 import importlib
@@ -19,6 +21,7 @@ import os
 import subprocess
 import threading
 import types
+from urllib.parse import urlsplit
 
 # Inputs read from disk (including files a concat list or an image sequence names).
 FILE_PROTOCOLS = "file"
@@ -48,6 +51,33 @@ def ffmpeg_input(source) -> list[str]:
     """``-protocol_whitelist <protocols> -i <source>`` for an ffmpeg command."""
     source = os.fspath(source)
     return [*input_options(source), "-i", source]
+
+
+# A remote MP4 read over HTTPS: ffmpeg's https protocol opens tls, which opens tcp.
+REMOTE_PROTOCOLS = "https,tls,tcp"
+
+
+def remote_input(url: str, allowed_hosts) -> list[str]:
+    """
+    ``-protocol_whitelist https,tls,tcp -f mov -i <url>`` for one remote MP4.
+
+    Why this input may open the network: a NASA video is hundreds of megabytes
+    and a clip needs a few seconds of it. Reading the window with ``-ss/-t``
+    straight from the server makes ffmpeg fetch only those byte ranges (the
+    server answers HTTP range requests), instead of downloading the file.
+    What still holds:
+    - only https on a host in ``allowed_hosts`` (ValueError otherwise; plain
+      http is refused, a redirect to another protocol fails on the whitelist);
+    - the MP4/MOV demuxer is forced, so a playlist or manifest served in place
+      of the video is not parsed as one and cannot make ffmpeg open other URLs;
+    - every other input of the same command stays local (``ffmpeg_input``).
+    """
+    parts = urlsplit(str(url or ""))
+    if parts.scheme != "https" or not parts.hostname or parts.hostname not in set(allowed_hosts):
+        raise ValueError(f"remote ffmpeg input not allowed: {url!r}")
+    if parts.username or parts.password or parts.port not in (None, 443):
+        raise ValueError(f"remote ffmpeg input not allowed: {url!r}")
+    return ["-protocol_whitelist", REMOTE_PROTOCOLS, "-f", "mov", "-i", parts.geturl()]
 
 
 def restrict_ffmpeg_inputs(command) -> list[str]:

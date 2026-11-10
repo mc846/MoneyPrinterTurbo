@@ -370,7 +370,7 @@ def contact_sheet(final_video: Path, target: Path) -> list[float]:
 
 # ---------------------------------------------------------------- teknik kontrol
 
-_SEARCH_LINE = re.compile(r"nasa image search: term=(?P<term>'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\").*?"
+_SEARCH_LINE = re.compile(r"nasa (?:image|video) search: term=(?P<term>'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\").*?"
                           r"kept=(?P<kept>\d+), skipped=(?P<skipped>\{[^}]*\})")
 _FALLBACK_LINE = re.compile(r"material fallback: term=(?P<term>'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"), "
                             r"(?P<primary>\w+)=\d+/(?P<primary_count>\d+) qualified, "
@@ -378,10 +378,11 @@ _FALLBACK_LINE = re.compile(r"material fallback: term=(?P<term>'(?:[^'\\]|\\.)*'
 # Kaynak zincirinin satırı (source_chain): tried=<kaynak>:<aday>/<uygun|->[:429|:skipped],...
 _CHAIN_LINE = re.compile(r"material source chain: term=(?P<term>'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"), "
                          r"tried=(?P<tried>\S+), using=(?P<using>\w+), reason=(?P<reason>\w+)")
-# nasa.search_images 的 skipped 计数键 → 报告里的淘汰原因。
+# nasa.search_images 和 nasa_video.search_videos 的 skipped 计数键 → 报告里的淘汰原因。
 _SKIP_REASONS = {
     "person": "kisi", "text_graphic": "yazi_metaveri", "copyright": "telif",
-    "third_party_credit": "kredi", "resolution": "cozunurluk",
+    "third_party_credit": "kredi", "credit": "kredi", "resolution": "cozunurluk",
+    "illustration": "cizim", "format": "program",
 }
 
 
@@ -393,9 +394,11 @@ def log_summary(log_lines: list[str], terms: list[str]) -> dict:
     for line in log_lines:
         if match := _SEARCH_LINE.search(line):
             term = ast.literal_eval(match["term"])
-            searched[term] = int(match["kept"])
+            # NASA görsel ve video araması aynı terim için ayrı satır yazar.
+            searched[term] = searched.get(term, 0) + int(match["kept"])
             for reason, count in ast.literal_eval(match["skipped"]).items():
-                eliminations[_SKIP_REASONS.get(reason, "diger")] += int(count)
+                key = _SKIP_REASONS.get(reason, "diger")
+                eliminations[key] = eliminations.get(key, 0) + int(count)
         elif match := _CHAIN_LINE.search(line):
             term = ast.literal_eval(match["term"])
             tried = [part.split(":") for part in match["tried"].split(",")]
@@ -413,6 +416,8 @@ def log_summary(log_lines: list[str], terms: list[str]) -> dict:
             eliminations["yazi_onizleme"] += 1
         elif line.startswith("nasa face filter: skipped"):
             eliminations["yuz"] += 1
+        elif line.startswith("nasa video filter: skipped"):
+            eliminations["temiz_bolum"] = eliminations.get("temiz_bolum", 0) + 1
     empty, switched = [], []
     for term in terms:
         if term in fallback:
@@ -451,6 +456,25 @@ def credit_problems(material_sources) -> list[str]:
     ]
 
 
+MATERIAL_LABELS = {"pixabay": "Pixabay", "coverr": "Coverr", "pexels": "Pexels"}
+
+
+def material_summary(material_sources) -> dict:
+    """Kullanılan görüntülerin kaynağa ve türe göre sayısı, ilk görülme sırasıyla
+    (ör. {"NASA video": 4, "NASA görsel": 2, "Pixabay": 1})."""
+    counts: dict = {}
+    for record in material_sources or []:
+        if not isinstance(record, dict):
+            continue
+        provider = str(record.get("provider") or "").lower()
+        if provider == "nasa":
+            label = "NASA video" if record.get("media_type") == "video" else "NASA görsel"
+        else:
+            label = MATERIAL_LABELS.get(provider, provider or "yerel")
+        counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
 def technical_checks(task_dir: Path, final_video: Path, script: str, params: dict, terms: list[str],
                      material_sources, log_lines: list[str], preset) -> dict:
     duration = round(_media_duration(final_video), 1)
@@ -468,6 +492,7 @@ def technical_checks(task_dir: Path, final_video: Path, script: str, params: dic
         "glifsiz_karakterler": missing_glyphs(_subtitle_text(task_dir / "subtitle.srt") or script, font_path),
         "yazi_tipi": font_name,
         "kredi_sorunlari": credit_problems(material_sources),
+        "goruntuler": material_summary(material_sources),
     }
     checks.update(log_summary(log_lines, terms))
     return checks
@@ -641,6 +666,7 @@ def _load_quality(batch_dir: Path, item) -> dict:
 ELIMINATION_LABELS = {
     "yazi_onizleme": "önizlemede yazı", "yuz": "yüz", "kisi": "kişi (metaveri)", "yazi_metaveri": "yazı/grafik (metaveri)",
     "telif": "telif", "kredi": "üçüncü taraf kredisi", "cozunurluk": "çözünürlük", "diger": "diğer",
+    "cizim": "çizim/canlandırma", "program": "program biçimi (video)", "temiz_bolum": "temiz bölüm yok (video)",
 }
 
 
@@ -723,6 +749,7 @@ def _item_card(batch_dir: Path, item) -> str:
         ("Kelime", f"{checks.get('kelime')}" + (f" (hedef {checks['kelime_hedef'][0]}-{checks['kelime_hedef'][1]})" if checks.get("kelime_hedef") else "")),
         ("Glifsiz karakter", " ".join(checks.get("glifsiz_karakterler", [])) or "yok"),
         ("Kredi sorunu", "; ".join(checks.get("kredi_sorunlari", [])) or "yok"),
+        ("Görüntüler", " · ".join(f"{k} {v}" for k, v in (checks.get("goruntuler") or {}).items()) or "yok"),
         ("Boş terim", ", ".join(checks.get("bos_terimler", [])) or "yok"),
         ("Yedeğe geçen terim", ", ".join(checks.get("yedege_gecen_terimler", [])) or "yok"),
         ("Filtre elemeleri", ", ".join(f"{ELIMINATION_LABELS.get(k, k)} {v}" for k, v in elim.items() if v) or "yok"),
