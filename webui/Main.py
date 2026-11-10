@@ -1326,7 +1326,7 @@ def _build_video_download_name(subject, index, total):
 
 def _render_task_table(filtered_tasks, key_prefix):
     with st.container(key=f"task_table_header_{key_prefix}"):
-        header_cols = st.columns([1.1, 1.7, 3.0, 0.8, 1.6], vertical_alignment="center")
+        header_cols = st.columns([1.1, 1.7, 3.0, 0.8, 2.0], vertical_alignment="center")
         header_cols[0].caption(tr("Task Status"))
         header_cols[1].caption(tr("Task Updated At"))
         header_cols[2].caption(tr("Task Subject"))
@@ -1357,7 +1357,7 @@ def _render_task_table(filtered_tasks, key_prefix):
                 key=f"task_row_{key_prefix}_{safe_task_key}", border=True
             ):
                 row_cols = st.columns(
-                    [1.1, 1.7, 3.0, 0.8, 1.6],
+                    [1.1, 1.7, 3.0, 0.8, 2.0],
                     vertical_alignment="center",
                 )
                 row_cols[0].write(_task_state_label(task["state"], has_video))
@@ -1366,7 +1366,7 @@ def _render_task_table(filtered_tasks, key_prefix):
                 row_cols[3].write(f"{task['progress']}%")
 
                 action_cols = row_cols[4].columns(
-                    4,
+                    5,
                     vertical_alignment="center",
                     gap="small",
                 )
@@ -1425,6 +1425,23 @@ def _render_task_table(filtered_tasks, key_prefix):
                             st.rerun()
                         else:
                             st.error(tr("Task Delete Failed"))
+
+                with action_cols[4]:
+                    # A revision needs the task's video and its saved materials (materials.json).
+                    revise_label = tr("revision.button")
+                    if st.button(
+                        revise_label,
+                        key=f"revise_task_{key_prefix}_{task_id}",
+                        use_container_width=True,
+                        icon=":material/auto_fix_high:",
+                        help=revise_label,
+                        disabled=is_busy or not has_video or not os.path.isfile(
+                            os.path.join(task["task_path"], "materials", "materials.json")
+                        ),
+                    ):
+                        from webui.revision_page import open_revision
+
+                        open_revision(task_id)
 
 
 def _render_task_manager_panel(tasks=None):
@@ -9850,6 +9867,13 @@ def _render_application():
 
         render_batch_page(tr)
         # 批量视图不渲染生成表单，也不请求保存配置：config.toml 不会被写入。
+        return
+
+    from webui.revision_page import render_revision_page, revision_view_active
+
+    if revision_view_active():
+        # A revision's settings are its own: like the batch view, no form and no config save.
+        render_revision_page(tr)
         return
 
     restore_applied = _apply_pending_task_restore()

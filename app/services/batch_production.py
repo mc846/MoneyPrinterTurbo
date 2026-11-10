@@ -947,6 +947,10 @@ def main(argv: list[str] | None = None, prog: str = "batch.py") -> int:
 
     if argv and argv[0] in batch_review.COMMANDS:  # iki aşamalı akışın komutları: durum, render, onayla…
         return batch_review.cli_main(argv, prog)
+    if argv and argv[0] == "paketi-yenile":  # bir revizyon için yükleme paketi (task_revisions)
+        from app.services import task_revisions
+
+        return task_revisions.package_cli(argv[1:], prog)
     parser = argparse.ArgumentParser(
         prog=prog,
         description="Bir .csv ya da .txt dosyasındaki konular için sırayla video üretir; her video için "

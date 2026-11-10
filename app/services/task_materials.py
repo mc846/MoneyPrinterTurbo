@@ -90,11 +90,14 @@ def load(task_dir: str | Path) -> dict | None:
 
 
 def material_sources(manifest: dict) -> list[dict]:
-    """The ``material_sources`` records of script.json, rebuilt from a manifest."""
+    """The ``material_sources`` records of script.json, rebuilt from a manifest.
+
+    Materials a revision added (``added_by``) belong to that revision's video only."""
     return [
         dict(material["source"])
         for material in manifest.get("materials") or []
         if isinstance(material, dict) and isinstance(material.get("source"), dict)
+        and not material.get("added_by")
     ]
 
 
@@ -490,6 +493,7 @@ def _candidate_entries(recorder, term_index, term, ordered, used_by_term, previe
         else:
             entry["status"] = "not_selected"
             entry["reason"] = "not needed: the voiceover was already covered"
+        entry["item"] = _item_record(item)
         entry["preview"] = None
         url = _preview_url(item)
         if url:
@@ -497,6 +501,87 @@ def _candidate_entries(recorder, term_index, term, ordered, used_by_term, previe
             previews.append((key, url, name, entry))
         entries.append(entry)
     return entries
+
+
+STOCK_PROVIDERS = ("pexels", "pixabay", "coverr", "nasa")
+
+
+def _item_record(item) -> dict | None:
+    """What a revision needs to download a candidate later (task_revisions adds scenes).
+
+    Only stock sources, whose media URLs are public; query strings are dropped, so no
+    key or token is stored. The source info is the search cache's whitelist."""
+    from app.services import material, material_cache
+
+    provider = _provider(item)
+    url = material._safe_public_url(getattr(item, "url", ""))
+    if provider not in STOCK_PROVIDERS or not url:
+        return None
+    return {
+        "provider": provider,
+        "url": url,
+        "duration": getattr(item, "duration", None),
+        "source_info": material_cache._cached_source_info(item),
+    }
+
+
+def manifest_path(task_id: str) -> Path:
+    return folder(task_id) / MANIFEST
+
+
+def stored_path(task_id: str, entry: dict) -> Path:
+    """Path of a file entry of the manifest (``materials[].files[role]``)."""
+    return folder(task_id) / entry["path"]
+
+
+def cache_path(entry: dict) -> Path | None:
+    """Where the file came from under storage/ (None if it was outside storage)."""
+    source = str(entry.get("source") or "")
+    if "/" not in source:
+        return None
+    return Path(utils.storage_dir()) / source
+
+
+def add_material(task_id: str, item, roles: dict[str, str], source_record: dict, *,
+                 search_term: str, term_index: int | None, added_by: str,
+                 relevance: dict | None = None) -> dict:
+    """Store files of a material a revision added and append it to materials.json."""
+    path = manifest_path(task_id)
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    folder_path = folder(task_id)
+    number = len(manifest.get("materials") or []) + 1
+    info = _info(item)
+    provider = _provider(item)
+    stem = f"{number:02d}-{_name_part(provider, 20)}-{_name_part(info.get('asset_id') or number)}"
+    files = {}
+    for role in ("original", "prepared", "clip", "video"):
+        if roles.get(role) and os.path.isfile(roles[role]):
+            target = folder_path / f"{stem}-{role}{Path(roles[role]).suffix.lower()}"
+            how = store_file(roles[role], target)
+            files[role] = {
+                "path": target.name, "sha256": _sha256(target), "size": target.stat().st_size,
+                "stored_as": how, "source": _source_label(roles[role]),
+            }
+    material = {
+        "id": f"m{number:02d}",
+        "provider": provider,
+        "asset_id": info.get("asset_id"),
+        "source_page": info.get("source_page"),
+        "credit": info.get("credit"),
+        "creator": source_record.get("creator"),
+        "search_term": search_term,
+        "term_index": term_index,
+        "duration": getattr(item, "duration", None),
+        "relevance": relevance,
+        "filters": [],
+        "files": files,
+        "source": dict(source_record),
+        "added_by": added_by,
+    }
+    manifest.setdefault("materials", []).append(material)
+    manifest["updated_at"] = _now()
+    task_artifacts._write_json_atomic(path, manifest)
+    return material
 
 
 def _settings(params) -> dict:

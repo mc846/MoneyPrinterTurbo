@@ -479,10 +479,12 @@ def _place_video(source: Path, target: Path) -> str:
 
 
 def build_package(item, result: dict, preset, folder: Path, log_lines: list[str], ask=_ask,
-                  review: dict | None = None) -> dict:
+                  review: dict | None = None, revision: dict | None = None) -> dict:
     """
     Bir videonun yükleme paketini ve kalite dosyasını yazar; durum için kısa bir özet döner. review (iki aşamalı
     akış, batch_review.approved_copy): metin yeniden denetlenmez, onaylanan metnin son denetimi kullanılır.
+    revision (task_revisions.refresh_package): paket bir revizyon için; altyazı, kaynaklar, ayarlar ve denetim
+    revizyondan gelir (metin değişmediyse özgün paketin denetimi), metin yeniden denetlenmez.
     """
     folder.mkdir(parents=True, exist_ok=True)
     final_video = Path(result["videos"][0])
@@ -492,20 +494,26 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
     terms = list(result.get("terms") or data.get("search_terms") or [])
     material_sources = data.get("material_sources") or []
     params = data.get("params") or {}
+    subtitle_source = task_dir / "subtitle.srt"
+    if revision is not None:
+        material_sources = list(revision.get("material_sources") or [])
+        params = revision.get("params") or params
+        subtitle_source = Path(revision["subtitle"]) if revision.get("subtitle") else folder / ".altyazi-yok.srt"
 
     placement = _place_video(final_video, folder / "video.mp4")
     (folder / "script.txt").write_text(script + "\n", encoding="utf-8")
-    credits = task_materials.credits_text(task_dir)
+    credits = (nasa.credits_text(material_sources) if revision is not None
+               else task_materials.credits_text(task_dir))
     if credits:
         # materials.json keeps the records credits.txt is made from (the same text).
         (folder / "credits.txt").write_text(credits, encoding="utf-8", newline="\n")
-    elif (task_dir / nasa.CREDITS_FILE).is_file():
+    elif revision is None and (task_dir / nasa.CREDITS_FILE).is_file():
         shutil.copy2(task_dir / nasa.CREDITS_FILE, folder / "credits.txt")
 
     # Altyazılar önce: paylasim.md dosya adlarını anar.
     source_language = str(params.get("video_language") or "tr").split("-")[0].lower() or "tr"
     subtitles = batch_subtitles.write_subtitles(
-        folder, task_dir / "subtitle.srt", utils.normalize_script_for_subtitle_matching(script),
+        folder, subtitle_source, utils.normalize_script_for_subtitle_matching(script),
         int(_media_duration(final_video) * 1000), source_language,
         [code for code in preset.subtitle_translations if code.split("-")[0] != source_language], ask,
     )
@@ -516,13 +524,17 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
         cover.save(folder / "kapak.jpg", "JPEG", quality=90)
     moments = contact_sheet(final_video, folder / "kareler.jpg")
 
-    if review is not None:
+    if revision is not None:
+        audit = revision.get("audit") or {"durum": "kapalı", "iddialar": [], "sayim": {}, "isaretli": []}
+    elif review is not None:
         audit = review.get("audit") or {"durum": "kapalı", "iddialar": [], "sayim": {}, "isaretli": []}
     elif preset.audit:
         audit = audit_script(item.subject, script, ask=ask)
     else:
         audit = {"durum": "kapalı", "iddialar": [], "sayim": {}, "isaretli": []}
-    checks = technical_checks(task_dir, final_video, script, params, terms, material_sources, log_lines, preset)
+    # The glyph check reads <folder>/subtitle.srt: a revision's own folder has one too.
+    checks_dir = subtitle_source.parent if revision is not None else task_dir
+    checks = technical_checks(checks_dir, final_video, script, params, terms, material_sources, log_lines, preset)
     audited = audit.get("durum") != "kapalı"
     reasons = review_reasons(audit, checks) if audited else review_reasons({"durum": "tamam"}, checks)
     warnings = check_warnings(checks) + subtitles["uyarilar"]
@@ -547,6 +559,8 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
         if review.get("approved_despite_flags"):
             reasons.append("Y/X ile yine de onaylandı")
             quality["kontrol_gerekli"] = True
+    if revision is not None:
+        quality["revizyon"] = revision.get("name")
     (folder / "kalite.json").write_text(json.dumps(quality, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"kontrol_gerekli": quality["kontrol_gerekli"], "nedenler": reasons, "uyarilar": warnings,
             "sure_sn": checks["sure_sn"], "kelime": checks["kelime"], "sayim": audit.get("sayim", {}),

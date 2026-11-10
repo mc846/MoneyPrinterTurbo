@@ -2013,6 +2013,12 @@ def apply_llm_overrides(args: argparse.Namespace) -> None:
 
 
 def run_cli(argv: Sequence[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] == ["revizyon"]:
+        # A new revision of a finished task from its saved materials (app/services/task_revisions.py).
+        from app.services import task_revisions
+
+        return task_revisions.cli_main(arguments[1:])
     args = parse_args(argv)
     import app.config  # noqa: F401 -- 初始化配置及进程日志设置。
     apply_nasa_overrides(args)
