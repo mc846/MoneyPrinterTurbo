@@ -331,7 +331,9 @@ def test_subtitle_only_change_reuses_the_voiceover_and_downloads_nothing(storage
     assert voice_seconds["calls"] == [] and audits == []
     assert record["audio"]["reused_from"] == "r001"
     assert record["audio"]["sha256"] == _sha(storage / "tasks" / task_id / "audio.mp3")
-    assert sorted(p.name for p in folder.iterdir()) == ["audio.mp3", "final.mp4", "revision.json", "script.txt"]
+    # credits.txt: the revision's own NASA credits, from the scenes it shows.
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "audio.mp3", "credits.txt", "final.mp4", "revision.json", "script.txt"]
     assert [s["status"] for s in record["scenes"]] == ["kept"] * 4
     assert record["params"]["text_fore_color"] == "#FFFF00"
     assert record["video"]["duration"] == pytest.approx(11.0, abs=0.15)
@@ -503,8 +505,9 @@ def test_cli_flags_become_revision_settings(storage, monkeypatch, capsys):
     task_id = _make_task(storage)
     seen = {}
 
-    def create(task, *, script=None, settings=None, base=None):
+    def create(task, *, script=None, settings=None, base=None, scene_ops=None, performance_settings=None):
         seen.update(task=task, script=script, settings=settings, base=base)
+        seen["ops"], seen["performance"] = scene_ops, performance_settings
         return {"revision": "r002", "check_required": True,
                 "video": {"file": "final.mp4"}}
 
@@ -519,7 +522,7 @@ def test_cli_flags_become_revision_settings(storage, monkeypatch, capsys):
     assert seen == {"task": task_id, "script": "yeni metin", "base": "r001", "settings": {
         "voice_name": "tr-TR-AhmetNeural-Male", "voice_rate": 1.2, "subtitle_enabled": True,
         "text_fore_color": "#FFFF00", "stroke_width": 2.0, "subtitle_position": "top", "bgm_file": "output001.mp3",
-        "bgm_volume": 0.3, "bgm_type": "custom", "nasa_credit_overlay": False}}
+        "bgm_volume": 0.3, "bgm_type": "custom", "nasa_credit_overlay": False}, "ops": [], "performance": {}}
     output = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert output["revision"] == "r002" and output["check_required"]
     assert batch_review.busy(storage / "tasks" / task_id / "revisions") is None  # the lock is released
@@ -629,8 +632,8 @@ def test_panel_starts_from_the_task_and_never_saves_settings(storage, monkeypatc
     assert app.selectbox(key=f"{key}_voice").value == "tr-TR-EmelNeural-Female"
     assert app.selectbox(key=f"revision_base_{task_id}").options == ["r001"]
     assert app.button(key="revision_generate").disabled  # nothing changed yet
-    captions = [c.value for c in app.caption]
-    assert sum("v1-s0" in c for c in captions) == 4
+    # A card per scene (scene_edits); its title is the scene ID and term.
+    assert sum(m.value.startswith("**v1-s0") for m in app.markdown) == 4
     app.color_picker(key=f"{key}_text_color").set_value("#FFFF00").run()
     app.number_input(key=f"{key}_font_size").set_value(72).run()
     assert not app.button(key="revision_generate").disabled

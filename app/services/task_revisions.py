@@ -8,11 +8,14 @@ pipeline put them. Revisions are never changed: a new one is built in a hidden f
 and renamed into place; ``verify`` compares the files with the recorded SHA-256.
 
 The materials stay shared (``materials/materials.json``); revisions refer to its
-scenes and materials by ID. A revision changes only the text, the voice and its rate,
+scenes and materials by ID. A revision changes the text, the voice and its rate,
 the subtitle style, the background music and the NASA on-screen credit
-(``EDITABLE``). Durations follow the new voiceover by the rules in
-``revision_timing``; materials are downloaded only for an added scene. The network is
-used only for TTS, the audit of a changed text and such downloads.
+(``EDITABLE``), and single scenes: replace, remove, crop position (``scene_edits``).
+Durations follow the new voiceover by the rules in ``revision_timing``; materials are
+downloaded only for an added or replaced scene. The network is used only for TTS, the
+audit of a changed text, a scene search and such downloads. Scene clips are cached in
+``revisions/.klipler`` so only changed scenes are rendered; speed settings come from
+``performance`` (never from config.toml).
 
 Command line: ``python cli.py revizyon <task_id> [options]`` (``cli_main``). The
 WebUI starts the same command in a background process (``start_background``).
@@ -28,6 +31,7 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,7 +40,7 @@ from loguru import logger
 from app import paths
 from app.models.schema import MaterialInfo, VideoAspect, VideoFitMode, VideoParams
 from app.services import revision_timing as timing
-from app.services import task_artifacts, task_materials
+from app.services import scene_edits, task_artifacts, task_materials
 from app.utils import ffmpeg_inputs, utils
 
 # MoviePy measures durations here with ffmpeg; its commands carry the protocol whitelist too.
@@ -141,7 +145,7 @@ def verify(task_id: str, revision: str) -> list[str]:
     """Files of the revision whose content no longer matches revision.json."""
     record = load(task_id, revision)
     changed = []
-    for key in ("script", "audio", "subtitle", "video"):
+    for key in ("script", "audio", "subtitle", "video", "credits"):
         entry = record.get(key) or {}
         path = file_path(task_id, record, key)
         if path is None or not entry.get("sha256"):
@@ -463,29 +467,44 @@ def _scene(record: dict) -> timing.Scene:
     )
 
 
-def _image_source(task_id: str, material: dict, work: Path) -> Path:
-    """The prepared image (NASA) or uploaded image (local) to render: in the cache, where the
-    zoom clip of the same duration is reused; restored there from the task if cleaned."""
-    files = material["files"]
-    entry = files.get("prepared") or files.get("local")
+def _cached_copy(task_id: str, entry: dict, work: Path, name: str) -> Path:
+    """A material file at its place in the cache (restored there from the task if cleaned)."""
     stored = task_materials.stored_path(task_id, entry)
     cached = task_materials.cache_path(entry)
     if cached is None:
-        cached = work / f"image-{material['id']}{stored.suffix}"
+        cached = work / f"{name}{stored.suffix}"
     if not cached.is_file():
         cached.parent.mkdir(parents=True, exist_ok=True)
         task_materials.store_file(stored, cached)
     return cached
 
 
+def _image_source(task_id: str, material: dict, work: Path, crop=None, params: VideoParams | None = None) -> Path:
+    """The image to render: the prepared image (NASA) or uploaded image (local) in the cache,
+    where the zoom clip of the same duration is reused. With a crop position, the source
+    image is prepared again at that position (its own cache name, nasa.prepare_image)."""
+    from app.services import nasa
+
+    files = material["files"]
+    if crop:
+        entry = files.get("original") or files.get("local")
+        original = _cached_copy(task_id, entry, work, f"original-{material['id']}")
+        prepared = nasa.prepare_image(str(original), VideoAspect(params.video_aspect), params.video_clip_duration,
+                                      params.image_motion, crop_position=tuple(crop))
+        if not prepared:
+            raise RevisionError(f"material {material['id']} cannot be cropped at {crop}: below the output resolution")
+        return Path(prepared)
+    return _cached_copy(task_id, files.get("prepared") or files.get("local"), work, f"image-{material['id']}")
+
+
 def _render_clip(task_id: str, material: dict, scene: timing.Scene, duration: float,
-                 params: VideoParams, work: Path, number: int) -> Path:
+                 params: VideoParams, work: Path, number: int, crop=None) -> Path:
     from app.services import video
 
     width, height = VideoAspect(params.video_aspect).to_resolution()
     output = work / f"clip-{number:03d}.mp4"
     if scene.kind == timing.IMAGE:
-        image = _image_source(task_id, material, work)
+        image = _image_source(task_id, material, work, crop, params)
         zoom = video.render_image_zoom_video(
             str(image), max(1, math.ceil(duration)), image_motion=params.image_motion,
             output_size=(width, height),
@@ -508,6 +527,116 @@ def _render_clip(task_id: str, material: dict, scene: timing.Scene, duration: fl
                                    bool(params.crop_materials_to_aspect))
     video._normalize_clip_with_ffmpeg(item, (width, height), fit, str(output))
     return output
+
+
+# ------------------------------------------------------------------ performance settings
+
+# Settings that change only how fast a revision is made. They come from (1) the panel or
+# the command line, (2) the task's own record (materials.json settings.performance;
+# a batch task without one: its preset), (3) these fast defaults; never from config.toml,
+# which the WebUI may have changed since the task.
+PERFORMANCE_DEFAULTS = {
+    "final_render_engine": "ffmpeg",
+    "material_concurrency": 3,
+    "video_clip_concurrency": 3,
+    "video_codec": None,
+    "n_threads": None,
+}
+_CONFIG_PERFORMANCE = ("final_render_engine", "material_concurrency", "video_clip_concurrency", "video_codec")
+
+
+def _batch_preset_performance(task_id: str) -> dict | None:
+    """The preset's speed settings of the batch this task belongs to (tasks made before the record)."""
+    from app.services import batch_production as bp
+
+    for state_file in bp.batches_dir().glob(f"*/{bp.STATE_FILE}"):
+        try:
+            data = _read(state_file)
+        except (OSError, ValueError):
+            continue
+        if not any(item.get("task_id") == str(task_id) for item in data.get("items") or []):
+            continue
+        try:
+            preset = bp.load_preset(data["preset"])
+        except Exception as exc:
+            logger.warning(f"the batch preset of task {task_id} cannot be read: {exc}")
+            return None
+        return {
+            "final_render_engine": preset.video.get("final_render_engine"),
+            "material_concurrency": preset.app.get("material_concurrency"),
+            "video_clip_concurrency": preset.app.get("video_clip_concurrency"),
+            "video_codec": preset.app.get("video_codec"),
+            "n_threads": preset.video.get("n_threads"),
+        }
+    return None
+
+
+def performance(task_id: str, explicit: dict | None = None) -> dict:
+    """{setting: {"value", "source"}}: source is explicit, task, preset or default."""
+    manifest = task_materials.load(task_folder(task_id)) or {}
+    recorded, source = (manifest.get("settings") or {}).get("performance"), "task"
+    if not recorded:
+        recorded, source = _batch_preset_performance(task_id), "preset"
+    resolved = {}
+    for name, default in PERFORMANCE_DEFAULTS.items():
+        if explicit and explicit.get(name) not in (None, ""):
+            resolved[name] = {"value": explicit[name], "source": "explicit"}
+        elif recorded and recorded.get(name) not in (None, ""):
+            resolved[name] = {"value": recorded[name], "source": source}
+        else:
+            resolved[name] = {"value": default, "source": "default"}
+    return resolved
+
+
+@contextmanager
+def _performance_applied(resolved: dict):
+    """The speed settings for this process while the revision renders, then the old values back.
+
+    config.app is only changed in memory: the revision runs in its own process (or a test)
+    and never saves the config."""
+    from app.config import config
+
+    saved = {name: config.app.get(name, _UNSET) for name in _CONFIG_PERFORMANCE}
+    try:
+        for name in _CONFIG_PERFORMANCE:
+            value = resolved[name]["value"]
+            if value is None:
+                config.app.pop(name, None)
+            else:
+                config.app[name] = value
+        yield
+    finally:
+        for name, value in saved.items():
+            if value is _UNSET:
+                config.app.pop(name, None)
+            else:
+                config.app[name] = value
+
+
+_UNSET = object()
+
+# ------------------------------------------------------------------ scene clips
+
+# Scene clips are kept in revisions/.klipler/ by everything that shapes them, so a revision
+# renders only the scenes that changed. Raise when the clip rendering changes.
+CLIP_VERSION = 1
+CLIP_CACHE = ".klipler"
+
+
+def _clip_key(material: dict, scene: timing.Scene, frames: int, crop, params: VideoParams) -> str:
+    files = material.get("files") or {}
+    if scene.kind == timing.IMAGE:
+        source = (files.get("original") or files.get("local")) if crop else (files.get("prepared") or files.get("local"))
+    else:
+        source = files.get("clip") or files.get("video") or files.get("local")
+    payload = [
+        CLIP_VERSION, (source or {}).get("sha256"), scene.kind, round(scene.start, 3), frames,
+        list(crop) if crop else None, list(VideoAspect(params.video_aspect).to_resolution()),
+        str(getattr(params.image_motion, "value", params.image_motion)),
+        str(getattr(params.video_fit_mode, "value", params.video_fit_mode)),
+        bool(params.crop_materials_to_aspect),
+    ]
+    return hashlib.sha256(json.dumps(payload).encode("utf-8")).hexdigest()[:32]
 
 
 def _frame_counts(durations: list[float], fps: int) -> list[int]:
@@ -539,9 +668,93 @@ def _resolve_bgm(params: VideoParams, parent: dict, music_changed: bool) -> str:
 # ------------------------------------------------------------------ creating a revision
 
 
+def _material_summary(material: dict) -> dict:
+    return {key: material.get(key) for key in ("id", "provider", "asset_id", "credit", "search_term")}
+
+
+def _ancestor_scenes(task_id: str, parent: dict) -> dict:
+    """The latest version of every scene the revision's ancestors had (for scenes coming back)."""
+    found, record = {}, parent
+    while record:
+        for scene in record.get("scenes") or []:
+            found.setdefault(scene["id"], scene)
+        record = load(task_id, record["parent"]) if record.get("parent") else None
+    return found
+
+
+def _apply_scene_ops(task_id: str, name: str, ops: list, records: list[dict], manifest: dict, materials: dict,
+                     params: VideoParams) -> tuple[list[dict], list[dict], list[str], int]:
+    """Apply scene operations to the base scenes: (scenes, changes old → new, warnings, downloads)."""
+    by_id = {record["id"]: record for record in records}
+    changes, warnings, downloads = [], [], 0
+    aspect = VideoAspect(params.video_aspect)
+    for op in [o for o in ops if o.op == scene_edits.REMOVE]:
+        record = by_id.pop(op.scene)
+        changes.append({"scene": op.scene, "op": "remove", "from": _material_summary(materials[record["material"]])})
+    for op in [o for o in ops if o.op == scene_edits.REPLACE]:
+        record = by_id[op.scene]
+        change = {"scene": op.scene, "op": "replace", "from": _material_summary(materials[record["material"]])}
+        if op.path:
+            added, file_warnings = scene_edits.add_local_file(
+                task_id, name, record, op.path, aspect, params.video_clip_duration, params.image_motion)
+            change.update(file=os.path.basename(op.path), warnings=file_warnings)
+            warnings += [f"{op.scene}: {warning}" for warning in file_warnings]
+        else:
+            key = op.candidate
+            if op.search:
+                found = scene_edits.search(task_id, record, op.search)
+                manifest, materials = _materials(task_id)
+                usable = [c for c in scene_edits.candidate_choices(manifest, materials, record, list(by_id.values()))
+                          if c["selectable"] and c.get("term_index") == found["index"]]
+                if not usable:
+                    raise RevisionError(f"the search {op.search!r} found no usable result for {op.scene}")
+                key = usable[0]["key"]
+                change["search"] = op.search
+            choice = next(c for c in scene_edits.candidate_choices(manifest, materials, record, list(by_id.values()))
+                          if c["key"] == key)
+            identity = (choice.get("provider"), str(choice.get("asset_id")))
+            added = next((m for m in materials.values()
+                          if (m.get("provider"), str(m.get("asset_id"))) == identity), None)
+            if added is None:
+                term = next(t for t in manifest["terms"] if t["index"] == choice["term_index"])
+                fetcher = _Fetcher(task_id, name, params, {key: (choice, term)})
+                fetched = fetcher(timing.Candidate(key, choice["term_index"]))
+                downloads += fetcher.downloads
+                if fetched is None:
+                    raise RevisionError(f"{key} could not be used: {fetcher.skipped[-1]['reason']}")
+                manifest, materials = _materials(task_id)
+                added = materials[fetched.material]
+            change["candidate"] = key
+        manifest, materials = _materials(task_id)
+        kind = _material_kind(added)
+        record.update(material=added["id"], kind=kind, start=0.0, status="replaced",
+                      search_term=added.get("search_term") or record.get("search_term"),
+                      source_duration=_media_duration(_footage(task_id, added)) if kind == timing.VIDEO else None)
+        record.pop("crop", None)
+        change["to"] = _material_summary(added)
+        changes.append(change)
+    for op in [o for o in ops if o.op == scene_edits.CROP]:
+        record = by_id[op.scene]
+        image = scene_edits._image_for_crop(task_id, materials[record["material"]])
+        if record["kind"] != timing.IMAGE or image is None:
+            raise RevisionError(f"{op.scene}: only image scenes can be cropped")
+        if not scene_edits._resolution_ok(str(image), aspect):
+            raise RevisionError(f"{op.scene}: the cropped area would be below the output resolution")
+        changes.append({"scene": op.scene, "op": "crop", "from": record.get("crop") or list(scene_edits.CENTER),
+                        "to": list(op.position)})
+        record["crop"] = list(op.position)
+        if record.get("status") != "replaced":
+            record["status"] = "cropped"
+    return [record for record in records if record["id"] in by_id], changes, warnings, downloads
+
+
 def create(task_id: str, *, script: str | None = None, settings: dict | None = None,
-           base: str | None = None) -> dict:
-    """Make the next revision from ``base`` (default: the latest). Returns its revision.json."""
+           base: str | None = None, scene_ops: list | None = None,
+           performance_settings: dict | None = None) -> dict:
+    """Make the next revision from ``base`` (default: the latest). Returns its revision.json.
+
+    ``scene_ops`` are scene_edits.SceneOp (replace, remove, crop); ``performance_settings``
+    are the explicitly given speed settings (see ``performance``)."""
     from app.services import batch_review, nasa, video
 
     started = time.monotonic()
@@ -564,10 +777,18 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
             raise RevisionError("the text is empty")
         changes["script"] = {"from_words": len(parent_script.split()), "to_words": len(new_script.split())}
         params_dict["video_script"] = new_script
+    ops = list(scene_ops or [])
+    if ops:
+        changes["scenes"] = [op.describe() for op in ops]
     if not changes:
         raise RevisionError("nothing changed")
+    resolved_performance = performance(task_id, performance_settings)
+    params_dict["n_threads"] = resolved_performance["n_threads"]["value"]
     params = VideoParams(**params_dict)
     manifest, materials = _materials(task_id)
+    scene_records = [dict(record) for record in parent["scenes"]]
+    if ops:
+        scene_edits.validate(task_id, ops, scene_records, manifest, materials, VideoAspect(params.video_aspect))
 
     folder = revisions_dir(task_id)
     folder.mkdir(exist_ok=True)
@@ -576,7 +797,9 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
     work = folder / f".{name}-{uuid.uuid4().hex[:8]}.tmp"
     work.mkdir()
     timings, network = {}, {"tts": False, "audit": False, "downloads": 0}
+    stack = ExitStack()
     try:
+        stack.enter_context(_performance_applied(resolved_performance))
         # 1. Voiceover and subtitles: reused unless the text or the voice changed.
         step = time.monotonic()
         audio, subtitle = work / "audio.mp3", work / "subtitle.srt"
@@ -609,26 +832,45 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
                 reasons.append(batch_review.describe_audit(audit))
             timings["audit"] = round(time.monotonic() - step, 1)
 
-        # 3. Scenes fitted to the voiceover.
+        # 3. Scene operations, then the scenes fitted to the voiceover.
         step = time.monotonic()
         progress("scenes")
-        base_scenes = [_scene(record) for record in parent["scenes"]]
+        scene_changes, edit_warnings = [], []
+        excluded = set(parent.get("excluded") or [])
+        if ops:
+            scene_records, scene_changes, edit_warnings, downloads = _apply_scene_ops(
+                task_id, name, ops, scene_records, manifest, materials, params)
+            network["downloads"] += downloads
+            excluded |= {change["scene"] for change in scene_changes if change["op"] == "remove"}
+            manifest, materials = _materials(task_id)
+        crops = {record["id"]: tuple(record["crop"]) for record in scene_records if record.get("crop")}
+        statuses = {record["id"]: record.get("status") for record in scene_records}
+        base_scenes = [_scene(record) for record in scene_records]
         present = {scene.id for scene in base_scenes}
-        reserve = [_scene(record) for record in first["scenes"] if record["id"] not in present]
+        ancestors = _ancestor_scenes(task_id, parent)
+        for record in first["scenes"]:
+            ancestors.setdefault(record["id"], record)
+        reserve = [_scene(record) for scene_id, record in ancestors.items()
+                   if scene_id not in present and scene_id not in excluded]
+        for record in ancestors.values():
+            if record.get("crop") and record["id"] not in present:
+                crops[record["id"]] = tuple(record["crop"])
         candidates, entries = _candidates(manifest, materials)
         fetcher = _Fetcher(task_id, name, params, entries)
         plan = timing.plan(base_scenes, audio_duration, float(params.video_clip_duration),
                            reserve=reserve, candidates=candidates, fetch=fetcher)
-        network["downloads"] = fetcher.downloads
+        network["downloads"] += fetcher.downloads
         manifest, materials = _materials(task_id)
         timings["scenes"] = round(time.monotonic() - step, 1)
 
-        # 4. Clips, assembly and the final video.
+        # 4. Clips (only changed scenes are rendered; the rest come from revisions/.klipler),
+        #    assembly and the final video.
         step = time.monotonic()
-        clips = []
+        clips, rendered, reused = [], [], []
+        cache = folder / CLIP_CACHE
+        cache.mkdir(exist_ok=True)
         frames = _frame_counts([planned.duration for planned in plan.scenes], video.fps)
         for number, planned in enumerate(plan.scenes, start=1):
-            progress(f"clips {number}/{len(plan.scenes)}")
             duration = planned.duration
             if number == len(plan.scenes):
                 # A little past the voiceover, as the pipeline renders; a video stays in its source.
@@ -639,8 +881,20 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
             # Clip boundaries on whole frames, rounded on the running total, so the clips add
             # up to the voiceover instead of losing a fraction of a frame each.
             duration = (frames[number - 1] + 0.5) / video.fps
-            clips.append(_render_clip(task_id, materials[planned.scene.material], planned.scene,
-                                      duration, params, work, number))
+            scene_id = planned.scene.id
+            crop = crops.get(scene_id)
+            material = materials[planned.scene.material]
+            cached = cache / f"{_clip_key(material, planned.scene, frames[number - 1], crop, params)}.mp4"
+            if cached.is_file() and cached.stat().st_size > 0:
+                reused.append(scene_id)
+                logger.info(f"revizyon {name}: sahne {scene_id} önbellekten, yeniden işlenmedi")
+            else:
+                progress(f"clips {number}/{len(plan.scenes)}: {scene_id}")
+                clip = _render_clip(task_id, material, planned.scene, duration, params, work, number, crop)
+                os.replace(clip, cached)
+                rendered.append(scene_id)
+                logger.info(f"revizyon {name}: sahne {scene_id} işlendi")
+            clips.append(cached)
         progress("assembling")
         combined = work / "combined.mp4"
         video.concat_video_clips_with_ffmpeg(
@@ -666,12 +920,14 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
         )
         if not final.is_file():
             raise RevisionError("the final video was not written")
-        for clip in clips:
-            clip.unlink(missing_ok=True)
         combined.unlink(missing_ok=True)
         timings["render"] = round(time.monotonic() - step, 1)
 
         (work / "script.txt").write_text(new_script + "\n", encoding="utf-8")
+        # credits.txt of the scenes this revision really shows (none without NASA images).
+        credits = nasa.credits_text(sources)
+        if credits:
+            (work / "credits.txt").write_text(credits, encoding="utf-8", newline="\n")
         warning = timing.term_matching_warning(script_changed, bool(params.match_materials_to_script))
         target = folder / name
         record = {
@@ -699,10 +955,17 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
                     "search_term": materials[planned.scene.material].get("search_term"),
                     "order": planned.scene.order, "start": planned.scene.start,
                     "duration": planned.duration, "source_duration": planned.scene.source_duration,
-                    "status": planned.status,
+                    "status": statuses.get(planned.scene.id) if planned.status == "kept"
+                    and statuses.get(planned.scene.id) in ("replaced", "cropped") else planned.status,
+                    **({"crop": list(crops[planned.scene.id])} if planned.scene.id in crops else {}),
                 }
                 for planned in plan.scenes
             ],
+            "scene_changes": scene_changes,
+            "excluded": sorted(excluded),
+            "credits": _file_entry(work / "credits.txt", work) if (work / "credits.txt").is_file() else None,
+            "performance": resolved_performance,
+            "clips": {"rendered": rendered, "reused": reused},
             "dropped": [{"id": s.id, "material": s.material, "reason": plan.dropped_reasons.get(s.id)}
                         for s in plan.dropped],
             "returned": [s.id for s in plan.returned],
@@ -710,7 +973,7 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
                       for c, s in plan.added],
             "skipped_candidates": fetcher.skipped,
             "extended": plan.extended,
-            "warnings": [warning] if warning else [],
+            "warnings": ([warning] if warning else []) + edit_warnings,
             "audit": audit,
             "check_required": bool(reasons),
             "check_reasons": reasons,
@@ -725,6 +988,8 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
     except Exception:
         shutil.rmtree(work, ignore_errors=True)
         raise
+    finally:
+        stack.close()
 
 
 def scene_rows(task_id: str, revision: dict) -> list[dict]:
@@ -745,10 +1010,13 @@ def scene_rows(task_id: str, revision: dict) -> list[dict]:
             files = material.get("files") or {}
             image = files.get("prepared") or (files.get("local") if _material_kind(material) == timing.IMAGE else None)
             path = task_materials.stored_path(task_id, image) if image else None
+        creator = (material.get("creator") or {}).get("name") if isinstance(material.get("creator"), dict) else None
         rows.append({
             "id": scene["id"], "term": scene.get("search_term") or material.get("search_term") or "",
             "duration": scene.get("duration"), "kind": scene.get("kind"), "status": scene.get("status"),
             "provider": material.get("provider"), "asset_id": material.get("asset_id"),
+            "credit": material.get("credit") or creator, "material": material.get("id"),
+            "score": (material.get("relevance") or {}).get("score"), "crop": scene.get("crop"),
             "preview": str(path) if path is not None and path.is_file() else None,
         })
     return rows
@@ -841,6 +1109,24 @@ _FLAGS = {
 }
 
 
+_PERFORMANCE_FLAGS = {
+    "final_render_engine": "--render-motoru", "material_concurrency": "--materyal-esezamanliligi",
+    "video_clip_concurrency": "--klip-esezamanliligi", "video_codec": "--kodlayici", "n_threads": "--is-parcacigi",
+}
+
+
+def build_performance(args: argparse.Namespace) -> dict:
+    values = {"final_render_engine": args.render_motoru, "material_concurrency": args.materyal_esezamanliligi,
+              "video_clip_concurrency": args.klip_esezamanliligi, "video_codec": args.kodlayici,
+              "n_threads": args.is_parcacigi}
+    return {name: value for name, value in values.items() if value is not None}
+
+
+def performance_arguments(values: dict) -> list[str]:
+    """``cli.py revizyon`` flags for explicitly chosen speed settings."""
+    return [f"{_PERFORMANCE_FLAGS[name]}={value}" for name, value in values.items() if value not in (None, "")]
+
+
 def settings_arguments(settings: dict) -> list[str]:
     """``cli.py revizyon`` flags for changed settings (the inverse of ``build_settings``)."""
     arguments = []
@@ -880,6 +1166,22 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--muzik-duzeyi", type=float)
     command.add_argument("--nasa-atif", choices=("acik", "kapali"))
     command.add_argument("--temel-revizyon", help="hangi revizyondan türesin (varsayılan: en sonuncusu)")
+    scenes = command.add_argument_group("sahneler (scene_edits)")
+    scenes.add_argument("--sahne-degistir", action="append", metavar="SAHNE=KAYNAK:KIMLIK",
+                        help="kayıtlı adayla değiştir, ör. v1-s03=nasa:PIA12345")
+    scenes.add_argument("--sahne-ara", action="append", metavar="SAHNE=TERIM",
+                        help='yeni aramayla değiştir (ilk kullanılabilir sonuç), ör. v1-s03="earth rise"')
+    scenes.add_argument("--sahne-dosya", action="append", metavar="SAHNE=YOL",
+                        help="yerel görsel ya da videoyla değiştir (NASA filtreleri yalnız uyarı)")
+    scenes.add_argument("--sahne-kaldir", action="append", metavar="SAHNE", help="sahneyi çıkar (son sahne kalmalı)")
+    scenes.add_argument("--kirpma", action="append", metavar="SAHNE=X[,Y]",
+                        help="görsel sahnenin kırpma konumu 0-1 (0,5 merkez), ör. v1-s02=0.3")
+    speed = command.add_argument_group("performans (yalnız hız; içerik değişmez)")
+    speed.add_argument("--render-motoru", choices=("ffmpeg", "moviepy"))
+    speed.add_argument("--materyal-esezamanliligi", type=int)
+    speed.add_argument("--klip-esezamanliligi", type=int)
+    speed.add_argument("--kodlayici", help="ör. libx264, h264_nvenc")
+    speed.add_argument("--is-parcacigi", type=int, help="ffmpeg iş parçacığı (n_threads)")
     command.add_argument("--llm-provider", help="denetim için LLM sağlayıcısı (yalnız bu süreçte)")
     command.add_argument("--llm-model")
     return command
@@ -911,10 +1213,11 @@ def cli_main(argv: list[str]) -> int:
         if text_file.name.startswith(".metin-") and text_file.parent.name == FOLDER:
             text_file.unlink(missing_ok=True)  # the WebUI's hand-over file
     try:
+        scene_ops = scene_edits.from_arguments(args)
         folder = revisions_dir(args.task_id)
         folder.mkdir(exist_ok=True)
         batch_review.acquire_busy(folder, ACTION)
-    except RevisionError as exc:
+    except (RevisionError, scene_edits.SceneEditError) as exc:
         logger.error(str(exc))
         return 2
     except batch_review.ReviewBusy as exc:
@@ -922,7 +1225,12 @@ def cli_main(argv: list[str]) -> int:
         return 3
     try:
         record = create(args.task_id, script=script, settings=build_settings(args),
-                        base=args.temel_revizyon)
+                        base=args.temel_revizyon, scene_ops=scene_ops,
+                        performance_settings=build_performance(args))
+    except scene_edits.SceneEditError as exc:
+        logger.error(f"sahne işlemi geçersiz: {exc}")
+        _Progress(args.task_id, "", args.temel_revizyon or "")("failed", error=str(exc)[:300])
+        return 2
     except (RevisionError, timing.RevisionTimingError, ValueError) as exc:
         logger.error(f"revizyon üretilemedi: {exc}")
         _Progress(args.task_id, "", args.temel_revizyon or "")("failed", error=str(exc)[:300])

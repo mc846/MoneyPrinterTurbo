@@ -12,8 +12,10 @@ from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
+from PIL import Image, ImageDraw
 
-from app.services import batch_review, task_revisions, voice
+from app.models.schema import VideoAspect
+from app.services import batch_review, material, material_upload, scene_edits, task_revisions, voice
 from app.services import bgm as bgm_service
 from app.utils import utils
 
@@ -148,18 +150,268 @@ def _form(tr, task_id: str, base: dict) -> tuple[str, dict]:
     return script, changed
 
 
-def _render_scenes(tr, task_id: str, base: dict) -> None:
+def _ops_key(task_id: str, base_name: str) -> str:
+    return f"revision_ops_{task_id}_{base_name}"
+
+
+def _ops(task_id: str, base_name: str) -> list[scene_edits.SceneOp]:
+    return [scene_edits.SceneOp.from_dict(data) for data in st.session_state.get(_ops_key(task_id, base_name), [])]
+
+
+def _set_ops(task_id: str, base_name: str, ops: list[scene_edits.SceneOp]) -> None:
+    st.session_state[_ops_key(task_id, base_name)] = [op.to_dict() for op in ops]
+
+
+def _add_op(task_id: str, base_name: str, op: scene_edits.SceneOp) -> None:
+    """A newer operation of the same kind on the same scene replaces the older one."""
+    ops = [old for old in _ops(task_id, base_name) if not (old.scene == op.scene and old.op == op.op)]
+    if op.op == scene_edits.REMOVE:
+        ops = [old for old in ops if old.scene != op.scene]
+    _set_ops(task_id, base_name, [*ops, op])
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def _thumbnail(path: str, mtime: float, max_side: int) -> Image.Image:
+    with Image.open(path) as image:
+        image.draft("RGB", (max_side * 2, max_side * 2))
+        image = image.convert("RGB")
+        image.thumbnail((max_side, max_side))
+        return image
+
+
+def framed(path: str, aspect: VideoAspect, position=scene_edits.CENTER, max_side: int = 480) -> Image.Image:
+    """The image with the video's crop window drawn on it (the rest dimmed) at ``position``."""
+    image = _thumbnail(path, os.path.getmtime(path), max_side).copy()
+    width, height = image.size
+    crop_width, crop_height = material._center_crop_size(width, height, aspect)
+    left = round((width - crop_width) * position[0])
+    top = round((height - crop_height) * position[1])
+    shade = Image.new("RGBA", image.size, (0, 0, 0, 140))
+    ImageDraw.Draw(shade).rectangle((left, top, left + crop_width - 1, top + crop_height - 1), fill=(0, 0, 0, 0))
+    image = Image.alpha_composite(image.convert("RGBA"), shade)
+    ImageDraw.Draw(image).rectangle((left, top, left + crop_width - 1, top + crop_height - 1),
+                                    outline=(255, 59, 48, 255), width=3)
+    return image.convert("RGB")
+
+
+def crop_axes(path: str, aspect: VideoAspect) -> tuple[bool, bool]:
+    """Which crop positions matter: (x, y); an image already in the video's shape has neither."""
+    with Image.open(path) as image:
+        width, height = image.size
+    crop_width, crop_height = material._center_crop_size(width, height, aspect)
+    return crop_width < width, crop_height < height
+
+
+def _scene_image(task_id: str, materials: dict, row: dict):
+    """The scene's source image for cropping (NASA original or the user's image)."""
+    return scene_edits._image_for_crop(task_id, materials.get(row["material"] or "", {}))
+
+
+# The open scene dialog ({"task", "base", "kind", "scene"}): kept in the session so the
+# dialog stays open over full reruns; closing it (X, Esc, outside) clears it.
+DIALOG_KEY = "revision_dialog"
+
+
+def _close_dialog() -> None:
+    st.session_state.pop(DIALOG_KEY, None)
+
+
+@st.dialog(" ", width="large", on_dismiss=_close_dialog)
+def _replace_dialog(tr, task_id: str, base: dict, scene_id: str) -> None:
+    st.markdown(f"**{tr('revision.replace.title').format(scene=scene_id)}**")
+    manifest, materials = task_revisions._materials(task_id)
+    scene = next(s for s in base["scenes"] if s["id"] == scene_id)
+    aspect = VideoAspect((base.get("params") or {}).get("video_aspect") or VideoAspect.portrait)
+    key = f"revision_replace_{task_id}_{scene_id}"
+    with st.form(f"{key}_search_form", border=False):
+        columns = st.columns([4, 1], vertical_alignment="bottom")
+        words = columns[0].text_input(tr("revision.replace.search"), key=f"{key}_words")
+        if columns[1].form_submit_button(tr("revision.replace.search_button")) and words.strip():
+            try:
+                with st.spinner(tr("revision.replace.searching")):
+                    found = scene_edits.search(task_id, scene, words)
+                st.session_state[f"{key}_flash"] = tr("revision.replace.search_done").format(
+                    count=len(found["candidates"]), term=found["term"])
+            except Exception as exc:
+                st.session_state[f"{key}_flash"] = tr("revision.replace.search_failed").format(error=exc)
+            manifest, materials = task_revisions._materials(task_id)
+    flash = st.session_state.pop(f"{key}_flash", None)
+    if flash:
+        st.info(flash)
+    choices = scene_edits.candidate_choices(manifest, materials, scene, base["scenes"])
+    folder = task_revisions.task_materials.folder(task_id)
+    st.markdown(f"**{tr('revision.replace.saved')}** ({len(choices)})")
+    if not choices:
+        st.caption(tr("revision.replace.none"))
+    per_row = 4
+    for start in range(0, len(choices), per_row):
+        columns = st.columns(per_row)
+        for column, choice in zip(columns, choices[start:start + per_row]):
+            with column.container(border=True, key=f"{key}_card_{choice['key']}".replace(":", "_")):
+                preview = folder / choice["preview"] if choice.get("preview") else None
+                if preview is not None and preview.is_file():
+                    st.image(str(preview), width="stretch")
+                score = (choice.get("relevance") or {}).get("score")
+                st.caption(f"{'🔍 ' if choice['search'] else ''}{choice['key']}"
+                           + (f" · {tr('revision.scene.score').format(score=f'{score:.2f}')}" if score is not None else ""))
+                st.caption(tr(f"revision.candidate.status.{choice.get('status') or 'not_selected'}"))
+                if not choice["selectable"]:
+                    st.caption(f":orange[{tr('revision.replace.not_selectable').format(reason=choice['reason'])}]")
+                if st.button(tr("revision.replace.choose"), key=f"{key}_choose_{choice['key']}",
+                             disabled=not choice["selectable"], width="stretch"):
+                    st.session_state[f"{key}_selected"] = {"candidate": choice["key"],
+                                                           "preview": str(preview) if preview else ""}
+    upload = st.file_uploader(tr("revision.replace.upload"), key=f"{key}_upload",
+                              type=[suffix.lstrip(".") for suffix in scene_edits.IMAGE_SUFFIXES + scene_edits.VIDEO_SUFFIXES])
+    if upload is not None and st.session_state.get(f"{key}_uploaded") != upload.file_id:
+        saved = material_upload.save_material_upload(upload.name, upload)
+        st.session_state[f"{key}_uploaded"] = upload.file_id
+        st.session_state[f"{key}_selected"] = {"path": saved, "preview": saved}
+    selected = st.session_state.get(f"{key}_selected")
+    if selected:
+        st.markdown(tr("revision.replace.selected").format(
+            name=selected.get("candidate") or os.path.basename(selected.get("path") or "")))
+        preview = selected.get("preview") or ""
+        if preview and os.path.splitext(preview)[1].lower() in scene_edits.IMAGE_SUFFIXES:
+            st.image(framed(preview, aspect), caption=tr("revision.replace.frame"))
+        if st.button(tr("revision.replace.add"), key=f"{key}_add", type="primary"):
+            _add_op(task_id, base["revision"], scene_edits.SceneOp(
+                scene_edits.REPLACE, scene_id, candidate=selected.get("candidate", ""), path=selected.get("path", "")))
+            st.session_state.pop(f"{key}_selected", None)
+            _close_dialog()
+            st.rerun()
+
+
+@st.dialog(" ", width="large", on_dismiss=_close_dialog)
+def _crop_dialog(tr, task_id: str, base: dict, scene_id: str, image: str) -> None:
+    st.markdown(f"**{tr('revision.crop.title').format(scene=scene_id)}**")
+    aspect = VideoAspect((base.get("params") or {}).get("video_aspect") or VideoAspect.portrait)
+    scene = next(s for s in base["scenes"] if s["id"] == scene_id)
+    pending = next((op for op in _ops(task_id, base["revision"]) if op.scene == scene_id and op.op == scene_edits.CROP),
+                   None)
+    current = pending.position if pending else tuple(scene.get("crop") or scene_edits.CENTER)
+    horizontal, vertical = crop_axes(image, aspect)
+    key = f"revision_crop_{task_id}_{scene_id}"
+    x = st.slider(tr("revision.crop.x"), 0.0, 1.0, float(current[0]), 0.01, key=f"{key}_x",
+                  disabled=not horizontal)
+    y = st.slider(tr("revision.crop.y"), 0.0, 1.0, float(current[1]), 0.01, key=f"{key}_y",
+                  disabled=not vertical)
+    if not (horizontal or vertical):
+        st.caption(tr("revision.crop.none"))
+    st.image(framed(image, aspect, (x, y), max_side=560), caption=tr("revision.replace.frame"))
+    if st.button(tr("revision.crop.apply"), key=f"{key}_apply", type="primary"):
+        _add_op(task_id, base["revision"], scene_edits.SceneOp(scene_edits.CROP, scene_id, position=(x, y)))
+        _close_dialog()
+        st.rerun()
+
+
+def _render_scenes(tr, task_id: str, base: dict, busy: bool) -> None:
     rows = task_revisions.scene_rows(task_id, base)
+    _manifest, materials = task_revisions._materials(task_id)
+    ops = _ops(task_id, base["revision"])
+    removed = {op.scene for op in ops if op.op == scene_edits.REMOVE}
+    changed = {op.scene: op for op in ops if op.op != scene_edits.REMOVE}
+    images = {}
     st.markdown(f"**{tr('revision.scenes')}** ({len(rows)})")
-    per_row = 6
+    per_row = 4
     for start in range(0, len(rows), per_row):
         columns = st.columns(per_row)
         for column, row in zip(columns, rows[start:start + per_row]):
-            with column:
+            with column.container(border=True, key=f"revision_scene_{row['id']}"):
                 if row["preview"]:
                     st.image(row["preview"], width="stretch")
-                st.caption(tr("revision.scene_caption").format(
-                    id=row["id"], term=row["term"], seconds=f"{float(row['duration'] or 0):.1f}"))
+                st.markdown(f"**{row['id']}** · {row['term']}")
+                credit = row.get("credit") or "—"
+                st.caption(f"{row.get('provider') or ''} · {credit}")
+                details = tr("revision.scene_caption").format(id=row["kind"], term=row.get("asset_id") or "",
+                                                              seconds=f"{float(row['duration'] or 0):.1f}")
+                if row.get("score") is not None:
+                    details += " · " + tr("revision.scene.score").format(score=f"{row['score']:.2f}")
+                st.caption(details)
+                if row["id"] in removed:
+                    st.caption(f":red-badge[{tr('revision.scene.removed')}]")
+                elif row["id"] in changed:
+                    st.caption(f":orange-badge[{changed[row['id']].describe()}]")
+                buttons = st.columns(3)
+                opened = {"task": task_id, "base": base["revision"], "scene": row["id"]}
+                if buttons[0].button(tr("revision.scene.replace"), key=f"revision_replace_btn_{row['id']}",
+                                     disabled=busy, width="stretch"):
+                    st.session_state[DIALOG_KEY] = {**opened, "kind": "replace"}
+                last = len(rows) - len(removed) <= 1 and row["id"] not in removed
+                if buttons[1].button(tr("revision.scene.remove"), key=f"revision_remove_btn_{row['id']}",
+                                     disabled=busy or last or row["id"] in removed, width="stretch",
+                                     help=tr("revision.last_scene") if last else None):
+                    _add_op(task_id, base["revision"], scene_edits.SceneOp(scene_edits.REMOVE, row["id"]))
+                    st.rerun()
+                image = _scene_image(task_id, materials, row) if row.get("kind") == "image" else None
+                if image is not None:
+                    images[row["id"]] = str(image)
+                    if buttons[2].button(tr("revision.scene.crop"), key=f"revision_crop_btn_{row['id']}",
+                                         disabled=busy, width="stretch"):
+                        st.session_state[DIALOG_KEY] = {**opened, "kind": "crop"}
+    dialog = st.session_state.get(DIALOG_KEY) or {}
+    if busy or (dialog.get("task"), dialog.get("base")) != (task_id, base["revision"]) \
+            or dialog.get("scene") not in {row["id"] for row in rows}:
+        return
+    if dialog.get("kind") == "replace":
+        _replace_dialog(tr, task_id, base, dialog["scene"])
+    elif dialog.get("kind") == "crop" and dialog["scene"] in images:
+        _crop_dialog(tr, task_id, base, dialog["scene"], images[dialog["scene"]])
+
+
+def _render_pending(tr, task_id: str, base_name: str) -> None:
+    ops = _ops(task_id, base_name)
+    if not ops:
+        return
+    st.markdown(f"**{tr('revision.pending')}**")
+    for index, op in enumerate(ops):
+        columns = st.columns([6, 1], vertical_alignment="center")
+        columns[0].markdown(f"- {op.describe()}")
+        if columns[1].button(tr("revision.pending.undo"), key=f"revision_undo_{index}_{op.scene}_{op.op}"):
+            _set_ops(task_id, base_name, [other for other in ops if other != op])
+            st.rerun()
+
+
+PERFORMANCE_FIELDS = ("final_render_engine", "material_concurrency", "video_clip_concurrency", "video_codec",
+                      "n_threads")
+CODECS = ("", "libx264", "h264_nvenc", "h264_amf", "h264_qsv", "h264_mf")
+
+
+def _render_performance(tr, task_id: str) -> dict:
+    """Speed settings (Advanced): only values changed here are passed as explicit ones."""
+    resolved = task_revisions.performance(task_id)
+    explicit = {}
+    with st.expander(tr("revision.advanced"), expanded=False):
+        st.caption(tr("revision.performance.help"))
+        key = f"revision_performance_{task_id}"
+        columns = st.columns(5)
+        engine = resolved["final_render_engine"]["value"] or "ffmpeg"
+        values = {
+            "final_render_engine": columns[0].selectbox(tr("revision.performance.engine"), ["ffmpeg", "moviepy"],
+                                                        index=["ffmpeg", "moviepy"].index(engine)
+                                                        if engine in ("ffmpeg", "moviepy") else 0,
+                                                        key=f"{key}_engine"),
+            "material_concurrency": columns[1].number_input(
+                tr("revision.performance.material"), 1, 8, int(resolved["material_concurrency"]["value"] or 3),
+                key=f"{key}_material"),
+            "video_clip_concurrency": columns[2].number_input(
+                tr("revision.performance.clips"), 1, 8, int(resolved["video_clip_concurrency"]["value"] or 3),
+                key=f"{key}_clips"),
+            "video_codec": columns[3].selectbox(tr("revision.performance.codec"), list(CODECS),
+                                                index=list(CODECS).index(resolved["video_codec"]["value"] or "")
+                                                if (resolved["video_codec"]["value"] or "") in CODECS else 0,
+                                                key=f"{key}_codec") or None,
+            "n_threads": columns[4].number_input(tr("revision.performance.threads"), 0, 64,
+                                                 int(resolved["n_threads"]["value"] or 0), key=f"{key}_threads") or None,
+        }
+        for name in PERFORMANCE_FIELDS:
+            source = resolved[name]["source"]
+            if values[name] != resolved[name]["value"]:
+                explicit[name] = values[name]
+                source = "explicit"
+            st.caption(f"{name}: {resolved[name]['value']} → {values[name]} · "
+                       + tr(f"revision.performance.source.{source}"))
+    return explicit
 
 
 def _local_time(value) -> str:
@@ -176,6 +428,8 @@ def _summary(tr, record: dict) -> str:
     for name, change in changes.items():
         if name == "script":
             parts.append(tr("revision.change.script").format(before=change.get("from_words"), after=change.get("to_words")))
+        elif name == "scenes":
+            parts.append(tr("revision.change.scenes").format(changes="; ".join(change)))
         else:
             parts.append(f"{name}: {change.get('from')} → {change.get('to')}")
     return " · ".join(parts) or tr("revision.change.none")
@@ -210,6 +464,17 @@ def _render_history(tr, task_id: str, records: list[dict], busy: bool) -> None:
                     seconds=f"{float((record.get('audio') or {}).get('duration') or 0):.1f}"))
                 if record.get("dropped"):
                     st.caption(tr("revision.dropped").format(scenes=", ".join(d["id"] for d in record["dropped"])))
+                for change in record.get("scene_changes") or []:
+                    before = (change.get("from") or {}).get("asset_id") if isinstance(change.get("from"), dict) \
+                        else change.get("from")
+                    after = (change.get("to") or {}).get("asset_id") if isinstance(change.get("to"), dict) \
+                        else change.get("to")
+                    st.caption(tr("revision.scene_change").format(scene=change["scene"], op=change["op"],
+                                                                  before=before, after=after or "—"))
+                clips = record.get("clips") or {}
+                if clips:
+                    st.caption(tr("revision.clips").format(rendered=len(clips.get("rendered") or []),
+                                                           reused=len(clips.get("reused") or [])))
                 if record.get("returned"):
                     st.caption(tr("revision.returned").format(scenes=", ".join(record["returned"])))
                 if record.get("added"):
@@ -272,10 +537,15 @@ def render_revision_page(tr) -> None:
     base = records[names.index(base_name)]
     script, changed = _form(tr, task_id, base)
     script_changed = batch_review.normalize_script(script) != task_revisions.script_text(task_id, base)
-    nothing = not changed and not script_changed
+    _render_scenes(tr, task_id, base, running)
+    ops = _ops(task_id, base_name)
+    _render_pending(tr, task_id, base_name)
+    explicit = _render_performance(tr, task_id)
+    nothing = not changed and not script_changed and not ops
     if st.button(tr("revision.generate"), key="revision_generate", type="primary", disabled=running or nothing,
                  icon=":material/movie:"):
-        arguments = [f"--temel-revizyon={base_name}", *task_revisions.settings_arguments(changed)]
+        arguments = [f"--temel-revizyon={base_name}", *task_revisions.settings_arguments(changed),
+                     *scene_edits.to_arguments(ops), *task_revisions.performance_arguments(explicit)]
         if script_changed:
             arguments.append(f"--metin-dosyasi={task_revisions.write_text_handover(task_id, script)}")
         try:
@@ -283,9 +553,9 @@ def render_revision_page(tr) -> None:
         except batch_review.ReviewBusy:
             st.error(tr("revision.busy"))
         else:
+            _set_ops(task_id, base_name, [])
             st.session_state["revision_flash"] = ("info", tr("revision.started"))
             st.rerun(scope="app")
     if nothing:
         st.caption(tr("revision.nothing_changed"))
-    _render_scenes(tr, task_id, base)
     _render_history(tr, task_id, records, running)
