@@ -478,6 +478,29 @@ def test_revisions_are_never_rewritten(storage, voice_seconds, no_downloads, aud
     assert not [p for p in folder.iterdir() if p.name.endswith(".tmp")]
 
 
+def test_an_untouched_text_of_a_revision_is_not_a_change(storage, voice_seconds, no_downloads, audits, monkeypatch):
+    """script.txt ends with a newline: a revision derived from a revision with the same text (as the
+    panel sends it back) must not run TTS or the audit (found in the source-chain e2e, 10.11)."""
+    task_id = _make_task(storage)
+    voice_seconds["seconds"] = 5.0
+    task_revisions.create(task_id, script="kısa metin")
+    second = task_revisions.load(task_id, "r002")
+    assert task_revisions.script_text(task_id, second) == "kısa metin"
+    voice_seconds["calls"].clear()
+    audits.clear()
+    record = task_revisions.create(task_id, script=task_revisions.script_text(task_id, second) + "\n",
+                                   settings={"font_size": 70})
+    assert "script" not in record["changes"] and voice_seconds["calls"] == [] and audits == []
+    assert record["audio"]["reused_from"] == "r002"
+    # The panel: no text hand-over when the text area keeps the base revision's text.
+    started = []
+    monkeypatch.setattr(task_revisions, "start_background", lambda task, arguments: started.append(arguments) or 1)
+    app = _revision_page(task_id).run()
+    app.number_input(key=f"revision_{task_id}_r003_font_size").set_value(72).run()
+    app.button(key="revision_generate").click().run()
+    assert started and not any(argument.startswith("--metin-dosyasi") for argument in started[0])
+
+
 def test_a_derived_revision_brings_dropped_scenes_back_first(storage, voice_seconds, no_downloads, audits):
     task_id = _make_task(storage)
     voice_seconds["seconds"] = 5.0

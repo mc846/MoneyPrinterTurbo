@@ -138,7 +138,9 @@ def script_text(task_id: str, revision: dict) -> str:
     entry = revision.get("script") or {}
     if "text" in entry:
         return entry["text"]
-    return file_path(task_id, revision, "script").read_text(encoding="utf-8")
+    text = file_path(task_id, revision, "script").read_text(encoding="utf-8")
+    # script.txt ends with the newline create() writes; the text itself has none.
+    return text[:-1] if text.endswith("\n") else text
 
 
 def verify(task_id: str, revision: str) -> list[str]:
@@ -782,7 +784,8 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
             params_dict[name] = value
     parent_script = script_text(task_id, parent)
     new_script = batch_review.normalize_script(script) if script is not None else parent_script
-    script_changed = new_script != parent_script
+    # Both sides normalized: an untouched text is not a change (no TTS, no audit).
+    script_changed = new_script != batch_review.normalize_script(parent_script)
     if script_changed:
         if not new_script.strip():
             raise RevisionError("the text is empty")

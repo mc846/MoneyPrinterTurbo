@@ -584,7 +584,8 @@ def render_revision_page(tr) -> None:
     base_name = st.selectbox(tr("revision.base"), names, index=len(names) - 1, key=f"revision_base_{task_id}")
     base = records[names.index(base_name)]
     script, changed = _form(tr, task_id, base)
-    script_changed = batch_review.normalize_script(script) != task_revisions.script_text(task_id, base)
+    script_changed = batch_review.normalize_script(script) != batch_review.normalize_script(
+        task_revisions.script_text(task_id, base))
     _render_scenes(tr, task_id, base, running)
     ops = _ops(task_id, base_name)
     _render_pending(tr, task_id, base_name)
