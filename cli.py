@@ -39,7 +39,7 @@ _MATERIAL_TAG_RELEVANCE_MODES = ("off", "rank", "strict")
 # 与 app.models.schema.VideoTermsStyle 保持一致。
 _VIDEO_TERMS_STYLES = ("legacy", "visual")
 # 与 app.services.material.FALLBACK_VIDEO_SOURCES 保持一致：只有库存素材源能互为后备。
-_FALLBACK_VIDEO_SOURCES = ("pexels", "pixabay", "coverr", "nasa")
+_FALLBACK_VIDEO_SOURCES = ("pexels", "pixabay", "coverr", "nasa", "nasa_svs")
 _CUSTOM_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
 _BATCH_FILE_MAX_BYTES = 1024 * 1024
 _BATCH_TASK_MAX_COUNT = 100

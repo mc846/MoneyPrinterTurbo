@@ -143,6 +143,15 @@ def _cached_source_info(item: MaterialInfo) -> dict | None:
     credit = source.get("credit")
     if isinstance(credit, str) and credit.strip():
         cached["credit"] = credit.strip()[:200]
+    # 场景角标（NASA SVS 的数据可视化说明）：短文本或按语言的 {"tr", "en"}。
+    label = source.get("scene_label")
+    if isinstance(label, str) and label.strip():
+        cached["scene_label"] = label.strip()[:80]
+    elif isinstance(label, dict):
+        texts = {key: str(label[key]).strip()[:80] for key in ("tr", "en")
+                 if isinstance(label.get(key), str) and label[key].strip()}
+        if texts:
+            cached["scene_label"] = texts
     # NASA 视频：类型、时长、原始尺寸和各个公开副本（干净片段从中读取）。
     if source.get("media_type") == "video" and isinstance(source.get("video"), dict):
         video = _cached_video(source["video"])

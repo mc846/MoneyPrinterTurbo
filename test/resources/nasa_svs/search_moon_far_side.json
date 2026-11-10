@@ -1,0 +1,55 @@
+{
+ "count": 177,
+ "next": null,
+ "previous": null,
+ "results": [
+  {
+   "id": 15103,
+   "url": "http://svs.gsfc.nasa.gov/15103/",
+   "result_type": "Produced Video",
+   "title": "Artemis II Saw Impact Flashes on the Far Side of the Moon",
+   "description": "Full version for video editors.Music is \"Bio Rhythms\" by Adam Paul Courtenay Burns of Universal Production Music. || ImpactFlashes_Horizontal.01009_print.jpg (1024x576) [143.7 KB] || ImpactFlashes_Horizontal.01009_searchweb.png (320x180) [89.9 KB] || ImpactFlashes_Horizontal.01009_thm.png (80x40) [7.1 KB] || ImpactFlashesHorizontalVersion.en_US.srt [3.5 KB] || ImpactFlashesHorizontalVersion.en_US.vtt [3.4 KB] || ImpactFlashes_Horizontal.mp4 (3840x2160) [137.1 MB] || ",
+   "release_date": "2026-10-07T09:30:00-04:00"
+  },
+  {
+   "id": 4253,
+   "url": "http://svs.gsfc.nasa.gov/4253/",
+   "result_type": "Visualization",
+   "title": "Moon Phase and Libration, from the Other Side",
+   "description": "This narrated video introduces two views of the Moon's far side. Transcript.This video is also available on our YouTube channel. || opposite.0820_print.jpg (1024x576) [158.8 KB] || opposite.0820_thm.png (80x40) [5.8 KB] || G2015-013_ViewfromOtherSide_MASTER_youtube_hq.mov (1280x720) [75.4 MB] || G2015-013_ViewfromOtherSide_MASTER_1280x720.wmv (1280x720) [50.7 MB] || G2015-013_ViewfromOtherSide_MASTER_appletv.m4v (960x540) [43.3 MB] || G2015-013_ViewfromOtherSide_MASTER_appletv.webm (960x540) [13.8 MB] || G2015-013_ViewfromOtherSide_MASTER_appletv_subtitles.m4v (960x540) [43.2 MB] || G2015-013_ViewfromOtherSide_MASTER_nasaportal.mov (640x360) [34.9 MB] || G2015-013_ViewfromOtherSide_MASTER_ipod_lg.m4v (640x360) [19.0 MB] || G2015-013_ViewfromOtherSide.en_US.srt [2.0 KB] || G2015-013_ViewfromOtherSide.en_US.vtt [2.0 KB] || G2015-013_ViewfromOtherSide_MASTER_prores.mov (1280x720) [1.5 GB] || G2015-013_ViewfromOtherSide_MASTER_ipod_sm.mp4 (320x240) [9.0 MB] || ",
+   "release_date": "2015-02-04T09:00:00-05:00"
+  },
+  {
+   "id": 11747,
+   "url": "http://svs.gsfc.nasa.gov/11747/",
+   "result_type": "Produced Video",
+   "title": "The Moon’s Far Side",
+   "description": "A NASA spacecraft provides a new look at a place humans could only dream of seeing a few decades ago. || cm-1024.jpg (1024x576) [234.5 KB] || cm-1920.jpg (1920x1080) [591.2 KB] || cm-1280.jpg (1280x720) [346.9 KB] || cm-1024_print.jpg (1024x576) [222.2 KB] || cm-1024_searchweb.png (320x180) [104.4 KB] || cm-1920_thm.png (80x40) [18.0 KB] || ",
+   "release_date": "2015-02-12T13:00:00-05:00"
+  },
+  {
+   "id": 5587,
+   "url": "http://svs.gsfc.nasa.gov/5587/",
+   "result_type": "Visualization",
+   "title": "Moon Phase and Libration, 2026",
+   "description": "The animation archived on this page shows the geocentric phase, libration, position angle of the axis, and apparent diameter of the Moon throughout the year 2026, at hourly intervals.",
+   "release_date": "2025-12-11T12:00:00-05:00"
+  },
+  {
+   "id": 5588,
+   "url": "http://svs.gsfc.nasa.gov/5588/",
+   "result_type": "Visualization",
+   "title": "Moon Phase and Libration, 2026 South Up",
+   "description": "The animation archived on this page shows the geocentric phase, libration, position angle of the axis, and apparent diameter of the Moon throughout the year 2026, at hourly intervals.",
+   "release_date": "2025-12-11T12:00:00-05:00"
+  },
+  {
+   "id": 5415,
+   "url": "http://svs.gsfc.nasa.gov/5415/",
+   "result_type": "Visualization",
+   "title": "Moon Phase and Libration, 2025",
+   "description": "The geocentric phase, libration, position angle of the axis, and apparent diameter of the Moon throughout the year 2025, at hourly intervals.",
+   "release_date": "2024-11-22T09:00:00-05:00"
+  }
+ ]
+}

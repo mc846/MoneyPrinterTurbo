@@ -1,0 +1,249 @@
+{
+ "id": 4253,
+ "url": "http://svs.gsfc.nasa.gov/4253/",
+ "page_type": "Visualization",
+ "title": "Moon Phase and Libration, from the Other Side",
+ "studio": "svs",
+ "missions": [
+  "LRO (Lunar Reconnaissance Orbiter)"
+ ],
+ "keywords": [
+  "Albedo",
+  "Elevation data",
+  "HDTV",
+  "Laser Altimeter",
+  "LOLA",
+  "LRO",
+  "LROC",
+  "Lunar",
+  "Lunar Elevation Map",
+  "Lunar Reconnaissance Orbiter",
+  "Lunar Surface",
+  "Lunar Topography"
+ ],
+ "credits": [
+  {
+   "role": "Animator",
+   "people": [
+    {
+     "name": "Ernie Wright",
+     "employer": "STC"
+    }
+   ]
+  },
+  {
+   "role": "Producer",
+   "people": [
+    {
+     "name": "David Ladd",
+     "employer": "USRA"
+    }
+   ]
+  },
+  {
+   "role": "Scientist",
+   "people": [
+    {
+     "name": "John Keller",
+     "employer": "NASA/GSFC"
+    },
+    {
+     "name": "Noah Petro",
+     "employer": "NASA/GSFC"
+    }
+   ]
+  }
+ ],
+ "main_image": {
+  "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/opposite.1170_print.jpg"
+ },
+ "description": "This narrated video introduces two views of the Moon's far side. Transcript.This video is also available on our YouTube channel. || opposite.0820_print.jpg (1024x576) [158.8 KB] || opposite.0820_thm.png (80x40) [5.8 KB] || G2015-013_ViewfromOtherSide_MASTER_youtube_hq.mov (1280x720) [75.4 MB] || G2015-013_ViewfromOtherSide_MASTER_1280x720.wmv (1280x720) [50.7 MB] || G2015-013_ViewfromOtherSide_MASTER_appletv.m4v (960x540) [43.3 MB] || G2015-013_ViewfromOtherSide_MASTER_appletv.webm (960x540) [13.8 MB] || G2015-013_ViewfromOtherSide_MASTER_appletv_subtitles.m4v (960x540) [43.2 MB] || G2015-013_",
+ "media_groups": [
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/G2015-013_ViewfromOtherSide_MASTER_youtube_hq.mov",
+      "filename": "G2015-013_ViewfromOtherSide_MASTER_youtube_hq.mov",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/G2015-013_ViewfromOtherSide_MASTER_1280x720.wmv",
+      "filename": "G2015-013_ViewfromOtherSide_MASTER_1280x720.wmv",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/G2015-013_ViewfromOtherSide_MASTER_prores.mov",
+      "filename": "G2015-013_ViewfromOtherSide_MASTER_prores.mov",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/G2015-013_ViewfromOtherSide_MASTER_appletv.m4v",
+      "filename": "G2015-013_ViewfromOtherSide_MASTER_appletv.m4v",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/G2015-013_ViewfromOtherSide_MASTER_appletv.webm",
+      "filename": "G2015-013_ViewfromOtherSide_MASTER_appletv.webm",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/G2015-013_ViewfromOtherSide_MASTER_appletv_subtitles.m4v",
+      "filename": "G2015-013_ViewfromOtherSide_MASTER_appletv_subtitles.m4v",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/G2015-013_ViewfromOtherSide_MASTER_nasaportal.mov",
+      "filename": "G2015-013_ViewfromOtherSide_MASTER_nasaportal.mov",
+      "media_type": "Movie",
+      "width": 640,
+      "height": 360
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/G2015-013_ViewfromOtherSide_MASTER_ipod_lg.m4v",
+      "filename": "G2015-013_ViewfromOtherSide_MASTER_ipod_lg.m4v",
+      "media_type": "Movie",
+      "width": 640,
+      "height": 360
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/G2015-013_ViewfromOtherSide_MASTER_ipod_sm.mp4",
+      "filename": "G2015-013_ViewfromOtherSide_MASTER_ipod_sm.mp4",
+      "media_type": "Movie",
+      "width": 320,
+      "height": 240
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/farside_earth_moon_line_1080p30.webm",
+      "filename": "farside_earth_moon_line_1080p30.webm",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/farside_earth_moon_line_1080p30.mp4",
+      "filename": "farside_earth_moon_line_1080p30.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/farside_moon_fixed_1080p30.mp4",
+      "filename": "farside_moon_fixed_1080p30.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/farside_moon_fixed_1080p30.webm",
+      "filename": "farside_moon_fixed_1080p30.webm",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/farside_earth_moon_line_nocard_1080p30.mp4",
+      "filename": "farside_earth_moon_line_nocard_1080p30.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/farside_earth_moon_line_nocard_720p30.mp4",
+      "filename": "farside_earth_moon_line_nocard_720p30.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/farside_earth_moon_line_nocard_720p30.webm",
+      "filename": "farside_earth_moon_line_nocard_720p30.webm",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a004200/a004253/farside_earth_moon_line_nocard_360p30.mp4",
+      "filename": "farside_earth_moon_line_nocard_360p30.mp4",
+      "media_type": "Movie",
+      "width": 640,
+      "height": 360
+     }
+    }
+   ]
+  }
+ ]
+}

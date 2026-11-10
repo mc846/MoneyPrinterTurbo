@@ -42,6 +42,7 @@ from app.services import (
     metaso_minimax,
     muapi,
     nasa,
+    nasa_svs,
     nasa_video,
     ofox,
     source_chain,
@@ -516,7 +517,7 @@ def _split_by_native_orientation(
 # 地址也不一定带描述性的 slug。NASA 的标签由关键词和标题生成（见 nasa.relevance_tags），
 # 没有 AI 标记。标签相关度和 AI 素材排除因此只对 Pixabay、Coverr 和 NASA 生效，Pexels
 # 保持原有顺序，作为后备时按无标签素材源处理（见 source_chain）。
-MATERIAL_TAG_SOURCES = frozenset({"pixabay", "coverr", "nasa"})
+MATERIAL_TAG_SOURCES = frozenset({"pixabay", "coverr", "nasa", "nasa_svs"})
 _RELEVANCE_STOP_WORDS = frozenset({
     "a", "an", "and", "are", "as", "at", "by", "for", "from", "in", "into", "is",
     "it", "its", "of", "off", "on", "onto", "or", "over", "the", "this", "that",
@@ -926,6 +927,10 @@ def _stock_source_search(
         # 图片和视频（nasa_media_types 的顺序）；只设置 "image" 时与 nasa.search_images 相同。
         provider = "nasa"
         remote_search_videos = nasa_video.search_media
+    elif source == "nasa_svs":
+        # NASA 科学可视化工作室的数据可视化视频（干净片段、远程读取片段与 NASA 视频相同）。
+        provider = "nasa_svs"
+        remote_search_videos = nasa_svs.search_videos
 
     def search_videos(
         search_term: str,
@@ -2900,6 +2905,8 @@ def _search_videos_with_cache(
     if provider == "nasa":
         # 过滤规则或相关设置改变后，旧的候选列表不能继续使用 24 小时。
         cache_args["variant"] = nasa.search_cache_variant()
+    elif provider == "nasa_svs":
+        cache_args["variant"] = nasa_svs.search_cache_variant()
 
     def load_cache_safely() -> List[MaterialInfo] | None:
         try:
@@ -3331,6 +3338,10 @@ def download_videos(
             if "nasa" in (source, *fallback_chain)
             and (nasa.face_filter_active() or "video" in nasa.configured_media_types()) else None
         )
+        if "nasa_svs" in (source, *fallback_chain):
+            # SVS 视频同样要先找干净片段。
+            screens = {**(screens or {}),
+                       "nasa_svs": lambda item: screen_material(item) if screen_material is not None else True}
         if vision is not None:
             # 视觉检查对链中每个素材源的够格候选依次运行：被拒绝的候选不计入。
             screens = {name: (lambda item: screen_material(item)) for name in (source, *fallback_chain)}
@@ -3349,8 +3360,8 @@ def download_videos(
     # 有后备素材源时两种候选同时存在，按候选的素材源分别处理。
     save_material = None
     screen_material = None
-    if "nasa" in (source, *fallback_chain):
-        # NASA 视频的干净片段按它在成片里的适配方式检查和读取（见 video._clip_fit_mode）。
+    if {"nasa", "nasa_svs"} & {source, *fallback_chain}:
+        # NASA 和 SVS 视频的干净片段按它在成片里的适配方式检查和读取（见 video._clip_fit_mode）。
         def video_options(item: MaterialInfo) -> dict:
             return {
                 "clip_seconds": float(max_clip_duration),
@@ -3359,22 +3370,24 @@ def download_videos(
             }
 
         def save_material(item: MaterialInfo, save_dir: str) -> str:
-            if fallback_source and item.provider != "nasa":
-                return save_video(video_url=item.url, save_dir=save_dir)
             if nasa_video.is_video(item):
+                # NASA 和 SVS 视频：只读取干净片段（不下载整个文件，没有声音）。
                 generation_progress.downloading()
                 return nasa_video.save_clip(item, save_dir, **video_options(item))
+            if fallback_source and item.provider != "nasa":
+                return save_video(video_url=item.url, save_dir=save_dir)
             return nasa.save_image_clip(
                 item, save_dir, video_aspect=video_aspect,
                 clip_duration=max_clip_duration, image_motion=image_motion,
             )
 
-        if nasa.face_filter_active() or "video" in nasa.configured_media_types():
+        if (nasa.face_filter_active() or "video" in nasa.configured_media_types()
+                or "nasa_svs" in (source, *fallback_chain)):
             def screen_material(item: MaterialInfo) -> bool:
-                if fallback_source and item.provider != "nasa":
-                    return True
                 if nasa_video.is_video(item):
                     return nasa_video.screen(item, **video_options(item))
+                if fallback_source and item.provider != "nasa":
+                    return True
                 if not nasa.face_filter_active():
                     return True
                 return nasa.screen_image(

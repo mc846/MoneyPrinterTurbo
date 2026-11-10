@@ -1,0 +1,269 @@
+{
+ "id": 20369,
+ "url": "http://svs.gsfc.nasa.gov/20369/",
+ "page_type": "Animation",
+ "title": "LRO Beauty Shots",
+ "studio": "cil",
+ "missions": [],
+ "keywords": [
+  "LRO",
+  "Moon"
+ ],
+ "credits": [
+  {
+   "role": "Animator",
+   "people": [
+    {
+     "name": "Adriana Manrique Gutierrez",
+     "employer": "KBR Wyle Services, LLC"
+    }
+   ]
+  },
+  {
+   "role": "Technical support",
+   "people": [
+    {
+     "name": "Aaron E. Lepsch",
+     "employer": "ADNET Systems, Inc."
+    }
+   ]
+  },
+  {
+   "role": "Producer",
+   "people": [
+    {
+     "name": "David Ladd",
+     "employer": "Advocates in Manpower Management, Inc."
+    }
+   ]
+  }
+ ],
+ "main_image": {
+  "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_CU_4k_30fps_ProRes.00400_print.jpg"
+ },
+ "description": "LRO Beauty Shot || LRO_cam2_4k_30fps_ProRes.00450_print.jpg (1024x432) [53.8 KB] || LRO_cam2_1080p_30fps_h264.mov (1920x812) [23.6 MB] || LRO_cam2_1080pwide_30fps_h264.mov (1920x812) [22.9 MB] || LRO_cam2_4k_30fps_ProRes.mov (5120x2160) [1.3 GB] || LRO_cam2_4k_30fps_h264.mp4 (5120x2160) [24.5 MB] || LRO_cam2_wide_30fps_ProRes.mov (5120x2160) [1.8 GB] || LRO_cam2_wide_30fps_h264.mp4 (5120x2160) [24.6 MB] || LRO_cam2_4k (3840x2160) [32.0 KB] || LRO_cam2_Wide (5120x2160) [32.0 KB] || LRO_cam2_4k_30fps_ProRes.webm (3840x2160) [5.2 MB] || ",
+ "media_groups": [
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam2_1080p_30fps_h264.mov",
+      "filename": "LRO_cam2_1080p_30fps_h264.mov",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 812
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam2_1080pwide_30fps_h264.mov",
+      "filename": "LRO_cam2_1080pwide_30fps_h264.mov",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 812
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam2_4k_30fps_ProRes.mov",
+      "filename": "LRO_cam2_4k_30fps_ProRes.mov",
+      "media_type": "Movie",
+      "width": 5120,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam2_4k_30fps_h264.mp4",
+      "filename": "LRO_cam2_4k_30fps_h264.mp4",
+      "media_type": "Movie",
+      "width": 5120,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam2_wide_30fps_ProRes.mov",
+      "filename": "LRO_cam2_wide_30fps_ProRes.mov",
+      "media_type": "Movie",
+      "width": 5120,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam2_wide_30fps_h264.mp4",
+      "filename": "LRO_cam2_wide_30fps_h264.mp4",
+      "media_type": "Movie",
+      "width": 5120,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam2_4k_30fps_ProRes.webm",
+      "filename": "LRO_cam2_4k_30fps_ProRes.webm",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_CU01_1080pwide_30fps_h264.mov",
+      "filename": "LRO_CU01_1080pwide_30fps_h264.mov",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 812
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_CU_4k_30fps_ProRes.mov",
+      "filename": "LRO_CU_4k_30fps_ProRes.mov",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_CU_4k_30fps_ProRes.webm",
+      "filename": "LRO_CU_4k_30fps_ProRes.webm",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_CU_4k_30fps_h264.mp4",
+      "filename": "LRO_CU_4k_30fps_h264.mp4",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_CU01_wide_30fps_h264.mp4",
+      "filename": "LRO_CU01_wide_30fps_h264.mp4",
+      "media_type": "Movie",
+      "width": 5120,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_CU01_wide_30fps_proRes.mov",
+      "filename": "LRO_CU01_wide_30fps_proRes.mov",
+      "media_type": "Movie",
+      "width": 5120,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_CU01_wide_30fps_proRes.webm",
+      "filename": "LRO_CU01_wide_30fps_proRes.webm",
+      "media_type": "Movie",
+      "width": 5120,
+      "height": 2160
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam1_1080p_30fps_h264.mov",
+      "filename": "LRO_cam1_1080p_30fps_h264.mov",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam1_1080pwide_30fps_h264.mov",
+      "filename": "LRO_cam1_1080pwide_30fps_h264.mov",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 812
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam1_4k_30fps_ProRes.mov",
+      "filename": "LRO_cam1_4k_30fps_ProRes.mov",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam1_4k_30fps_h264.mp4",
+      "filename": "LRO_cam1_4k_30fps_h264.mp4",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam1_wide_30fps_h264.mp4",
+      "filename": "LRO_cam1_wide_30fps_h264.mp4",
+      "media_type": "Movie",
+      "width": 5120,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam1_wide_30fps_proRes.mov",
+      "filename": "LRO_cam1_wide_30fps_proRes.mov",
+      "media_type": "Movie",
+      "width": 5120,
+      "height": 2160
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a020000/a020300/a020369/LRO_cam1_4k_30fps_ProRes.webm",
+      "filename": "LRO_cam1_4k_30fps_ProRes.webm",
+      "media_type": "Movie",
+      "width": 3840,
+      "height": 2160
+     }
+    }
+   ]
+  }
+ ]
+}

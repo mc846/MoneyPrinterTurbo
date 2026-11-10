@@ -1,0 +1,330 @@
+{
+ "id": 3874,
+ "url": "http://svs.gsfc.nasa.gov/3874/",
+ "page_type": "Visualization",
+ "title": "Tour of the Moon",
+ "studio": "svs",
+ "missions": [
+  "Clementine",
+  "LRO (Lunar Reconnaissance Orbiter)"
+ ],
+ "keywords": [
+  "Elevation data",
+  "Flyover",
+  "HDTV",
+  "Hyperwall",
+  "Laser Altimeter",
+  "LOLA",
+  "LRO",
+  "LROC",
+  "Lunar",
+  "Lunar Reconnaissance Orbiter",
+  "Lunar Surface",
+  "Lunar Topography"
+ ],
+ "credits": [
+  {
+   "role": "Animator",
+   "people": [
+    {
+     "name": "Ernie Wright",
+     "employer": "STC"
+    }
+   ]
+  },
+  {
+   "role": "Producer",
+   "people": [
+    {
+     "name": "Chris Smith",
+     "employer": "HTSI"
+    }
+   ]
+  },
+  {
+   "role": "Scientist",
+   "people": [
+    {
+     "name": "James Garvin",
+     "employer": "NASA/GSFC"
+    }
+   ]
+  }
+ ],
+ "main_image": {
+  "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tour.07200.jpg"
+ },
+ "description": "Using elevation and image data returned by Lunar Reconnaissance Orbiter (LRO), this animation takes the viewer on a virtual tour of the Moon. The tour visits a number of interesting sites chosen to illustrate a wide variety of lunar terrain features. Some are on the near side and are familiar to both professional and amateur observers on Earth, while others can only be seen clearly from space. Some are large and old (Orientale, South Pole-Aitken), others are smaller and younger (Tycho, Aristarchus). Constantly shadowed areas near the poles are hard to photograph but easier to measure with alti",
+ "media_groups": [
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tour_1080p60.webmhd.webm",
+      "filename": "tour_1080p60.webmhd.webm",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tour_720p30.mp4",
+      "filename": "tour_720p30.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tour_720p60.mp4",
+      "filename": "tour_720p60.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tour_1080p60.mp4",
+      "filename": "tour_1080p60.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tour_360p30.mp4",
+      "filename": "tour_360p30.mp4",
+      "media_type": "Movie",
+      "width": 640,
+      "height": 360
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tour_nodata_1080p60.webmhd.webm",
+      "filename": "tour_nodata_1080p60.webmhd.webm",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tour_nodata_720p30.mp4",
+      "filename": "tour_nodata_720p30.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tour_nodata_720p60.mp4",
+      "filename": "tour_nodata_720p60.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tour_nodata_1080p60.mp4",
+      "filename": "tour_nodata_1080p60.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tour_nodata_360p30.mp4",
+      "filename": "tour_nodata_360p30.mp4",
+      "media_type": "Movie",
+      "width": 640,
+      "height": 360
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/intro_1080p60.mp4",
+      "filename": "intro_1080p60.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/intro_720p60.mp4",
+      "filename": "intro_720p60.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/intro_720p30.mp4",
+      "filename": "intro_720p30.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/intro_1080p60.webmhd.webm",
+      "filename": "intro_1080p60.webmhd.webm",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/intro_360p30.mp4",
+      "filename": "intro_360p30.mp4",
+      "media_type": "Movie",
+      "width": 640,
+      "height": 360
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tourex_1080p60.webmhd.webm",
+      "filename": "tourex_1080p60.webmhd.webm",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tourex_720p30.mp4",
+      "filename": "tourex_720p30.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tourex_720p60.mp4",
+      "filename": "tourex_720p60.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tourex_1080p60.mp4",
+      "filename": "tourex_1080p60.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/tourex_360p30.mp4",
+      "filename": "tourex_360p30.mp4",
+      "media_type": "Movie",
+      "width": 640,
+      "height": 360
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/highlight_720p30.mp4",
+      "filename": "highlight_720p30.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/highlight_1080p60.webmhd.webm",
+      "filename": "highlight_1080p60.webmhd.webm",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/highlight_720p60.mp4",
+      "filename": "highlight_720p60.mp4",
+      "media_type": "Movie",
+      "width": 1280,
+      "height": 720
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/highlight_1080p60.mp4",
+      "filename": "highlight_1080p60.mp4",
+      "media_type": "Movie",
+      "width": 1920,
+      "height": 1080
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a000000/a003800/a003874/highlight_360p30.mp4",
+      "filename": "highlight_360p30.mp4",
+      "media_type": "Movie",
+      "width": 640,
+      "height": 360
+     }
+    }
+   ]
+  }
+ ]
+}

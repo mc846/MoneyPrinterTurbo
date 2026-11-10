@@ -1419,7 +1419,11 @@ CREDITS_DISCLAIMER = (
 )
 # credits.txt 每行开头的素材源名称。Pixabay 等库存素材源只在作为 NASA 的后备
 # （video_source_fallback）时出现；它们的许可不要求署名，这里写作者名和素材页面。
-CREDIT_SOURCE_LABELS = {"nasa": "NASA", "pixabay": "Pixabay", "pexels": "Pexels", "coverr": "Coverr"}
+CREDIT_SOURCE_LABELS = {"nasa": "NASA", "nasa_svs": "NASA SVS", "pixabay": "Pixabay", "pexels": "Pexels",
+                        "coverr": "Coverr"}
+# NASA 科学可视化工作室（nasa_svs）的数据可视化：credits.txt 与分享文本里的说明行。
+SVS_CREDIT_LINE = ("Veri görselleştirmeleri: NASA's Scientific Visualization Studio (svs.gsfc.nasa.gov) / "
+                   "Data visualizations: NASA's Scientific Visualization Studio")
 # 屏幕署名最多列出的机构数，其余写成 "ve diğerleri" / "and others"。
 CREDIT_OVERLAY_MAX_AGENCIES = 2
 # 署名里两个以上大写字母的词视为机构缩写（NASA、ESA、JPL、STScI…）；人名不会命中。
@@ -1466,7 +1470,7 @@ def _credited_sources(material_sources: Any) -> list[dict]:
 # Attribution"；Pro 及以上不需要，这里无法知道 API 等级，因此一律署名）。Pixabay 和
 # Pexels 的许可不要求署名：它们只在已有 credits.txt 时列出，Pexels 按其 API 指南写
 # "Video by … on Pexels"（https://www.pexels.com/api/documentation/）。
-ATTRIBUTION_REQUIRED_SOURCES = frozenset({"nasa", "coverr"})
+ATTRIBUTION_REQUIRED_SOURCES = frozenset({"nasa", "nasa_svs", "coverr"})
 COVERR_SITE = "https://coverr.co"
 
 
@@ -1474,16 +1478,18 @@ def _credit_line(record: dict) -> str:
     """一条署名：NASA 图片用署名；Coverr 和 Pexels 写 "Video by 作者 on 素材源"；Pixabay 写作者名。"""
     provider = str(record.get("provider") or "").lower()
     label = CREDIT_SOURCE_LABELS[provider]
-    if provider == "nasa":
+    creator = record.get("creator") if isinstance(record.get("creator"), dict) else {}
+    name = str(creator.get("name") or "").strip()
+    if provider in ("nasa", "nasa_svs"):
         line = f"[{label}] {record.get('credit') or DEFAULT_CREDIT}"
         segment = record.get("segment") if isinstance(record.get("segment"), dict) else {}
         if record.get("media_type") == "video" and isinstance(segment.get("start"), (int, float)):
             # 视频写明用到的片段，便于对照原视频。
             start, length = float(segment["start"]), float(segment.get("duration") or record.get("duration") or 0)
             line += f" (video, {start:g}-{start + length:g} s)"
+        if provider == "nasa_svs" and name:
+            line += f" — {name}"  # the page's people: "Visualizer: …; Planetary scientist: …"
         return line
-    creator = record.get("creator") if isinstance(record.get("creator"), dict) else {}
-    name = str(creator.get("name") or "").strip()
     if provider in {"coverr", "pexels"}:
         return f"[{label}] Video by {name} on {label}" if name else f"[{label}] Video on {label}"
     return f"[{label}] {name or label}"
@@ -1513,10 +1519,12 @@ def credits_text(material_sources: Any) -> str:
         lines.append(f"{index}. {_credit_line(record)}")
         if page:
             lines.append(f"   {page}")
-        if provider != "nasa" and CREDIT_SOURCE_LABELS[provider] not in other_labels:
+        if provider not in ("nasa", "nasa_svs") and CREDIT_SOURCE_LABELS[provider] not in other_labels:
             other_labels.append(CREDIT_SOURCE_LABELS[provider])
     others = ", ".join(other_labels)
-    if "nasa" in providers:
+    if "nasa_svs" in providers:
+        lines += ["", SVS_CREDIT_LINE]
+    if "nasa" in providers or ("nasa_svs" in providers and not others):
         footer = CREDITS_FOOTER if not others else (
             f"Görüntüler: NASA ve ortakları, {others} / Images: NASA and partners, {others}"
         )

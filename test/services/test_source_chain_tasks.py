@@ -115,7 +115,7 @@ def test_a_new_search_uses_the_task_chain_or_one_chosen_source(storage, monkeypa
     monkeypatch.setitem(config.app, "coverr_api_keys", [])
     monkeypatch.setitem(config.app, "pexels_api_keys", ["x-key"])
     where = scene_edits.search_sources(task_id)
-    assert where == {"chain": ["nasa", "pixabay", "coverr"], "sources": ["pexels", "pixabay", "nasa"]}
+    assert where == {"chain": ["nasa", "pixabay", "coverr"], "sources": ["pexels", "pixabay", "nasa", "nasa_svs"]}
     scene = {"id": "v1-s03", "term_index": 3}
     # The task's chain: NASA has nothing, Pixabay is enough, Coverr (no key) is skipped.
     found = scene_edits.search(task_id, scene, "earth rise")
@@ -148,7 +148,7 @@ def test_the_replace_dialog_offers_the_chain_and_each_source(storage, monkeypatc
     app.button(key="revision_replace_btn_v1-s02").click().run()
     key = f"revision_replace_{task_id}_v1-s02"
     box = app.selectbox(key=f"{key}_source")
-    assert box.options[0].endswith("(NASA → Pixabay)") and box.options[1:] == ["Pixabay", "NASA"]
+    assert box.options[0].endswith("(NASA → Pixabay)") and box.options[1:] == ["Pixabay", "NASA", "NASA SVS"]
     app.text_input(key=f"{key}_words").set_value("earth rise")
     box.set_value("Pixabay")
     app.button(key=f"{key}_search").click().run()

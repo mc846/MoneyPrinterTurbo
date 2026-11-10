@@ -1,0 +1,76 @@
+{
+ "id": 11197,
+ "url": "http://svs.gsfc.nasa.gov/11197/",
+ "page_type": "Produced Video",
+ "title": "Hypercolor Mosaic",
+ "studio": "gms",
+ "missions": [],
+ "keywords": [
+  "App"
+ ],
+ "credits": [
+  {
+   "role": "Writer",
+   "people": [
+    {
+     "name": "Alex Kasprak",
+     "employer": "USRA"
+    }
+   ]
+  }
+ ],
+ "main_image": {
+  "url": "http://svs.gsfc.nasa.gov/vis/a010000/a011100/a011197/messenger_2sides_1024x576.jpg"
+ },
+ "description": "On March 18, 2011, NASA's MESSENGER spacecraft entered orbit around Mercury, becoming the first spacecraft ever to do so. Among the many instruments on this pioneering probe is a wide-angle camera capable of generating high-resolution images of the planet's surface. By stitching thousands of these images together, scientists created the first complete map of Mercury. The result isn't just a pretty picture. The map's enhanced colors, produced by special filters fitted on the camera, tell a story about the chemical, mineralogical and geological history of the innermost planet in our solar system",
+ "media_groups": [
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a010000/a011100/a011197/MESSENGER-540-MASTER_high.mp4",
+      "filename": "MESSENGER-540-MASTER_high.mp4",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a010000/a011100/a011197/MESSENGER-540-MASTER_high.webmhd.webm",
+      "filename": "MESSENGER-540-MASTER_high.webmhd.webm",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a010000/a011100/a011197/MESSENGERcamera-540-MASTER_high.mp4",
+      "filename": "MESSENGERcamera-540-MASTER_high.mp4",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    },
+    {
+     "type": "media",
+     "instance": {
+      "url": "http://svs.gsfc.nasa.gov/vis/a010000/a011100/a011197/MESSENGERcamera-540-MASTER_high.webmhd.webm",
+      "filename": "MESSENGERcamera-540-MASTER_high.webmhd.webm",
+      "media_type": "Movie",
+      "width": 960,
+      "height": 540
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -562,7 +562,7 @@ def test_the_report_counts_videos_and_their_filters():
 def test_the_gercek_preset():
     preset = batch_production.load_preset(ROOT_DIR / "presets" / "gercek.toml")
     assert preset.video["video_source"] == "nasa"
-    assert preset.video["video_source_fallback"] == ["pixabay", "coverr"]
+    assert preset.video["video_source_fallback"] == ["nasa_svs", "pixabay", "coverr"]
     assert preset.video["exclude_ai_generated_materials"] is True
     assert preset.video["video_fit_mode"] == "blur" and preset.video["crop_materials_to_aspect"] is True
     assert preset.app["nasa_media_types"] == ["video", "image"]

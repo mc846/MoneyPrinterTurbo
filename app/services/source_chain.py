@@ -41,7 +41,7 @@ from typing import Any, Callable, Iterable, Sequence
 
 from loguru import logger
 
-STOCK_SOURCES = ("pexels", "pixabay", "coverr", "nasa")
+STOCK_SOURCES = ("pexels", "pixabay", "coverr", "nasa", "nasa_svs")
 API_KEYS = {"pexels": "pexels_api_keys", "pixabay": "pixabay_api_keys", "coverr": "coverr_api_keys"}
 _OFF = {"", "none", "off"}
 

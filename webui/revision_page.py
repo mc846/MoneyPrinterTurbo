@@ -217,7 +217,8 @@ def _describe(tr, op: scene_edits.SceneOp) -> str:
 
 FILTER_NAMES = ("text", "face")
 # Stock source names in the new-search source list (labels, not format_func: AppTest).
-SOURCE_LABELS = {"nasa": "NASA", "pixabay": "Pixabay", "pexels": "Pexels", "coverr": "Coverr"}
+SOURCE_LABELS = {"nasa": "NASA", "nasa_svs": "NASA SVS", "pixabay": "Pixabay", "pexels": "Pexels",
+                 "coverr": "Coverr"}
 
 
 def _reason(tr, choice: dict) -> str:

@@ -48,7 +48,7 @@ SUPPORTED_SOURCES = {
 }
 # Keep aligned with ``_FALLBACK_VIDEO_SOURCES`` in cli.py: only stock sources can
 # back each other up through --video-source-fallback.
-FALLBACK_SOURCES = {"pexels", "pixabay", "coverr", "nasa"}
+FALLBACK_SOURCES = {"pexels", "pixabay", "coverr", "nasa", "nasa_svs"}
 VOLCENGINE_ARK_API_KEY_URL = (
     "https://console.volcengine.com/ark/region:ark+cn-beijing/apikey"
 )
