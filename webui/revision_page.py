@@ -202,6 +202,23 @@ def crop_axes(path: str, aspect: VideoAspect) -> tuple[bool, bool]:
     return crop_width < width, crop_height < height
 
 
+FILTER_NAMES = ("text", "face")
+
+
+def _reason(tr, choice: dict) -> str:
+    """Why a candidate cannot be chosen, in the UI language (scene_edits keeps the English reason)."""
+    code = choice.get("reason_code")
+    if code == "filtered":
+        names = [tr(f"revision.filter.{name}") if name in FILTER_NAMES else name
+                 for name in choice.get("filters_rejected") or []]
+        return tr("revision.reason.filtered").format(filters=", ".join(names) or "—")
+    if code == "other_scene":
+        return tr("revision.reason.other_scene").format(scene=choice.get("used_by") or "")
+    if code in ("failed", "current", "no_address"):
+        return tr(f"revision.reason.{code}")
+    return str(choice.get("reason") or "")
+
+
 def _scene_image(task_id: str, materials: dict, row: dict):
     """The scene's source image for cropping (NASA original or the user's image)."""
     return scene_edits._image_for_crop(task_id, materials.get(row["material"] or "", {}))
@@ -256,7 +273,7 @@ def _replace_dialog(tr, task_id: str, base: dict, scene_id: str) -> None:
                            + (f" · {tr('revision.scene.score').format(score=f'{score:.2f}')}" if score is not None else ""))
                 st.caption(tr(f"revision.candidate.status.{choice.get('status') or 'not_selected'}"))
                 if not choice["selectable"]:
-                    st.caption(f":orange[{tr('revision.replace.not_selectable').format(reason=choice['reason'])}]")
+                    st.caption(f":orange[{tr('revision.replace.not_selectable').format(reason=_reason(tr, choice))}]")
                 if st.button(tr("revision.replace.choose"), key=f"{key}_choose_{choice['key']}",
                              disabled=not choice["selectable"], width="stretch"):
                     st.session_state[f"{key}_selected"] = {"candidate": choice["key"],
