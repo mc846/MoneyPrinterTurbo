@@ -83,7 +83,8 @@ def messages(elements):
 def test_empty_page_shows_the_preset_summary_and_refuses_to_start(batches, no_config_writes):
     app = page()
     summary = dict(app.dataframe[0].value.itertuples(index=False))
-    assert summary == {"Source": "nasa → pixabay", "Voice": "tr-TR-EmelNeural-Female", "Aspect ratio": "9:16",
+    # The space preset's fallback chain: Pixabay, then Coverr.
+    assert summary == {"Source": "nasa → pixabay → coverr", "Voice": "tr-TR-EmelNeural-Female", "Aspect ratio": "9:16",
                        "Target words": "90–100", "LLM": "claude_code", "Subtitle translations": "en"}
     assert app.selectbox(key="batch_preset_select").value == "uzay.toml"
     app.button(key="batch_start").click()
