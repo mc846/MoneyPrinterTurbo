@@ -16,7 +16,7 @@ import time
 import unicodedata
 from contextlib import ExitStack, contextmanager, redirect_stdout
 from functools import lru_cache
-from typing import Callable, List
+from typing import Callable, List, Sequence
 from loguru import logger
 import numpy as np
 from moviepy import (
@@ -1604,7 +1604,14 @@ def combine_videos(
     used_video_paths: List[str] | None = None,
     progress_callback: Callable[[float], None] | None = None,
     crop_cross_orientation_clips: bool = False,
+    scene_timeline: List[dict] | None = None,
 ) -> str:
+    """
+    ``scene_timeline``, when given, receives where every clip lands in the combined video:
+    {"source", "start_frame", "end_frame", "start", "end"} with frames counted in the
+    written clips (transitions are inside a clip, so the clips follow one another) and cut
+    where the combined video ends (``scene_timeline_from_clips``).
+    """
     # Direct callers and persisted tasks can still supply the raw string.
     # Normalize it once for all downstream enum access.
     video_concat_mode = VideoConcatMode(video_concat_mode or VideoConcatMode.random)
@@ -1998,18 +2005,29 @@ def combine_videos(
                     break
                 used_video_paths.append(clip.source_file_path)
                 elapsed += clip.duration
+        timeline = None
+        if scene_timeline is not None or task_materials.recording():
+            timeline = scene_timeline_from_clips(
+                [(clip.file_path, clip.source_file_path) for clip in processed_clips], combined_video_path)
+            if scene_timeline is not None:
+                scene_timeline.extend(timeline)
         if task_materials.recording():
             # The same cut-off as above: the part of every clip the video shows.
             segments, elapsed = [], 0.0
-            for clip in processed_clips:
+            for position, clip in enumerate(processed_clips):
                 if elapsed >= audio_duration:
                     break
                 shown = min(clip.duration, audio_duration - elapsed)
-                segments.append({
+                segment = {
                     "source": clip.source_file_path,
                     "start": clip.source_start or 0.0,
                     "duration": shown,
-                })
+                }
+                if timeline and position < len(timeline):
+                    # Where the scene is in the video, on whole frames.
+                    segment["video_start"] = timeline[position]["start"]
+                    segment["video_end"] = timeline[position]["end"]
+                segments.append(segment)
                 elapsed += clip.duration
             task_materials.timeline(combined_video_path, segments)
     finally:
@@ -2339,6 +2357,143 @@ def _subtitles_in_upper_half(params: VideoParams) -> bool:
     return params.subtitle_position == "custom" and float(params.custom_position or 0) < 50
 
 
+def video_frame_count(video_file: str) -> int:
+    """The frames of a video file, counted by ffmpeg with a stream copy (exact, no decoding)."""
+    result = subprocess.run(
+        [utils.get_ffmpeg_binary(), "-hide_banner", "-nostdin", *ffmpeg_inputs.ffmpeg_input(video_file),
+         "-map", "0:v:0", "-c", "copy", "-f", "null", "-"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=300,
+    )
+    counts = re.findall(r"frame=\s*(\d+)", result.stderr or "")
+    return int(counts[-1]) if counts else 0
+
+
+def scene_timeline_from_clips(clips: Sequence[tuple[str, str]], combined_file: str) -> List[dict]:
+    """
+    Where every clip (file, source) of a concatenation lands in the combined video: whole
+    frames, cut where the combined video ends (it stops at the voiceover).
+    """
+    total = video_frame_count(combined_file)
+    counts: dict[str, int] = {}
+    timeline, cursor = [], 0
+    for clip_file, source in clips:
+        if cursor >= total:
+            break
+        if clip_file not in counts:
+            counts[clip_file] = video_frame_count(clip_file)
+        end = min(total, cursor + counts[clip_file])
+        timeline.append({"source": source, "start_frame": cursor, "end_frame": end,
+                         "start": round(cursor / fps, 4), "end": round(end / fps, 4)})
+        cursor += counts[clip_file]
+    return timeline
+
+
+# Scene labels ("NASA SVS · LRO verisinden görselleştirme", later "Canlandırma · yapay zekâ"):
+# a small line in the corner on the credit's side of the frame (away from the subtitles),
+# during the scenes that carry one. scene_labels_enabled switches them off.
+SCENE_LABEL_MARGIN = 0.04
+SCENE_LABEL_GAP = 0.012
+
+
+def scene_labels_enabled() -> bool:
+    """scene_labels_enabled, on by default (a label only shows on scenes that have one)."""
+    value = config.app.get("scene_labels_enabled", True)
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off", ""}
+    return bool(value)
+
+
+def scene_label_text(label, language: str = "") -> str:
+    """A label is a text or {"tr": …, "en": …}: Turkish for tr-* videos, English otherwise."""
+    if isinstance(label, dict):
+        key = "tr" if str(language or "").lower().startswith("tr") else "en"
+        return str(label.get(key) or label.get("en") or label.get("tr") or "").strip()
+    return str(label or "").strip()
+
+
+def _label_image(text: str, font_path: str, video_width: int) -> Image.Image:
+    font_size = max(18, round(video_width * 0.024))
+    font = ImageFont.truetype(font_path, font_size)
+    stroke = max(1, font_size // 16)
+    left, top, right, bottom = font.getbbox(text, stroke_width=stroke)
+    pad_x, pad_y = font_size // 2, font_size // 3
+    width, height = right - left + 2 * pad_x, bottom - top + 2 * pad_y
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((0, 0, width - 1, height - 1), radius=pad_y, fill=(0, 0, 0, 140))
+    draw.text((pad_x - left, pad_y - top), text, font=font, fill=(255, 255, 255, 255),
+              stroke_width=stroke, stroke_fill=(0, 0, 0, 255))
+    return image
+
+
+def scene_label_layout(labels: Sequence[dict], label_size: dict, video_width: int, video_height: int,
+                       params: VideoParams, credit_box: tuple | None = None) -> List[dict]:
+    """
+    Where and when each label shows: [{"text", "start", "end", "x", "y"}].
+
+    ``labels`` are {"start", "end", "text"} (seconds); neighbouring scenes with the same
+    text become one span. The corner is the one away from the subtitles (top left when they
+    are in the lower half, bottom left otherwise), the side of the NASA credit; while the
+    credit shows (``credit_box`` = (start, end, y, height)) the label moves next to it, so
+    the two never overlap. Spans follow one another, so two labels never show at once.
+    """
+    spans: List[dict] = []
+    for label in sorted(labels, key=lambda item: float(item["start"])):
+        text, start, end = label["text"], float(label["start"]), float(label["end"])
+        if not text or end <= start:
+            continue
+        if spans and spans[-1]["text"] == text and abs(spans[-1]["end"] - start) < 1.5 / fps:
+            spans[-1]["end"] = max(spans[-1]["end"], end)
+        elif spans and start < spans[-1]["end"]:
+            spans[-1]["end"] = start  # the later scene's label takes over
+            spans.append({"text": text, "start": start, "end": end})
+        else:
+            spans.append({"text": text, "start": start, "end": end})
+    top = not _subtitles_in_upper_half(params)
+    margin_x = round(video_width * SCENE_LABEL_MARGIN)
+    placed = []
+    for span in spans:
+        width, height = label_size[span["text"]]
+        y = round(video_height * SCENE_LABEL_MARGIN) if top else round(video_height * (1 - SCENE_LABEL_MARGIN)) - height
+        pieces = [(span["start"], span["end"], y)]
+        if credit_box is not None:
+            credit_start, credit_end, credit_y, credit_height = credit_box
+            gap = round(video_height * SCENE_LABEL_GAP)
+            moved = credit_y + credit_height + gap if top else credit_y - gap - height
+            pieces = []
+            for start, end in ((span["start"], min(span["end"], credit_start)),
+                               (max(span["start"], credit_start), min(span["end"], credit_end)),
+                               (max(span["start"], credit_end), span["end"])):
+                if end - start > 1e-6:
+                    inside = start >= credit_start - 1e-6 and end <= credit_end + 1e-6
+                    pieces.append((start, end, moved if inside else y))
+        for start, end, piece_y in pieces:
+            placed.append({"text": span["text"], "start": start, "end": end, "x": margin_x, "y": int(piece_y)})
+    return placed
+
+
+def scene_label_clips(labels: Sequence[dict], font_path: str, video_width: int, video_height: int,
+                      params: VideoParams, credit_clip=None) -> List[ImageClip]:
+    """The labels as timed, static image layers (both final render engines draw them)."""
+    try:
+        images = {label["text"]: _label_image(label["text"], font_path, video_width)
+                  for label in labels if label.get("text")}
+    except Exception as exc:
+        logger.warning(f"failed to draw scene labels: error={type(exc).__name__}, detail={exc}")
+        return []
+    credit_box = None
+    if credit_clip is not None:
+        position = credit_clip.pos(0)
+        credit_box = (float(credit_clip.start), float(credit_clip.end), int(position[1]), int(credit_clip.size[1]))
+    sizes = {text: image.size for text, image in images.items()}
+    clips = []
+    for piece in scene_label_layout(labels, sizes, video_width, video_height, params, credit_box):
+        clips.append(ImageClip(np.array(images[piece["text"]]))
+                     .with_start(piece["start"]).with_duration(piece["end"] - piece["start"])
+                     .with_position((piece["x"], piece["y"])))
+    return clips
+
+
 def credit_overlay_clip(
     text: str,
     font_path: str,
@@ -2393,9 +2548,13 @@ def generate_video(
     params: VideoParams,
     bgm_file_override: str | None = None,
     credit_text: str = "",
+    scene_labels: Sequence[dict] | None = None,
 ) -> bool:
     """
     合成最终视频，并返回本次背景音乐处理是否成功。
+
+    ``scene_labels`` 是 [{"start", "end", "text"}]（秒）：这些时间段里在角落显示一行小字
+    （``scene_label_clips``；scene_labels_enabled 关闭时不显示）。
 
     返回值只描述 BGM 处理状态：没有请求 BGM 或成功混合时返回 True；请求了
     BGM 但加载、特效或混合失败时返回 False。即使 BGM 失败仍会继续输出只有
@@ -2687,16 +2846,30 @@ def generate_video(
             video_clip = CompositeVideoClip([video_clip, *text_clips])
             clip_stack.callback(video_clip.close)
 
-        if credit_text:
-            credit_font = font_path or file_security.resolve_path_within_directory(
+        credit_clip = None
+        overlay_font = ""
+        if credit_text or scene_labels:
+            overlay_font = font_path or file_security.resolve_path_within_directory(
                 utils.font_dir(), params.font_name or "STHeitiMedium.ttc"
             )
+        if credit_text:
             credit_clip = credit_overlay_clip(
-                credit_text, credit_font, video_width, video_height, video_clip.duration, params
+                credit_text, overlay_font, video_width, video_height, video_clip.duration, params
             )
             if credit_clip is not None:
                 logger.info(f"  ⑥ credit overlay: {credit_text}")
                 video_clip = CompositeVideoClip([video_clip, credit_clip])
+                clip_stack.callback(video_clip.close)
+
+        if scene_labels and scene_labels_enabled():
+            label_clips = scene_label_clips(
+                [label for label in scene_labels if float(label["start"]) < video_clip.duration],
+                overlay_font, video_width, video_height, params, credit_clip,
+            )
+            if label_clips:
+                texts = sorted({str(label.get("text")) for label in scene_labels if label.get("text")})
+                logger.info(f"  ⑦ scene labels: {len(label_clips)} layers ({'; '.join(texts)})")
+                video_clip = CompositeVideoClip([video_clip, *label_clips])
                 clip_stack.callback(video_clip.close)
 
         bgm_enabled = bgm_service.should_use_bgm(

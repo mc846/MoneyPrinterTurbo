@@ -173,6 +173,17 @@ def _segment_record(segment: Any) -> dict[str, Any] | None:
     return record or None
 
 
+def _scene_label_record(label: Any) -> str | dict[str, str] | None:
+    """场景角标：一段文字，或按语言的 {"tr", "en"}（短文本）。"""
+    if isinstance(label, str) and label.strip():
+        return label.strip()[:80]
+    if isinstance(label, dict):
+        texts = {key: str(label[key]).strip()[:80] for key in ("tr", "en")
+                 if isinstance(label.get(key), str) and label[key].strip()}
+        return texts or None
+    return None
+
+
 def _vision_record(vision: Any) -> dict[str, Any] | None:
     """视觉检查判定的白名单副本（短文本、布尔值和原因列表）。"""
     if not isinstance(vision, dict):
@@ -245,6 +256,10 @@ def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, An
     vision = _vision_record(source.get("vision"))
     if vision:
         record["vision"] = vision
+    # 这个素材的场景在成片里显示的角标（如 NASA SVS 的数据可视化说明；video.scene_label_clips）。
+    scene_label = _scene_label_record(source.get("scene_label"))
+    if scene_label:
+        record["scene_label"] = scene_label
     # Every successful download gets this record; the task's materials snapshot
     # keeps the full path and the item next to it (see task_materials).
     task_materials.downloaded(item, local_path, record)
