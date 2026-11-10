@@ -39,8 +39,8 @@ USAGE_GUIDELINES_URL = "https://www.nasa.gov/nasa-brand-center/images-and-media/
 # 必须加 1，否则旧规则选出的候选还会被使用一整天。1 = 首个版本，2 = 活动用语、NHQ 编号、
 # 人名关键词和人脸检查，3 = 署名去掉话题标签，署名里没有 NASA 或核实过的合作方时淘汰，
 # 4 = 候选带预览图地址（文字检查用），nasa_text_filter 写入缓存键，5 = 候选带描述标签
-# （description_tags，相关度的低权重部分）。
-FILTER_VERSION = 5
+# （description_tags，相关度的低权重部分），6 = 插画/动画检查也看素材编号和视频元数据。
+FILTER_VERSION = 6
 DETAILS_PAGE = "https://images.nasa.gov/details/{nasa_id}"
 DEFAULT_CREDIT = "NASA"
 # 图片（本模块）和视频（nasa_video）。nasa_media_types 的顺序同时是素材源内的类型
@@ -485,11 +485,17 @@ def exclude_illustrations_enabled() -> bool:
 
 
 def illustration_risk(data: dict) -> str | None:
-    """nasa_exclude_illustrations 开启且标题、关键词或描述开头说明不是拍摄的画面时，返回命中的词。"""
+    """
+    nasa_exclude_illustrations 开启且标题、关键词、描述开头或素材编号说明不是拍摄的画面时，返回命中的词。
+
+    素材编号也要看：有的视频只在编号里写明是动画（"… Teaser - UHD-animation"，标题和描述
+    里没有）。编号里的下划线换成空格再匹配。
+    """
     if not exclude_illustrations_enabled():
         return None
     opening = " ".join(_plain_text(data.get("description")).split()[:DESCRIPTION_TAG_WORDS])
-    match = _ILLUSTRATION.search(f"{_text(data.get('title'))} {_text(data.get('keywords'))} {opening}")
+    asset_id = _text(data.get("nasa_id")).replace("_", " ")
+    match = _ILLUSTRATION.search(f"{_text(data.get('title'))} {_text(data.get('keywords'))} {asset_id} {opening}")
     return match.group(0).lower() if match else None
 
 

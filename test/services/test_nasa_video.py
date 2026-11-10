@@ -156,6 +156,25 @@ def test_illustrations_are_skipped_only_when_asked():
     assert "exclude_illustrations" not in nasa.search_cache_variant()  # older cache keys stay valid
 
 
+def test_an_animation_named_only_in_the_asset_id_or_metadata_is_skipped(video_types):
+    # E2E 10.11: "PROMISE: Bringing Mars Rover Innovation to the Moon" said "animation" only in its id.
+    teaser_id = "20261105 PROMISE Reveal - UHD-animation"
+    items = [_search_item(teaser_id, "PROMISE: Bringing Mars Rover Innovation to the Moon", [],
+                          "Meet PROMISE, a lunar rover."),
+             _search_item("render1", "Lunar rover drive", ["rover"]), _search_item("real1", "Lunar rover drive")]
+    assets = {key: _asset(key) for key in (teaser_id, "render1", "real1")}
+    metadata = {teaser_id: _metadata(), "real1": _metadata(),
+                "render1": {**_metadata(), "AVAIL:Description": "This rendering shows the rover."}}
+    with patch.dict(config.app, {"nasa_exclude_illustrations": True}):
+        assert nasa.illustration_risk({"nasa_id": "Moon_animation_01", "title": "Moon"}) == "animation"
+        with (patch.object(nasa, "_get_json", side_effect=_fake_api(items, assets, metadata)),
+              patch.object(nasa_video.task_materials, "source_filtered") as filtered):
+            found = nasa_video.search_videos("lunar rover", 5)
+    assert [item.source_info["asset_id"] for item in found] == ["real1"]
+    assert filtered.call_args.args[2] == {"illustration": 2}
+    assert nasa_video.blocked_format({"title": "Artemis III Teaser"}) == "teaser"
+
+
 # ---------------------------------------------------------------- clean window (pure)
 
 

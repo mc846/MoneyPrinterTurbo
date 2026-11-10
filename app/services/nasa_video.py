@@ -54,7 +54,7 @@ BLOCKED_FORMATS = (
     "briefing", "town hall", "webinar", "interview", "panel discussion", "q&a", "live coverage",
     "launch coverage", "live broadcast", "what's up", "whats up", "this week @nasa", "this week at nasa",
     "nasa 360", "nasa explorers", "space to ground", "behind the spacecraft", "nasa edge", "podcast",
-    "nasa minute", "explainer", "ask nasa", "asknasa",
+    "nasa minute", "explainer", "ask nasa", "asknasa", "teaser",
     "lecture", "seminar", "colloquium", "symposium", "keynote", "ceremony", "trailer",
 )
 VIDEO_MAX_DURATION = 900  # seconds: longer uploads are lectures, briefings and live streams
@@ -161,6 +161,11 @@ def _detailed(data: dict, search_term: str, clip_seconds: float) -> tuple[Materi
     metadata = metadata if isinstance(metadata, dict) else {}
     if blocked_format(data, metadata):
         return None, "format"
+    # The asset's own title, keywords and description can differ from the search result's.
+    if nasa.illustration_risk({"nasa_id": nasa_id, "title": metadata.get("AVAIL:Title"),
+                               "keywords": metadata.get("AVAIL:Keywords"),
+                               "description": metadata.get("AVAIL:Description")}):
+        return None, "illustration"
     if nasa.third_party_copyright(data, metadata):
         return None, "copyright"
     credit = nasa.extract_credit(data, metadata)
