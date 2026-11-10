@@ -367,7 +367,8 @@ video_terms_style = "legacy"
 # only after a search term runs out of native candidates; otherwise only when
 # the native candidates of all terms cannot cover the voiceover. The smallest
 # qualifying rendition is downloaded, and cropped clips are always
-# center-cropped, even when video_fit_mode is "contain".
+# center-cropped, even when video_fit_mode is "contain". With "blur" they are
+# not cropped: the whole frame is shown over a blurred copy of the clip.
 # 默认关闭；开启后同方向素材不够用时，才用居中裁剪后满足目标分辨率的另一方向素材。
 crop_materials_to_aspect = false
 
@@ -979,7 +980,10 @@ open_task_folder_on_completion = true
 # video_concat_mode = "random"       # "random" or "sequential"
 # video_transition_mode = "None"     # "None", "Shuffle", "FadeIn", etc.
 # video_aspect_pexels = "9:16"       # Stored separately for each video source.
-# video_fit_mode = "cover"           # "cover" fills/crops; "contain" adds black bars.
+# video_fit_mode = "cover"           # "cover" fills/crops; "contain" adds black bars;
+#                                    # "blur" shows the whole frame over a blurred copy
+#                                    # of the clip that fills the canvas (e.g. a 16:9
+#                                    # clip in a 9:16 video, without black bars).
 # video_clip_duration = 3
 # video_clip_speed = 1.0
 # video_count = 1

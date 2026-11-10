@@ -47,10 +47,16 @@ class VideoAspect(str, Enum):
 
 
 class VideoFitMode(str, Enum):
-    """How source clips with a different aspect ratio fill the output canvas."""
+    """How source clips with a different aspect ratio fill the output canvas.
+
+    cover fills the canvas and crops the excess edges; contain shows the whole
+    source frame over black bars; blur shows the whole source frame over a
+    blurred copy of itself that fills the canvas.
+    """
 
     cover = "cover"
     contain = "contain"
+    blur = "blur"
 
 
 class ImageMotion(str, Enum):

@@ -513,9 +513,11 @@ def _render_clip(task_id: str, material: dict, scene: timing.Scene, duration: fl
     output = work / f"clip-{number:03d}.mp4"
     if scene.kind == timing.IMAGE:
         image = _image_source(task_id, material, work, crop, params)
+        # The task's fit mode, as in preprocess_video: a local image of another aspect ratio is
+        # fitted the same way as in the original video (prepared NASA images already match).
         zoom = video.render_image_zoom_video(
             str(image), max(1, math.ceil(duration)), image_motion=params.image_motion,
-            output_size=(width, height),
+            output_size=(width, height), fit_mode=params.video_fit_mode,
         )
         item = video.SubClippedVideoClip(file_path=zoom, start_time=0.0, end_time=duration,
                                          width=width, height=height)
@@ -627,7 +629,8 @@ _UNSET = object()
 
 # Scene clips are kept in revisions/.klipler/ by everything that shapes them, so a revision
 # renders only the scenes that changed. Raise when the clip rendering changes.
-CLIP_VERSION = 1
+# 2: image scenes use the task's fit mode (they were always rendered with cover).
+CLIP_VERSION = 2
 CLIP_CACHE = ".klipler"
 
 

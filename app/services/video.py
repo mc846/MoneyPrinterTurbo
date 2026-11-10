@@ -32,7 +32,7 @@ from moviepy import (
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
 from moviepy.tools import compute_position
-from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from app.config import config
 from app.models import const
@@ -158,6 +158,18 @@ _IMAGE_CLIP_ENCODING = {
     "preset": "medium",
     "ffmpeg_params": [*_BT709_FFMPEG_PARAMS, "-bf", "0"],
 }
+# blur 画面适配：完整画面按 contain 的尺寸居中，四周由同一画面铺满画布、模糊并稍微调暗的
+# 背景填充（例如横屏素材放进竖屏视频时不出现黑边）。背景取源画面中与画布同比例的居中区域，
+# 缩小到画布的 1/_BLUR_BACKGROUND_DOWNSCALE，做 _BLUR_BACKGROUND_PASSES 次盒式模糊（三次
+# 盒式模糊接近高斯模糊），调暗后放大回画布。模糊后的画面没有细节，先缩小再模糊与全尺寸模糊
+# 看起来相同，在 1080×1920 上却快约 6 倍。模糊强度：画布像素中的盒式模糊半径为画布短边 ×
+# _BLUR_BACKGROUND_RADIUS_RATIO，1080 像素的短边为 30（缩小后 8），约相当于 sigma 34 像素
+# 的高斯模糊。ffmpeg 的 boxblur 与 Pillow 的 BoxBlur 是同一种核，两条路径的背景一致。
+_BLUR_BACKGROUND_RADIUS_RATIO = 1 / 36
+_BLUR_BACKGROUND_PASSES = 3
+_BLUR_BACKGROUND_DOWNSCALE = 4
+# 背景亮度系数，1.0 表示不调暗。
+_BLUR_BACKGROUND_BRIGHTNESS = 0.85
 
 
 def _get_subtitle_spring_scale(time_seconds: float, duration_seconds: float) -> float:
@@ -1106,6 +1118,51 @@ def _clips_allow_stream_copy(clip_files: List[str]) -> bool:
     return len(signatures) == 1 and None not in signatures
 
 
+def _blur_background_region(
+    source_width: int, source_height: int, target_width: int, target_height: int
+) -> tuple[int, int, int, int]:
+    """blur 背景的取样区域 (x, y, 宽, 高)：源画面中与画布同比例的居中区域（即 cover 显示的部分，取整到像素）。"""
+    if source_width * target_height > source_height * target_width:
+        width, height = round(source_height * target_width / target_height), source_height
+    else:
+        width, height = source_width, round(source_width * target_height / target_width)
+    width, height = max(1, min(source_width, width)), max(1, min(source_height, height))
+    return (source_width - width) // 2, (source_height - height) // 2, width, height
+
+
+def _blur_background_scale(target_width: int, target_height: int) -> tuple[tuple[int, int], int]:
+    """blur 背景模糊时的缩小尺寸和盒式模糊半径（缩小后的像素）。ffmpeg 与 MoviePy 两条路径共用。"""
+    small = (
+        max(1, round(target_width / _BLUR_BACKGROUND_DOWNSCALE)),
+        max(1, round(target_height / _BLUR_BACKGROUND_DOWNSCALE)),
+    )
+    radius = round(
+        min(target_width, target_height) * _BLUR_BACKGROUND_RADIUS_RATIO / _BLUR_BACKGROUND_DOWNSCALE
+    )
+    # ffmpeg 的 boxblur 要求半径不超过短边的一半。
+    return small, max(1, min(radius, min(small) // 2))
+
+
+def _blurred_background(image: Image.Image, box, target_size: tuple[int, int]) -> Image.Image:
+    """
+    用 Pillow 生成与 _fit_filter 的 blur 背景相同的画面：box 区域缩小（BOX，即 ffmpeg 的 area）、
+    盒式模糊、调暗，再双线性放大到 target_size。边缘与 ffmpeg 的 boxblur 一样按镜像延伸：
+    先镜像填充足够宽的边，再模糊、裁回。box 可以是小数（图片片段逐帧放大时）。
+    """
+    small, radius = _blur_background_scale(*target_size)
+    pad = radius * _BLUR_BACKGROUND_PASSES
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    pixels = np.asarray(image.resize(small, Image.BOX, box=box))
+    blurred = Image.fromarray(np.pad(pixels, ((pad, pad), (pad, pad), (0, 0)), mode="symmetric"))
+    for _ in range(_BLUR_BACKGROUND_PASSES):
+        blurred = blurred.filter(ImageFilter.BoxBlur(radius))
+    blurred = blurred.crop((pad, pad, pad + small[0], pad + small[1]))
+    if _BLUR_BACKGROUND_BRIGHTNESS != 1.0:
+        blurred = blurred.point(lambda value: round(value * _BLUR_BACKGROUND_BRIGHTNESS))
+    return blurred.resize(tuple(target_size), Image.BILINEAR)
+
+
 def _fit_filter(
     source_width: int, source_height: int, target_width: int, target_height: int, fit_mode: VideoFitMode
 ) -> str:
@@ -1132,6 +1189,23 @@ def _fit_filter(
     x, y = compute_position(
         (resized_width, resized_height), (target_width, target_height), ("center", "center")
     )
+    if VideoFitMode(fit_mode) == VideoFitMode.blur:
+        # 一路生成模糊背景，一路按 contain 缩小完整画面，再在 RGB 中把画面叠到背景中间。
+        crop_x, crop_y, crop_width, crop_height = _blur_background_region(
+            source_width, source_height, target_width, target_height
+        )
+        (small_width, small_height), radius = _blur_background_scale(target_width, target_height)
+        brightness = _BLUR_BACKGROUND_BRIGHTNESS
+        dim = f",colorchannelmixer=rr={brightness:g}:gg={brightness:g}:bb={brightness:g}"
+        return (
+            "split=2[blur_source][blur_frame];"
+            f"[blur_source]crop={crop_width}:{crop_height}:{crop_x}:{crop_y},"
+            f"scale={small_width}:{small_height}:flags=area,format=gbrp,"
+            f"boxblur={radius}:{_BLUR_BACKGROUND_PASSES}{dim if brightness != 1.0 else ''},"
+            f"scale={target_width}:{target_height}:flags=bilinear,format=rgb24[blur_background];"
+            f"[blur_frame]scale={resized_width}:{resized_height}:flags=lanczos[blur_fitted];"
+            f"[blur_background][blur_fitted]overlay={int(x)}:{int(y)}:format=rgb"
+        )
     return (
         f"scale={resized_width}:{resized_height}:flags=lanczos,"
         f"pad={target_width}:{target_height}:{int(x)}:{int(y)}:color=black"
@@ -1403,7 +1477,7 @@ def _fit_clip_to_canvas(
     target_height: int,
     fit_mode: VideoFitMode | str = VideoFitMode.cover,
 ):
-    """Resize a clip to an exact canvas using cover/crop or contain/letterbox."""
+    """Resize a clip to an exact canvas using cover/crop, contain/letterbox or blur."""
     source_width, source_height = (int(value) for value in clip.size)
     target_width = int(target_width)
     target_height = int(target_height)
@@ -1446,6 +1520,29 @@ def _fit_clip_to_canvas(
     scale_factor = min(width_scale, height_scale)
     resized_width = max(1, min(target_width, int(source_width * scale_factor)))
     resized_height = max(1, min(target_height, int(source_height * scale_factor)))
+    if mode == VideoFitMode.blur:
+        # blur shows the same complete frame as contain, over a blurred and slightly
+        # darkened copy of the clip that fills the canvas (the same background as the
+        # ffmpeg normalization, see _fit_filter and _blurred_background).
+        left, top, width, height = _blur_background_region(
+            source_width, source_height, target_width, target_height
+        )
+        box = (left, top, left + width, top + height)
+        background = clip.without_mask().transform(
+            lambda get_frame, t: np.asarray(
+                _blurred_background(
+                    Image.fromarray(np.asarray(get_frame(t)).astype("uint8")),
+                    box,
+                    (target_width, target_height),
+                )
+            )
+        )
+        fitted_clip = clip.resized(
+            new_size=(resized_width, resized_height)
+        ).with_position("center")
+        return CompositeVideoClip(
+            [background, fitted_clip], size=(target_width, target_height), use_bgclip=True
+        ).with_duration(clip.duration)
     background = ColorClip(
         size=(target_width, target_height), color=(0, 0, 0)
     ).with_duration(clip.duration)
@@ -1471,8 +1568,11 @@ def _clip_fit_mode(
     开启 crop_materials_to_aspect 后，素材源会接受居中裁剪后满足目标分辨率的
     另一方向素材。这类片段必须按 cover 裁剪；按 contain 处理会把横屏素材缩成
     竖屏画面中间的一条窄带。与目标同方向的片段仍沿用用户选择的方式。
+    blur 不改成 cover：在竖屏里完整显示横屏画面、用模糊背景填满四周正是它的用途。
     """
     if not crop_cross_orientation_clips or target_width == target_height:
+        return fit_mode
+    if VideoFitMode(fit_mode) == VideoFitMode.blur:
         return fit_mode
     if target_height > target_width:
         matches_orientation = clip_height > clip_width
@@ -1678,7 +1778,8 @@ def combine_videos(
                 clip = clip.with_speed_scaled(normalized_clip_speed)
             # Normalize every source clip before transitions are applied. In cover mode
             # the clip fills the canvas and the excess edges are cropped; contain keeps
-            # the complete source frame and uses black bars for the unused area.
+            # the complete source frame and uses black bars for the unused area; blur
+            # fills that area with a blurred copy of the clip instead.
             clip_w, clip_h = clip.size
             if clip_w != video_width or clip_h != video_height:
                 clip_ratio = clip.w / clip.h
@@ -2691,6 +2792,14 @@ def _image_clip_settings_identity(
         "fps": _IMAGE_CLIP_FPS,
         "encoding": _IMAGE_CLIP_ENCODING,
     }
+    if output_size and VideoFitMode(fit_mode) == VideoFitMode.blur:
+        # 只有 blur 片段的命名包含背景参数，cover/contain 片段的缓存不受影响。
+        settings["blur_background"] = [
+            _BLUR_BACKGROUND_RADIUS_RATIO,
+            _BLUR_BACKGROUND_PASSES,
+            _BLUR_BACKGROUND_DOWNSCALE,
+            _BLUR_BACKGROUND_BRIGHTNESS,
+        ]
     if not output_size and motion == ImageMotion.zoom:
         # v1.3.10 bu yolu tamsayı boyutlu, titreyen yakınlaştırmadan alt piksel afin dönüşüme
         # (_smooth_zoom_clip) geçirdi: eski önbellek kullanılmasın. Yalnız bu yolun kimliği
@@ -2722,10 +2831,11 @@ def _target_size_layout(
 
     与先按原尺寸渲染、再由 _fit_clip_to_canvas 适配画布的结果一致：cover 取与
     成片同比例的居中区域铺满画面；contain 保留整张图片，按比例缩小后居中放在
-    黑色画布上（尺寸取整方式与 _fit_clip_to_canvas 相同）。
+    黑色画布上（尺寸取整方式与 _fit_clip_to_canvas 相同）；blur 的画面与 contain
+    相同，背景由 _target_size_image_clip 另行生成。
     """
     if (
-        VideoFitMode(fit_mode) == VideoFitMode.contain
+        VideoFitMode(fit_mode) in (VideoFitMode.contain, VideoFitMode.blur)
         and source_width * target_height != source_height * target_width
     ):
         scale = min(target_width / source_width, target_height / source_height)
@@ -2783,6 +2893,13 @@ def _target_size_image_clip(
         left, top = 0.0, 0.0
         region_width, region_height = float(needed[0]), float(needed[1])
     offset = ((target_width - band[0]) // 2, (target_height - band[1]) // 2)
+    # blur 的背景每帧取当前放大倍数下与画布同比例的居中区域，与先按原尺寸渲染、再按 blur
+    # 适配画布的结果相同（背景随画面一起放大）。
+    background_region = None
+    if VideoFitMode(fit_mode) == VideoFitMode.blur and band != (target_width, target_height):
+        background_region, _ = _target_size_layout(
+            source.width, source.height, target_width, target_height, VideoFitMode.cover
+        )
 
     def frame_at(time_seconds):
         zoom = _image_zoom_factor(time_seconds, motion)
@@ -2793,7 +2910,17 @@ def _target_size_image_clip(
             band, Image.LANCZOS, box=(x, y, x + width, y + height)
         )
         if band != (target_width, target_height):
-            canvas = Image.new("RGB", (target_width, target_height))
+            if background_region is None:
+                canvas = Image.new("RGB", (target_width, target_height))
+            else:
+                bg_left, bg_top, bg_width, bg_height = background_region
+                bg_x = bg_left + (bg_width - bg_width / zoom) / 2
+                bg_y = bg_top + (bg_height - bg_height / zoom) / 2
+                canvas = _blurred_background(
+                    source,
+                    (bg_x, bg_y, bg_x + bg_width / zoom, bg_y + bg_height / zoom),
+                    (target_width, target_height),
+                )
             canvas.paste(frame, offset)
             frame = canvas
         return np.asarray(frame)
@@ -2883,6 +3010,14 @@ def render_image_zoom_video(
         source_digest.update(source_frame.tobytes())
         if source_mask is not None:
             source_digest.update(source_mask.tobytes())
+        if (
+            output_size
+            and VideoFitMode(fit_mode) == VideoFitMode.blur
+            and source_frame.shape[1] * output_size[1] == source_frame.shape[0] * output_size[0]
+        ):
+            # 与成片同比例的图片（例如 NASA 处理好的图片）没有空白，blur 与 cover 的画面
+            # 相同：按 cover 命名和渲染，直接复用已有的 cover 片段。
+            fit_mode = VideoFitMode.cover
         settings_identity = _image_clip_settings_identity(
             clip_duration, motion, output_size, fit_mode
         )
