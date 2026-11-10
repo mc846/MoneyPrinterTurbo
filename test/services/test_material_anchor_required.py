@@ -41,11 +41,24 @@ def test_anchor_hit_reads_tags_titles_and_the_nasa_description():
     anchors = ["moon", "far side"]
     assert material._anchor_hit(_item("a", ["Apollo 16", "Lunar surface panorama"]), anchors)
     assert not material._anchor_hit(_item("b", ["Mars Reconnaissance Orbiter", "Crater Ejecta"]), anchors)
-    described = _item("c", ["Orion", "Earthrise"], description=["The Moon passes in front of Earth."])
+    described = _item("c", ["Orion", "Earthrise"], description=["The Moon passes in front of the Sun."])
     assert material._anchor_hit(described, anchors)
-    # Every word of an anchor must appear: "far" alone is not "far side".
-    assert not material._anchor_hit(_item("d", ["far away galaxy"]), ["far side"])
-    assert material._anchor_hit(_item("e", ["the far side"]), ["far side"])
+    # Only celestial bodies count: "far side" is no anchor of its own.
+    assert not material._anchor_hit(_item("e", ["the far side"]), anchors)
+
+
+def test_only_anchors_naming_a_celestial_body_count():
+    assert material.anchor_bodies(["moon", "far side"]) == {"moon"}
+    assert material.anchor_bodies(["solar storm", "sun"]) == {"sun"}
+    assert material.anchor_bodies(["jupiter", "moons"]) == {"jupiter", "moon"}
+    assert material.anchor_bodies(["Lunar south pole"]) == {"moon"}
+    # Concepts, objects and "space" are not bodies: the rule does nothing for these topics.
+    for anchors in (["time dilation", "relativity"], ["quantum entanglement", "physics"], ["black hole", "space"],
+                    ["neutron star", "space"], ["space station", "astronaut food"]):
+        assert material.anchor_bodies(anchors) == set()
+        assert material._anchor_hit(_item("x", ["Mars", "rover"]), anchors)
+    # "solar storm": the Sun is enough, the storm need not be named.
+    assert material._anchor_hit(_item("s", ["SDO", "Sun", "coronal loops"]), ["solar storm"])
 
 
 def test_no_anchors_or_no_tags_means_no_rule():

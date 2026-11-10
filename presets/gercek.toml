@@ -51,8 +51,9 @@ video_clip_concurrency = 3
 nasa_face_filter = true
 nasa_media_types = ["video", "image"]
 nasa_exclude_illustrations = true
-# Çapalardan biri (ör. "moon"; lunar = moon) etikette, başlıkta ya da NASA açıklamasında geçmeyen aday elenir:
-# "overlapping craters" için Mars, "impact basin" için Merkür görseli gelmez.
+# Çapalardaki gök cismi (ör. "moon"; lunar = moon) etikette, başlıkta ya da NASA açıklamasında geçmeyen aday
+# elenir: "overlapping craters" için Mars, "impact basin" için Merkür görseli gelmez. Gök cismi olmayan çapalar
+# ("black hole", "time dilation", "space") sayılmaz.
 material_require_anchor = true
 video_source_fallback_min_relevance = 0.5
 video_source_fallback_min_candidates = 1

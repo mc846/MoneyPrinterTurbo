@@ -620,9 +620,24 @@ ANCHOR_SYNONYMS = {
 }
 
 
+# material_require_anchor 只看锚点里的天体名（太阳、月球、行星和大卫星）：规则要防的是
+# 错误天体的画面（月球主题里的火星、水星照片）。"time dilation"、"quantum entanglement"、
+# "black hole" 这类锚点几乎不出现在素材标签里，要求命中会让大部分关键词留空：224 个
+# 关键词（28 个主题）的测量中，所有锚点都参与时留空的关键词从 8 个变成 76 个。
+ANCHOR_BODIES = frozenset({
+    "sun", "moon", "mercury", "venus", "earth", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto",
+    "ceres", "io", "europa", "ganymede", "callisto", "titan", "enceladus", "triton", "phobos", "deimos", "charon",
+})
+
+
 def _anchor_words(text: str) -> set[str]:
     """锚点比较用的内容词：``_relevance_words`` 的规范化（所有格、复数）再换成名词。"""
     return {ANCHOR_SYNONYMS.get(word, word) for word in _relevance_words(text)}
+
+
+def anchor_bodies(anchors: Sequence[str]) -> set[str]:
+    """锚点里的天体名（"solar storm" → sun，"jupiter moons" → jupiter、moon）；没有时规则不生效。"""
+    return {word for anchor in anchors for word in _anchor_words(anchor) if word in ANCHOR_BODIES}
 
 
 def require_anchor_enabled() -> bool:
@@ -635,17 +650,18 @@ def require_anchor_enabled() -> bool:
 
 def _anchor_hit(item: MaterialInfo, anchors: Sequence[str]) -> bool:
     """
-    候选是否命中至少一个锚点（锚点的全部内容词都出现）：看标签和标题，NASA 还看描述
-    开头（description_tags）。没有锚点或素材源没有标签数据时视为命中（规则不生效）。
+    候选是否命中锚点里的至少一个天体名（``anchor_bodies``）：看标签和标题，NASA 还看
+    描述开头（description_tags）。锚点里没有天体名，或素材源没有标签数据时视为命中
+    （规则不生效）。
     """
-    anchor_sets = [words for words in (_anchor_words(anchor) for anchor in anchors) if words]
+    bodies = anchor_bodies(anchors)
     source_info = item.source_info if isinstance(item.source_info, dict) else {}
     tags = source_info.get("tags")
-    if not anchor_sets or not isinstance(tags, list):
+    if not bodies or not isinstance(tags, list):
         return True
     texts = [*tags, *(source_info.get("description_tags") or [])]
     words = {word for text in texts if isinstance(text, str) for word in _anchor_words(text)}
-    return any(anchor <= words for anchor in anchor_sets)
+    return bool(bodies & words)
 
 
 def _order_material_candidates(

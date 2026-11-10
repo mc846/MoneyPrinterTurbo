@@ -407,14 +407,17 @@ crop_materials_to_aspect = false
 # 默认关闭；rank 按标签与搜索词的匹配程度排序，strict 另外剔除未完全匹配的素材。
 material_tag_relevance = "off"
 
-# With tag relevance on and anchors set, keep only candidates whose tags or
-# title (for NASA also the opening of the description) contain at least one
-# anchor ("moon" keeps NASA's "lunar surface" photos, drops a Mars crater
-# image found for "overlapping craters"). Adjectives count as their noun
-# (lunar = moon, solar = sun, martian = mars, terrestrial = earth, jovian =
-# jupiter, stellar = star, galactic = galaxy...). No anchors, no effect;
-# sources without tags (Pexels) are not affected.
-# 默认关闭；开启后（有锚点时）只保留标签、标题或 NASA 描述里命中至少一个锚点的候选。
+# With tag relevance on and anchors naming a celestial body (the Sun, the
+# Moon, a planet or a large moon: "moon", "solar storm", "jupiter"), keep
+# only candidates whose tags or title (for NASA also the opening of the
+# description) name one of those bodies ("moon" keeps NASA's "lunar surface"
+# photos and drops a Mars crater image found for "overlapping craters").
+# Adjectives count as their noun (lunar = moon, solar = sun, martian = mars,
+# terrestrial = earth, jovian = jupiter...). Other anchors ("time dilation",
+# "black hole", "space") do not count: such words are rarely in stock tags
+# and requiring them empties most terms. No body anchor, no effect; sources
+# without tags (Pexels) are not affected.
+# 默认关闭；开启后（锚点里有天体名时）只保留标签、标题或 NASA 描述里提到该天体的候选。
 material_require_anchor = false
 
 # Skip Pixabay footage that Pixabay flags as AI-generated (isAiGenerated), and
