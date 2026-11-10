@@ -417,6 +417,28 @@ material_tag_relevance = "off"
 # 默认关闭；开启后（有锚点时）只保留标签、标题或 NASA 描述里命中至少一个锚点的候选。
 material_require_anchor = false
 
+# Show stock candidates to a vision model before they are used (a still for
+# images, three frames of the chosen window for NASA videos). It answers the
+# image type, the main subject, whether the subject is one of the anchors,
+# text, people and logos; a candidate is turned down when it is an
+# illustration, CGI or a diagram, when its subject is not an anchor, when it
+# shows a recognizable person or a logo. A data visualization is used and
+# listed as needing a label in the batch report. Rejected candidates are
+# replaced by the next one; after material_vision_max_per_term model calls
+# for a term and source the term moves on to the next source of the chain.
+# material_vision_max_per_task caps the calls of a task: when it is reached,
+# or the model fails (usage or session limit, login, timeout), the screening
+# stops with a warning and the task goes on unscreened. Decisions are cached
+# (storage/cache_vision) by asset, prompt version, model and anchors.
+# material_vision_model: "claude:<model>" runs the logged-in claude CLI
+# (stream-json image input, no tools; "claude:sonnet", "claude:haiku"),
+# "ollama:<model>" an Ollama vision model (e.g. "ollama:gemma4:31b-cloud").
+# 默认关闭；开启后库存素材在使用前由视觉模型检查（类型、主体、锚点、人物、标志）。
+material_vision_screening = false
+material_vision_model = "claude:sonnet"
+material_vision_max_per_term = 3
+material_vision_max_per_task = 40
+
 # Skip Pixabay footage that Pixabay flags as AI-generated (isAiGenerated), and
 # Coverr footage flagged with is_ai_generated. Other sources provide no such
 # flag, so the setting has no effect for them.

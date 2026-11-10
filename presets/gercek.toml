@@ -54,6 +54,13 @@ nasa_exclude_illustrations = true
 # Çapalardan biri (ör. "moon"; lunar = moon) etikette, başlıkta ya da NASA açıklamasında geçmeyen aday elenir:
 # "overlapping craters" için Mars, "impact basin" için Merkür görseli gelmez.
 material_require_anchor = true
+# Görsel tarama: aday kullanılmadan önce görsel modele gösterilir (görsel: önizleme; NASA videosu: temiz
+# pencerenin 3 karesi). Reddedilir: çizim, CGI, diyagram; konusu çapa değil; tanınabilir kişi; logo. Veri
+# görselleştirmesi kabul edilir, kalite raporunda "etiket gerekli" yazar. Kota/oturum sınırında tarama durur, iş sürer.
+material_vision_screening = true
+material_vision_model = "claude:sonnet"
+material_vision_max_per_term = 3
+material_vision_max_per_task = 40
 video_source_fallback_min_relevance = 0.5
 video_source_fallback_min_candidates = 1
 

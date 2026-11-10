@@ -48,6 +48,7 @@ from app.services import (
     task_artifacts,
     task_materials,
     video,
+    vision_screen,
     volcengine_seedance,
 )
 from app.utils import ffmpeg_inputs, logging_utils, utils
@@ -172,6 +173,26 @@ def _segment_record(segment: Any) -> dict[str, Any] | None:
     return record or None
 
 
+def _vision_record(vision: Any) -> dict[str, Any] | None:
+    """视觉检查判定的白名单副本（短文本、布尔值和原因列表）。"""
+    if not isinstance(vision, dict):
+        return None
+    record: dict[str, Any] = {}
+    for field in ("decision", "image_type", "subject", "person", "label", "model"):
+        value = vision.get(field)
+        if isinstance(value, str) and value:
+            record[field] = value[:80]
+    for field in ("subject_matches_anchor", "text_overlay", "logo", "cached"):
+        if isinstance(vision.get(field), bool):
+            record[field] = vision[field]
+    if isinstance(vision.get("prompt_version"), int):
+        record["prompt_version"] = vision["prompt_version"]
+    reasons = vision.get("reasons")
+    if isinstance(reasons, list):
+        record["reasons"] = [str(reason)[:80] for reason in reasons[:6]]
+    return record or None
+
+
 def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, Any]:
     """
     为成功下载的素材生成轻量来源记录。
@@ -220,6 +241,10 @@ def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, An
     segment = _segment_record(source.get("segment")) if record["provider"] == "nasa" else None
     if segment:
         record["segment"] = segment
+    # 视觉检查的判定（material_vision_screening）：类型、主体、结论和原因。
+    vision = _vision_record(source.get("vision"))
+    if vision:
+        record["vision"] = vision
     # Every successful download gets this record; the task's materials snapshot
     # keeps the full path and the item next to it (see task_materials).
     task_materials.downloaded(item, local_path, record)
@@ -3220,9 +3245,13 @@ def download_videos(
     anchors: Sequence[str] | None = None,
     fallback_source: str = "",
     video_fit_mode: VideoFitMode | str = VideoFitMode.cover,
+    video_subject: str = "",
 ) -> List[str]:
     """
     搜索并下载覆盖配音时长所需的素材，返回本地文件路径。
+
+    ``material_vision_screening`` 开启时，库存素材在使用前还要经过视觉模型检查
+    （``vision_screen``；``video_subject`` 写进提示词）。
 
     ``video_fit_mode`` 只用于 NASA 视频：决定检查文字的画面范围（blur/contain 看整个
     画面，cover 看居中裁剪的部分）和读取哪个副本（见 ``nasa_video``）。
@@ -3250,6 +3279,8 @@ def download_videos(
     """
     anchors = [str(anchor) for anchor in (anchors or ()) if str(anchor).strip()]
     task_materials.started(search_terms, anchors)
+    # 视觉检查只用于库存素材源（按需生成的付费素材源和本地素材不检查）。
+    vision = vision_screen.start(anchors, video_subject) if source in FALLBACK_VIDEO_SOURCES else None
     source_options = {
         "crop_to_aspect": crop_to_aspect,
         "tag_relevance": tag_relevance,
@@ -3269,6 +3300,9 @@ def download_videos(
             if "nasa" in (source, *fallback_chain)
             and (nasa.face_filter_active() or "video" in nasa.configured_media_types()) else None
         )
+        if vision is not None:
+            # 视觉检查对链中每个素材源的够格候选依次运行：被拒绝的候选不计入。
+            screens = {name: (lambda item: screen_material(item)) for name in (source, *fallback_chain)}
         search_videos, order_options = chain_source_search(
             source, fallback_chain, unavailable=unavailable, screens=screens, **source_options
         )
@@ -3316,6 +3350,23 @@ def download_videos(
                     item, material_directory, video_aspect=video_aspect,
                     clip_duration=max_clip_duration, image_motion=image_motion,
                 )
+
+    if vision is not None:
+        # 素材源自己的检查（NASA 的人脸、干净片段）先运行，视觉检查在后：NASA 视频要先有
+        # 选定的片段才能取三帧。判定有缓存，链的判定、按顺序匹配和下载各问一次也只调用一次模型。
+        source_save, source_screen = save_material, screen_material
+
+        def screen_material(item: MaterialInfo) -> bool:
+            if source_screen is not None and not source_screen(item):
+                return False
+            return vision.screen(item)
+
+        def save_material(item: MaterialInfo, save_dir: str) -> str:
+            if not screen_material(item):
+                return ""
+            if source_save is not None:
+                return source_save(item, save_dir)
+            return save_video(video_url=item.url, save_dir=save_dir)
 
     material_directory = config.app.get("material_directory", "").strip()
     if material_directory == "task":
@@ -3424,6 +3475,7 @@ def download_videos(
             **({"save_material": save_material} if save_material is not None else {}),
             **({"screen_material": screen_material} if screen_material is not None else {}),
         )
+        vision_screen.finish(vision)
         if not paths:
             _raise_if_no_suitable_term(search_videos)
         return paths
@@ -3526,6 +3578,7 @@ def download_videos(
                     f"detail={_redact_request_error(e, item.url)}"
                 )
     logger.success(f"downloaded {len(video_paths)} videos")
+    vision_screen.finish(vision)
     _persist_material_sources(task_id, material_sources)
     return video_paths
 

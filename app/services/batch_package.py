@@ -376,6 +376,11 @@ _FALLBACK_LINE = re.compile(r"material fallback: term=(?P<term>'(?:[^'\\]|\\.)*'
                             r"(?P<primary>\w+)=\d+/(?P<primary_count>\d+) qualified, "
                             r"(?P<fallback>\w+)=\d+/(?P<fallback_count>\d+) qualified, .*using=(?P<using>\w+)")
 # Kaynak zincirinin satırı (source_chain): tried=<kaynak>:<aday>/<uygun|->[:429|:skipped],...
+# Görsel taramanın görev sonu satırı (vision_screen.Session.summary).
+_VISION_SUMMARY = re.compile(
+    r"vision screening: model=(?P<model>\S+), calls=(?P<calls>\d+), cached=(?P<cached>\d+), "
+    r"accepted=(?P<accepted>\d+), rejected=(?P<rejected>\d+), unscreened=(?P<unscreened>\d+), "
+    r"seconds=(?P<seconds>[\d.]+), status=(?P<status>.+)$")
 _CHAIN_LINE = re.compile(r"material source chain: term=(?P<term>'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"), "
                          r"tried=(?P<tried>\S+), using=(?P<using>\w+), reason=(?P<reason>\w+)")
 # nasa.search_images 和 nasa_video.search_videos 的 skipped 计数键 → 报告里的淘汰原因。
@@ -388,7 +393,7 @@ _SKIP_REASONS = {
 
 def log_summary(log_lines: list[str], terms: list[str]) -> dict:
     """Görev günlüğünden boş ve yedeğe geçen terimler ile filtre elemeleri."""
-    searched, fallback = {}, {}
+    searched, fallback, vision = {}, {}, None
     eliminations = {"yazi_onizleme": 0, "yuz": 0, "kisi": 0, "yazi_metaveri": 0, "telif": 0,
                     "kredi": 0, "cozunurluk": 0, "diger": 0}
     for line in log_lines:
@@ -418,6 +423,14 @@ def log_summary(log_lines: list[str], terms: list[str]) -> dict:
             eliminations["yuz"] += 1
         elif line.startswith("nasa video filter: skipped"):
             eliminations["temiz_bolum"] = eliminations.get("temiz_bolum", 0) + 1
+        elif line.startswith("vision screening: skipped"):
+            eliminations["gorsel_tarama"] = eliminations.get("gorsel_tarama", 0) + 1
+        elif match := _VISION_SUMMARY.search(line):
+            vision = {"model": match["model"], "cagri": int(match["calls"]), "onbellek": int(match["cached"]),
+                      "kabul": int(match["accepted"]), "ret": int(match["rejected"]),
+                      "taranmadi": int(match["unscreened"]), "sure_sn": float(match["seconds"]),
+                      "durum": "tamamlandı" if match["status"] == "complete" else
+                      "tamamlanamadı: " + match["status"].removeprefix("stopped: ")}
     empty, switched = [], []
     for term in terms:
         if term in fallback:
@@ -433,6 +446,7 @@ def log_summary(log_lines: list[str], terms: list[str]) -> dict:
         "filtre_elemeleri": eliminations,
         # Önbellekten gelen aramalar günlüğe yazılmaz; elemeler yalnız yeni aramalar için sayılır.
         "onbellekten_gelen_aramalar": sum(1 for term in terms if term not in searched and term not in fallback),
+        **({"gorsel_tarama": vision} if vision else {}),
     }
 
 
@@ -493,6 +507,9 @@ def technical_checks(task_dir: Path, final_video: Path, script: str, params: dic
         "yazi_tipi": font_name,
         "kredi_sorunlari": credit_problems(material_sources),
         "goruntuler": material_summary(material_sources),
+        # Görsel taramanın veri görselleştirmesi dediği klipler: ekranda etiket gerekir.
+        "etiket_gerekli": [str(record.get("asset_id")) for record in material_sources or []
+                           if isinstance(record, dict) and ((record.get("vision") or {}).get("label"))],
     }
     checks.update(log_summary(log_lines, terms))
     return checks
@@ -521,6 +538,12 @@ def check_warnings(checks: dict) -> list[str]:
     if not checks.get("kelime_uygun", True):
         low, high = checks["kelime_hedef"]
         warnings.append(f"kelime sayısı {checks['kelime']} (hedef {low}-{high})")
+    vision = checks.get("gorsel_tarama") or {}
+    if str(vision.get("durum") or "").startswith("tamamlanamadı"):
+        warnings.append(f"görsel tarama tamamlanamadı ({vision['durum'].split(': ', 1)[-1]}); "
+                        f"{vision.get('taranmadi', 0)} klip taranmadan kullanıldı")
+    if checks.get("etiket_gerekli"):
+        warnings.append(f"etiket gerekli: {', '.join(checks['etiket_gerekli'])} (veri görselleştirmesi)")
     return warnings
 
 
@@ -667,6 +690,7 @@ ELIMINATION_LABELS = {
     "yazi_onizleme": "önizlemede yazı", "yuz": "yüz", "kisi": "kişi (metaveri)", "yazi_metaveri": "yazı/grafik (metaveri)",
     "telif": "telif", "kredi": "üçüncü taraf kredisi", "cozunurluk": "çözünürlük", "diger": "diğer",
     "cizim": "çizim/canlandırma", "program": "program biçimi (video)", "temiz_bolum": "temiz bölüm yok (video)",
+    "gorsel_tarama": "görsel tarama",
 }
 
 
@@ -750,6 +774,9 @@ def _item_card(batch_dir: Path, item) -> str:
         ("Glifsiz karakter", " ".join(checks.get("glifsiz_karakterler", [])) or "yok"),
         ("Kredi sorunu", "; ".join(checks.get("kredi_sorunlari", [])) or "yok"),
         ("Görüntüler", " · ".join(f"{k} {v}" for k, v in (checks.get("goruntuler") or {}).items()) or "yok"),
+        ("Görsel tarama", (lambda v: f"{v['model']} · {v['cagri']} çağrı, {v['onbellek']} önbellekten, "
+                                     f"{v['ret']} ret, {v['taranmadi']} taranmadı · {v['sure_sn']:g} sn · {v['durum']}"
+                           if v else "kapalı")(checks.get("gorsel_tarama"))),
         ("Boş terim", ", ".join(checks.get("bos_terimler", [])) or "yok"),
         ("Yedeğe geçen terim", ", ".join(checks.get("yedege_gecen_terimler", [])) or "yok"),
         ("Filtre elemeleri", ", ".join(f"{ELIMINATION_LABELS.get(k, k)} {v}" for k, v in elim.items() if v) or "yok"),
