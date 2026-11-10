@@ -744,7 +744,13 @@ uv run python cli.py revizyon <görev> --kirpma v1-s02=0.3 --render-motoru ffmpe
 
 ## Yapay zekâ kaynakları ve "Ya olsaydı" (inceleme, 10.11; kod değişikliği yok)
 
-Hedef: gerçek cümleler kaynak zincirinden (NASA → Pixabay → …), kurgu cümleler yapay zekâ videosuyla, ekranda "Canlandırma · yapay zekâ" etiketiyle. Önerilen sağlayıcı WaveSpeed.
+**Durum (10.11): WaveSpeed API pilotu ödeme yöntemi nedeniyle rafta** (Türkiye'den WaveSpeed'e ödeme yapılamıyor). Kurgu kanalı API yerine istem paketi + gelen kutusu yoluyla yapılacak (bkz. Planlanan iyileştirmeler'deki yol haritası). Aşağıdaki inceleme ve pilot önerisi kayıt için duruyor. İncelemede bulunan, **düzeltilmemiş** WaveSpeed hataları (kaynak yeniden açılırsa önce bunlar):
+- Belgedeki `deleted` tahmin durumu ele alınmıyor: yoklama 600 sn zaman aşımına kadar bekler.
+- Çözünürlük kaydı yanlış: istek çözünürlük göndermez (model varsayılanı 720p), kayıt 1080×1920 yazar.
+- Toplu işte yeniden ödeme: başarısız konu yeni görev kimliğiyle bir kez daha denenir, yeniden başlatılan render yeni görev açar; ödenmiş klipler yeniden üretilip ödenir.
+- Görsel kaynaklarında (`openai_image`, `codex_image`) ücret onayı yok.
+
+Hedef: gerçek cümleler kaynak zincirinden (NASA → Pixabay → …), kurgu cümleler yapay zekâ videosuyla, ekranda "Canlandırma · yapay zekâ" etiketiyle. Önerilen sağlayıcı WaveSpeed (rafta, yukarıya bakın).
 
 **Ortak yapı (bugün):**
 - Her yapay zekâ kaynağı tek ve dışlayıcı bir `video_source`: `download_videos` stok yolundan önce `_download_videos_<x>_on_demand`'e döner. Terim başına bir ücretli üretim, terim sırasıyla, ses süresi dolunca durur. Eşit aralık, zincir, aday, arama önbelleği yok. Terimler biterse `combine_videos` klipleri döngüye alır (yapay zekâ klibi tekrar edebilir).
@@ -904,7 +910,11 @@ Sırası önceliğe göre. `[x]` ile işaretliler tamamlandı ve `main`'e alınd
     - Sonuç: yedek boş terimleri dolduruyor ve terimi hiç karşılamayan NASA adaylarının yerine geçiyor. Ama NASA'nın etiketi terimi tutmayan doğru görseli de gidebiliyor ("binary star system"). Uzay reçetesinde açık tutmak yararlı; daha seçici bir ölçüt için terimin alan kelimesine göre ağırlık (ör. "star", "galaxy" eşleşmesi) sonraki adımda değerlendirilebilir.
 - [x] Sıralı yedek kaynak zinciri (`feat/source-chain` + `feat/source-chain-tasks`, 10.11): `video_source_fallback` tek değer ya da sıralı liste; bkz. **Kaynak zinciri**.
 - [x] Uygun aday yokken terim boş kalır, yüz filtresi karardan önce (`feat/chain-suitable-only`, 10.11): bkz. **Kaynak zinciri**.
-- [ ] **Sıradaki: "Ya olsaydı" videoları** (gerçek görüntü + yapay zekâ canlandırması; bkz. **Yapay zekâ kaynakları ve "Ya olsaydı"**). Yol haritası:
+- [ ] **Yol haritası (10.11'den beri; iki kanal):**
+  1. [x] **Gerçek kanalı** (yalnız çekilmiş görüntü, ör. "Ay'ın karanlık yüzünün yüzey yapısı"): NASA videoları, temiz bölüm seçimi, `blur` sığdırma, `presets/gercek.toml` (10.11; bkz. **NASA video ve gerçek kanalı**).
+  2. [ ] **NASA SVS kaynağı** (svs.gsfc.nasa.gov; ölçüm ve kapsam **NASA video ve gerçek kanalı** altında, M).
+  3. [ ] **Kurgu kanalı** (yalnız yapay zekâ videoları): API yerine istem paketi (sahne başına hazır istemler, kullanıcı kendi aracında üretir) + gelen kutusu (üretilen klipler bir klasöre bırakılır, görev onları sahnelere bağlar). WaveSpeed API pilotu rafta (ödeme).
+- [ ] **Rafta: "Ya olsaydı" videoları** (gerçek görüntü + yapay zekâ canlandırması, WaveSpeed API'siyle; ödeme yöntemi nedeniyle rafta, bkz. **Yapay zekâ kaynakları ve "Ya olsaydı"**). Eski yol haritası:
   1. **Aşama 1, pilot:** revizyon panelinde "Bu sahneyi yapay zekâyla üret" (bir görsel ve bir video yolu, WaveSpeed), fiyat teklifi + onay + üst sınır, `materials.json`'a model/istem/maliyet kaydı. Ölçüm: sahne başına maliyet, süre, E/K/H.
   2. **Aşama 2, reçete ve gerçek/kurgu metin:** metin üretiminde kurgu cümlelerin işaretlenmesi, terim yerine sahne istemi (`{term, kind, ai_prompt}`), reçetede yapay zekâ ayarları.
   3. **Aşama 3, karışık render ve etiket:** sahne başına kaynak yönlendirme (zincir + yapay zekâ aynı videoda; `_empty_term_handler` kancası buradan genişler), "Canlandırma · yapay zekâ" ekran etiketi (sahne zaman aralığıyla, NASA atfıyla çakışmadan), `credits.txt`'te yapay zekâ satırı.
