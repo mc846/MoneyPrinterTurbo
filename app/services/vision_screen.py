@@ -16,9 +16,10 @@ Backends (``material_vision_model`` = "<backend>:<model>"): ``claude`` runs the 
 CLI headless with stream-json image input and no tools (the subscription login, like
 the claude_code LLM provider); ``ollama`` posts to /api/chat (e.g. gemma4:31b-cloud).
 
-Per task (``Session``): at most ``material_vision_max_per_term`` model calls per term and
-source (then the term moves on to the next source of the chain) and
-``material_vision_max_per_task`` in all. When the task limit is reached, or the
+Per task (``Session``): at most ``material_vision_max_per_term`` candidates screened per term
+and source, cached decisions included, so a warm cache decides the same as a cold one (then
+the term moves on to the next source of the chain), and ``material_vision_max_per_task``
+model calls in all. When the task limit is reached, or the
 backend fails (quota, session limit, login, timeout), screening stops for the task
 with a warning, the remaining candidates are used unscreened and the quality report
 says the screening did not complete. Decisions are cached on disk by provider, asset,
@@ -38,7 +39,6 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
@@ -281,19 +281,28 @@ def _download(url: str, folder: str) -> str:
     return target
 
 
-def _frames(item, folder: str) -> tuple[list[str], str]:
-    """Image files to show and a signature of what they are (the window for a NASA video)."""
+def _signature(item) -> str | None:
+    """What the model is shown, known without fetching it (the window of a NASA video, else the
+    preview); None when there is nothing to show."""
     from app.services import nasa_video
 
     info = item.source_info if isinstance(item.source_info, dict) else {}
     if nasa_video.is_video(item):
         segment = info.get("segment") or {}
-        frames = nasa_video.window_frames(item, folder)
-        return frames, f"window:{segment.get('start')}:{segment.get('duration')}"
+        if segment.get("start") is None:
+            return None
+        return f"window:{segment.get('start')}:{segment.get('duration')}"
     preview = info.get("preview")
-    if isinstance(preview, str) and preview.startswith(("http://", "https://")):
-        return [_download(preview, folder)], "preview"
-    return [], ""
+    return "preview" if isinstance(preview, str) and preview.startswith(("http://", "https://")) else None
+
+
+def _frames(item, folder: str) -> list[str]:
+    """The image files to show: three frames of a NASA video's window, else the preview."""
+    from app.services import nasa_video
+
+    if nasa_video.is_video(item):
+        return nasa_video.window_frames(item, folder)
+    return [_download(item.source_info["preview"], folder)]
 
 
 def cache_key(item, signature: str, backend: str, model: str, anchors: Sequence[str]) -> str:
@@ -339,13 +348,16 @@ class Session:
     max_per_term: int = DEFAULT_MAX_PER_TERM
     max_per_task: int = DEFAULT_MAX_PER_TASK
     calls: int = 0
-    cached: int = 0
+    cached: int = 0  # decisions read from the disk cache (an earlier task)
+    repeats: int = 0  # the same candidate asked again in this task (chain decision, use, download)
     accepted: int = 0
     rejected: int = 0
     unscreened: int = 0
     seconds: float = 0.0
     stopped: str = ""
-    per_term: Counter = field(default_factory=Counter)
+    # (term, source) -> the candidates screened for it, cached decisions included: the limit is
+    # on candidates, so a task decides the same with a cold or a warm cache.
+    screened: dict = field(default_factory=dict)
     decisions: dict = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
     call_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -362,45 +374,52 @@ class Session:
         info = item.source_info if isinstance(item.source_info, dict) else {}
         term = str(info.get("search_term") or "")
         provider = str(getattr(item, "provider", "") or info.get("provider") or "")
+        signature = _signature(item)
+        if signature is None:
+            return self._unscreened(item, "no_image")
+        key = cache_key(item, signature, self.backend, self.model, self.anchors)
+        with self.lock:
+            known = self.decisions.get(key)
+            if known is not None:
+                self.repeats += 1
+            else:
+                seen = self.screened.setdefault((term, provider), set())
+                limited = key not in seen and len(seen) >= self.max_per_term
+                if not limited:
+                    seen.add(key)
+        if known is not None:
+            return self._apply(item, known, cached=True, count=False)
+        if limited:
+            # This source has had its share of candidates for the term: the chain moves on.
+            task_materials.rejected(item, "vision", f"limit: {self.max_per_term} screened for {term!r}")
+            return False
+        known = _load(key)
+        if known is not None:
+            with self.lock:
+                self.decisions[key] = known
+                self.cached += 1
+            return self._apply(item, known, cached=True)
+        with self.lock:
+            if self.stopped:
+                stopped = True
+            elif self.calls >= self.max_per_task:
+                stopped = None
+            else:
+                stopped = False
+                self.calls += 1
+        if stopped is None:
+            self.stop(f"material_vision_max_per_task={self.max_per_task} reached")
+            return self._unscreened(item, "stopped")
+        if stopped:
+            return self._unscreened(item, "stopped")
         with tempfile.TemporaryDirectory(prefix="vision-") as folder:
             try:
-                frames, signature = _frames(item, folder)
+                frames = _frames(item, folder)
             except Exception as exc:
                 logger.warning(f"vision screening: no image for {info.get('asset_id')}: {type(exc).__name__}: {exc}")
-                frames, signature = [], ""
+                frames = []
             if not frames:
                 return self._unscreened(item, "no_image")
-            key = cache_key(item, signature, self.backend, self.model, self.anchors)
-            with self.lock:
-                known = self.decisions.get(key)
-            known = known or _load(key)
-            if known is not None:
-                with self.lock:
-                    self.decisions[key] = known
-                    self.cached += 1
-                return self._apply(item, known, cached=True)
-            with self.lock:
-                if self.stopped:
-                    stopped = True
-                elif self.calls >= self.max_per_task:
-                    stopped = None
-                else:
-                    stopped = False
-                    if self.per_term[(term, provider)] >= self.max_per_term:
-                        limited = True
-                    else:
-                        limited = False
-                        self.per_term[(term, provider)] += 1
-                        self.calls += 1
-            if stopped is None:
-                self.stop(f"material_vision_max_per_task={self.max_per_task} reached")
-                return self._unscreened(item, "stopped")
-            if stopped:
-                return self._unscreened(item, "stopped")
-            if limited:
-                # This source has had its share for the term: the chain moves on.
-                task_materials.rejected(item, "vision", f"limit: {self.max_per_term} screened for {term!r}")
-                return False
             prompt = build_prompt(len(frames), self.subject or term, term, self.anchors, context_text(item))
             images = [_encode(frame) for frame in frames]
         started = time.perf_counter()
@@ -432,7 +451,8 @@ class Session:
             self.decisions[key] = decision
         return self._apply(item, decision, cached=False)
 
-    def _apply(self, item, decision: dict, *, cached: bool) -> bool:
+    def _apply(self, item, decision: dict, *, cached: bool, count: bool = True) -> bool:
+        """Record the decision on the item; ``count`` False for a candidate asked again in this task."""
         info = item.source_info if isinstance(item.source_info, dict) else {}
         record = {**decision.get("result", {}), "decision": "use" if decision["use"] else "reject",
                   "reasons": list(decision.get("reasons") or []), "model": decision.get("model"),
@@ -441,6 +461,8 @@ class Session:
             record["label"] = decision["label"]
         if isinstance(item.source_info, dict):
             item.source_info["vision"] = record
+        if not count:
+            return bool(decision["use"])
         with self.lock:
             if decision["use"]:
                 self.accepted += 1
@@ -461,7 +483,7 @@ class Session:
 
     def summary(self) -> str:
         return (f"vision screening: model={self.backend}:{self.model or 'default'}, calls={self.calls}, "
-                f"cached={self.cached}, accepted={self.accepted}, rejected={self.rejected}, "
+                f"cached={self.cached}, repeats={self.repeats}, accepted={self.accepted}, rejected={self.rejected}, "
                 f"unscreened={self.unscreened}, seconds={self.seconds:.1f}, "
                 f"status={'stopped: ' + self.stopped if self.stopped else 'complete'}")
 
