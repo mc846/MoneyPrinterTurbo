@@ -419,6 +419,8 @@ def merged_options(options: Iterable[dict], anchors: Sequence[str]) -> dict:
     }
     if any("anchors" in o for o in options):
         merged["anchors"] = tuple(anchors)
+    if any(o.get("require_anchor") for o in options):
+        merged["require_anchor"] = True
     return merged
 
 

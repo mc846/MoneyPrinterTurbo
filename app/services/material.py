@@ -609,6 +609,45 @@ def _is_ai_generated(item: MaterialInfo) -> bool:
     return source_info.get("ai_generated") is True
 
 
+# 锚点匹配时把形容词换成名词（"lunar surface" 命中锚点 "moon"）。只用于锚点，不改变
+# 关键词相关度。"solar panel" 也会命中 "sun"：锚点规则只排除完全无关的候选。
+ANCHOR_SYNONYMS = {
+    "lunar": "moon", "selenian": "moon", "solar": "sun", "terrestrial": "earth",
+    "martian": "mars", "jovian": "jupiter", "venusian": "venus", "cytherean": "venus",
+    "mercurian": "mercury", "saturnian": "saturn", "uranian": "uranus", "neptunian": "neptune",
+    "plutonian": "pluto", "stellar": "star", "galactic": "galaxy", "cometary": "comet",
+    "asteroidal": "asteroid", "nebular": "nebula",
+}
+
+
+def _anchor_words(text: str) -> set[str]:
+    """锚点比较用的内容词：``_relevance_words`` 的规范化（所有格、复数）再换成名词。"""
+    return {ANCHOR_SYNONYMS.get(word, word) for word in _relevance_words(text)}
+
+
+def require_anchor_enabled() -> bool:
+    """读取 material_require_anchor，默认关闭。"""
+    value = config.app.get("material_require_anchor", False)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _anchor_hit(item: MaterialInfo, anchors: Sequence[str]) -> bool:
+    """
+    候选是否命中至少一个锚点（锚点的全部内容词都出现）：看标签和标题，NASA 还看描述
+    开头（description_tags）。没有锚点或素材源没有标签数据时视为命中（规则不生效）。
+    """
+    anchor_sets = [words for words in (_anchor_words(anchor) for anchor in anchors) if words]
+    source_info = item.source_info if isinstance(item.source_info, dict) else {}
+    tags = source_info.get("tags")
+    if not anchor_sets or not isinstance(tags, list):
+        return True
+    texts = [*tags, *(source_info.get("description_tags") or [])]
+    words = {word for text in texts if isinstance(text, str) for word in _anchor_words(text)}
+    return any(anchor <= words for anchor in anchor_sets)
+
+
 def _order_material_candidates(
     items: List[MaterialInfo],
     video_aspect: VideoAspect,
@@ -618,9 +657,13 @@ def _order_material_candidates(
     exclude_ai_generated: bool = False,
     shuffle: bool = False,
     anchors: Sequence[str] = (),
+    require_anchor: bool = False,
 ) -> List[MaterialInfo]:
     """
     按优先级排列候选：标签相关度 > 锚点命中数 > 方向（同方向优先）> 原有顺序。
+
+    ``require_anchor``（material_require_anchor）开启且有锚点时，只保留至少命中一个
+    锚点的候选（见 ``_anchor_hit``）；没有标签数据的素材源不受影响。
 
     相关度按带来该素材的关键词（``source_info["search_term"]``）计算，因此同一
     函数既用于单个关键词的候选，也用于合并候选池。strict 只保留标签覆盖全部
@@ -647,6 +690,8 @@ def _order_material_candidates(
     anchor_word_sets = [
         set(words) for words in (_relevance_words(anchor) for anchor in anchors) if words
     ]
+    if require_anchor and relevance != MaterialTagRelevance.off:
+        items = [item for item in items if _anchor_hit(item, anchors)]
     # NASA 素材源内的类型优先级（nasa_media_types 的顺序，见 nasa_video.media_type_rank）：
     # 够格（相关度达到后备阈值）的候选里先按类型、再按相关度排；不够格的排在后面。
     # 其它素材源的类型都是 0，只看相关度，顺序与以前相同。
@@ -811,6 +856,8 @@ def _stock_source_search(
     }
     if tag_relevance != MaterialTagRelevance.off and anchors:
         order_options["anchors"] = tuple(anchors)
+        if require_anchor_enabled():
+            order_options["require_anchor"] = True
     provider = "pexels"
     remote_search_videos = search_videos_pexels
     if source == "pixabay":
@@ -844,11 +891,14 @@ def _stock_source_search(
             ordered = _order_material_candidates(items, video_aspect, **order_options)
             if task_materials.recording():
                 kept = {id(item) for item in ordered}
-                dropped = [
-                    (item, "ai_generated" if order_options["exclude_ai_generated"]
-                     and _is_ai_generated(item) else "relevance_strict")
-                    for item in items if id(item) not in kept
-                ]
+                def drop_reason(item):
+                    if order_options["exclude_ai_generated"] and _is_ai_generated(item):
+                        return "ai_generated"
+                    if order_options.get("require_anchor") and not _anchor_hit(item, order_options["anchors"]):
+                        return "anchor_missing"
+                    return "relevance_strict"
+
+                dropped = [(item, drop_reason(item)) for item in items if id(item) not in kept]
             items = ordered
         task_materials.searched(provider, search_term, items, dropped)
         if provider == "nasa" and items and nasa.text_filter_active():
