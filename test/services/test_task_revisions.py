@@ -454,7 +454,8 @@ def test_the_last_image_scene_is_extended_when_no_candidate_is_left(storage, voi
     assert record["extended"] == "v1-s03"
     durations = {s["id"]: s["duration"] for s in record["scenes"]}
     assert durations["v1-s03"] == pytest.approx(14.0 - 3 - 3 - 2.5, abs=0.01)
-    assert [s["reason"] for s in record["skipped_candidates"]] == ["image could not be downloaded", "download failed"]
+    assert [s["reason"] for s in record["skipped_candidates"]] == [
+        "image could not be downloaded or prepared", "download failed"]
     assert record["video"]["duration"] == pytest.approx(14.0, abs=0.15)
 
 

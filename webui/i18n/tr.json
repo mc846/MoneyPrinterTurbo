@@ -706,6 +706,8 @@
     "batch.history.counts_review": "{awaiting} onay bekliyor · {approved} onaylı · {skipped} atlandı",
     "batch.history.review": "İncele",
     "batch.resume.awaiting_review": "Konular onay bekliyor: onaylayın ve “Onaylıları render et”i kullanın.",
+    "revision.returned": "Geri gelen sahneler: {scenes}",
+    "revision.warning.term_matching": "Metin değişti ve materyaller metin sırasını izliyor: sahneler terimlerini ve sırasını korur, bir sahne artık cümlesine uymayabilir.",
     "revision.button": "Geliştir",
     "revision.batch_tasks": "Videolar (geliştir)",
     "revision.back": "Geri",

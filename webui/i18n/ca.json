@@ -706,6 +706,8 @@
     "batch.history.counts_review": "{awaiting} pendents · {approved} aprovats · {skipped} omesos",
     "batch.history.review": "Revisa",
     "batch.resume.awaiting_review": "Els temes esperen revisió: aprova’ls i fes servir “Renderitza els aprovats”.",
+    "revision.returned": "Escenes recuperades: {scenes}",
+    "revision.warning.term_matching": "El text ha canviat i els materials segueixen l'ordre del guió: les escenes mantenen els termes i l'ordre, així que una escena pot no encaixar amb la seva frase.",
     "revision.button": "Millora",
     "revision.batch_tasks": "Vídeos (millora)",
     "revision.back": "Enrere",

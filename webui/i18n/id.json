@@ -706,6 +706,8 @@
     "batch.history.counts_review": "{awaiting} menunggu · {approved} disetujui · {skipped} dilewati",
     "batch.history.review": "Tinjau",
     "batch.resume.awaiting_review": "Topik menunggu tinjauan: setujui lalu gunakan “Render yang disetujui”.",
+    "revision.returned": "Adegan yang kembali: {scenes}",
+    "revision.warning.term_matching": "Naskah berubah sementara materi mengikuti urutan naskah: adegan mempertahankan istilah dan urutannya, jadi sebuah adegan mungkin tidak lagi cocok dengan kalimatnya.",
     "revision.button": "Perbaiki",
     "revision.batch_tasks": "Video (perbaiki)",
     "revision.back": "Kembali",

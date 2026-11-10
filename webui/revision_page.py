@@ -210,9 +210,14 @@ def _render_history(tr, task_id: str, records: list[dict], busy: bool) -> None:
                     seconds=f"{float((record.get('audio') or {}).get('duration') or 0):.1f}"))
                 if record.get("dropped"):
                     st.caption(tr("revision.dropped").format(scenes=", ".join(d["id"] for d in record["dropped"])))
+                if record.get("returned"):
+                    st.caption(tr("revision.returned").format(scenes=", ".join(record["returned"])))
                 if record.get("added"):
                     st.caption(tr("revision.added").format(scenes=", ".join(a["id"] for a in record["added"])))
                 for warning in record.get("warnings") or []:
+                    # revision.json keeps the module's English text; the known warning is translated.
+                    if warning == task_revisions.timing.term_matching_warning(True, True):
+                        warning = tr("revision.warning.term_matching")
                     st.caption(f":orange[{warning}]")
                 for reason in record.get("check_reasons") or []:
                     st.caption(f":orange[{reason}]")

@@ -421,7 +421,10 @@ class _Fetcher:
                     original, prepared = nasa._prepared_image(
                         item, cache, aspect, self.params.video_clip_duration, self.params.image_motion)
                 if not prepared:
-                    self.skipped.append({"candidate": candidate.key, "reason": "image could not be downloaded"})
+                    # Unavailable (e.g. 403 for a rebuilt ~orig), too large to open, or below the
+                    # output resolution after cropping (nasa.prepare_image); the log has which.
+                    self.skipped.append({"candidate": candidate.key,
+                                         "reason": "image could not be downloaded or prepared"})
                     return None
                 if nasa._shows_face(item, prepared, original, aspect):
                     self.skipped.append({"candidate": candidate.key, "reason": "face"})

@@ -706,6 +706,8 @@
     "batch.history.counts_review": "{awaiting} en attente · {approved} approuvés · {skipped} ignorés",
     "batch.history.review": "Relire",
     "batch.resume.awaiting_review": "Les sujets attendent la validation : approuvez-les puis utilisez « Rendre les approuvés ».",
+    "revision.returned": "Scènes rétablies : {scenes}",
+    "revision.warning.term_matching": "Le texte a changé alors que les médias suivent l'ordre du script : les scènes gardent leurs termes et leur ordre, une scène peut ne plus correspondre à sa phrase.",
     "revision.button": "Améliorer",
     "revision.batch_tasks": "Vidéos (améliorer)",
     "revision.back": "Retour",

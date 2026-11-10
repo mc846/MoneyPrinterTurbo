@@ -706,6 +706,8 @@
     "batch.history.counts_review": "{awaiting} aguardando · {approved} aprovados · {skipped} pulados",
     "batch.history.review": "Revisar",
     "batch.resume.awaiting_review": "Os temas aguardam revisão: aprove-os e use “Renderizar aprovados”.",
+    "revision.returned": "Cenas recuperadas: {scenes}",
+    "revision.warning.term_matching": "O texto mudou e os materiais seguem a ordem do roteiro: as cenas mantêm seus termos e sua ordem, então uma cena pode não corresponder mais à sua frase.",
     "revision.button": "Melhorar",
     "revision.batch_tasks": "Vídeos (melhorar)",
     "revision.back": "Voltar",
