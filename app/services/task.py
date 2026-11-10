@@ -915,6 +915,10 @@ def get_video_materials(
                 progress_callback=_stage_progress_reporter(task_id, 40, 50),
                 **generation_options,
             )
+        except material.NoSuitableMaterialsError as exc:
+            # 素材源链里每个关键词都没有够格候选：说明原因（阈值、留空的关键词）。
+            _mark_task_failed(task_id, "materials", str(exc))
+            return None
         except volcengine_seedance.VolcEngineSeedanceError as exc:
             # 未确认状态和已生成但下载失败都对应一个可在方舟控制台恢复的远端
             # 任务。统一从异常携带的 task_id 写入失败状态，避免不同异常分支

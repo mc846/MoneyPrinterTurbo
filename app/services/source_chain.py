@@ -8,25 +8,29 @@
 
 Per term:
 
-1. The primary, then the fallbacks in order. A source is suitable when it has at
-   least ``min_candidates`` candidates whose tag relevance is at least
-   ``min_relevance`` (``material._qualified_candidate_count``; with tag relevance off
-   every candidate counts). The first suitable source is used and later sources get
-   no request.
-2. When none is suitable, the source with the most suitable candidates is used; a tie
-   goes to the earlier one. A source without candidates is never chosen.
-3. Untagged fallbacks (Pexels and Coverr carry no tags; ``tagged`` is False) cannot
-   be measured, so they never count as suitable and are not asked in the first pass.
-   They are the last resort: asked in chain order only when no tagged source has a
-   single suitable candidate, and the first with candidates is used. The primary
-   keeps today's rule (an untagged primary counts all its candidates).
+1. The primary, then the fallbacks in order. A candidate is suitable when its tag
+   relevance is at least ``min_relevance`` (with tag relevance off every candidate is)
+   and it passed the source's filters: the NASA text filter runs in the search, the
+   face filter (it needs the file) runs here, on the suitable candidates in order, until
+   ``min_candidates`` pass (``Link.screen``). A source with at least ``min_candidates``
+   suitable candidates is used and later sources get no request. A term gets only its
+   suitable candidates.
+2. When none reaches the minimum, the source with the most suitable candidates is used;
+   a tie goes to the earlier one.
+3. With tag relevance on, a term without a suitable candidate in any source stays
+   empty (``no_suitable``; ``no_candidates`` when no source had any): its time goes to
+   the other scenes, and ``on_empty`` (the future AI-generation hook) may fill it.
+   Untagged fallbacks (Pexels) cannot show a candidate above the threshold, so with
+   tag relevance on they are not asked; with it off they count like the others. The
+   primary keeps its rule: an untagged primary counts all its candidates.
 4. A fallback without an API key is dropped for the task with one warning
    (``available``). A source answering HTTP 429 is skipped for the rest of the task
    with one warning (``ChainState``).
 5. A term takes all its candidates from one source; pools never mix.
 
 Each decision (sources tried with their candidate and suitable counts, the chosen
-source and why) goes to ``on_decision`` (task_materials records it) and to the log.
+source and why) goes to ``on_decision`` (task_materials records it), to the task's
+``ChainState`` and to the log.
 """
 
 import threading
@@ -43,9 +47,9 @@ _OFF = {"", "none", "off"}
 
 MET = "met"
 MOST_SUITABLE = "most_suitable"
-UNTAGGED_LAST_RESORT = "untagged_last_resort"
-NO_SUITABLE = "no_suitable"
-NO_CANDIDATES = "no_candidates"
+NO_SUITABLE = "no_suitable"  # candidates, none above the threshold: the term stays empty
+NO_CANDIDATES = "no_candidates"  # no candidate anywhere: the term stays empty
+FILLED = "filled"  # empty, filled by the on_empty hook (AI-generated scenes, later)
 
 
 class SourceChainError(ValueError):
@@ -182,10 +186,24 @@ def watch_rate_limit():
 
 @dataclass
 class ChainState:
-    """Per task: sources that answered 429 are skipped until the task ends."""
+    """Per task: sources that answered 429 are skipped until the task ends; the decision
+    of every term searched (``all_empty`` tells whether no term found a suitable one)."""
 
     rate_limited: set = field(default_factory=set)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    decisions: dict = field(default_factory=dict)
+
+    def record(self, term: str, decision: dict) -> None:
+        with self.lock:
+            self.decisions[str(term)] = decision
+
+    def all_empty(self) -> bool:
+        with self.lock:
+            return bool(self.decisions) and all(d.get("empty") for d in self.decisions.values())
+
+    def empty_terms(self) -> list[str]:
+        with self.lock:
+            return [term for term, d in self.decisions.items() if d.get("empty")]
 
     def mark_rate_limited(self, source: str) -> None:
         with self.lock:
@@ -209,6 +227,9 @@ class Link:
     tag_relevance: Any  # the effective MaterialTagRelevance of this source (off for untagged ones)
     tagged: bool  # the source's candidates carry tags (material.MATERIAL_TAG_SOURCES)
     primary: bool = False
+    # Filters that need the file (NASA face check): item -> usable. Run on the suitable
+    # candidates in order until the minimum is reached, before the decision.
+    screen: Callable[[Any], bool] | None = None
 
     def measured(self, relevance_on: bool) -> bool:
         """Its suitable count means something: the primary, a tagged source, or the task's
@@ -216,22 +237,22 @@ class Link:
         return self.primary or self.tagged or not relevance_on
 
 
-def decide(entries: list[dict]) -> tuple[str | None, str]:
+def decide(entries: list[dict], relevance_on: bool) -> tuple[str | None, str]:
     """Pick from the sources tried (in chain order) when none met the minimum.
 
-    ``entries`` have source, candidates, suitable (None when not measured)."""
-    measured = [e for e in entries if e.get("suitable") is not None and e.get("candidates")]
+    ``entries`` have source, candidates, suitable (None when not measured). The source
+    with the most suitable candidates wins (ties: the earlier one). With tag relevance on
+    and no suitable candidate anywhere the term stays empty (``no_suitable``); with it off
+    every candidate is suitable, so only a source without candidates is left out."""
     best = None
-    for entry in measured:
-        if entry["suitable"] > 0 and (best is None or entry["suitable"] > best["suitable"]):
+    for entry in entries:
+        suitable = entry.get("suitable")
+        if suitable and (best is None or suitable > best["suitable"]):
             best = entry
     if best is not None:
         return best["source"], MOST_SUITABLE
-    untagged = next((e for e in entries if e.get("suitable") is None and e.get("candidates")), None)
-    if untagged is not None:
-        return untagged["source"], UNTAGGED_LAST_RESORT
-    if measured:
-        return measured[0]["source"], NO_SUITABLE
+    if any(entry.get("candidates") for entry in entries):
+        return None, NO_SUITABLE
     return None, NO_CANDIDATES
 
 
@@ -240,16 +261,22 @@ def chain_search(
     *,
     min_relevance: float,
     min_candidates: int,
-    count_suitable: Callable[[str, list, Any, float, bool], int | None],
+    suitable_items: Callable[[str, list, Any, float, bool], list | None],
     relevance_on: bool,
     state: ChainState | None = None,
     on_decision: Callable[[str, dict], None] | None = None,
+    on_empty: Callable[[str, dict], list | None] | None = None,
     unavailable: Sequence[str] = (),
 ) -> Callable[..., list]:
     """A search function trying ``links`` (the primary first) per term by the rules above.
 
-    ``unavailable``: chain sources left out for the task (no API key); each decision
-    names them so the record shows the whole chain."""
+    ``suitable_items(term, items, tag_relevance, min_relevance, primary)`` returns the
+    candidates above the relevance threshold in order (all of them with relevance off;
+    None when not measurable). A term gets only suitable candidates that passed the
+    link's ``screen``. ``on_empty(term, decision)`` is asked when a term would stay empty;
+    the items it returns are used instead (``filled``; none today: the hook for
+    AI-generated scenes). ``unavailable``: chain sources left out for the task (no API
+    key); each decision names them so the record shows the whole chain."""
     state = state or ChainState()
     links = list(links)
 
@@ -272,74 +299,111 @@ def chain_search(
             state.mark_rate_limited(link.source)
             entry["rate_limited"] = True
         entry["candidates"] = len(items)
-        # None: not measurable (an untagged fallback, or a tagged one whose candidates
-        # came without tag data); such a source is only a last resort.
-        entry["suitable"] = (
-            count_suitable(search_term, items, link.tag_relevance, min_relevance, link.primary)
-            if link.measured(relevance_on) else None
-        )
-        return items, entry
+        suitable = suitable_items(search_term, items, link.tag_relevance, min_relevance, link.primary)
+        if suitable is None:
+            entry["suitable"] = None
+            return [], entry
+        if link.screen is not None and suitable:
+            suitable = _screened(link, suitable, min_candidates, entry)
+        entry["suitable"] = len(suitable)
+        return suitable, entry
 
     def search_videos(search_term: str, minimum_duration: int, video_aspect) -> list:
         kwargs = {"minimum_duration": minimum_duration, "video_aspect": video_aspect}
         tried, results = [], {}
         chosen, reason = None, NO_CANDIDATES
-        later = []
         for link in links:
             if not link.measured(relevance_on):
-                later.append(link)  # untagged fallback: only as the last resort
+                # An untagged fallback cannot show a candidate above the threshold: not asked.
+                tried.append({"source": link.source, "tagged": False, "candidates": 0, "suitable": None,
+                              "skipped": "untagged"})
                 continue
             items, entry = run(link, search_term, kwargs)
             tried.append(entry)
             results[link.source] = items
-            if entry["suitable"] is not None and entry["suitable"] >= min_candidates and items:
+            if entry["suitable"] is not None and entry["suitable"] >= min_candidates:
                 chosen, reason = link.source, MET
                 break
         if chosen is None:
-            chosen, reason = decide(tried)
-            if reason in (NO_SUITABLE, NO_CANDIDATES) and later:
-                # No tagged source has a suitable candidate: ask the untagged ones in order.
-                for link in later:
-                    items, entry = run(link, search_term, kwargs)
-                    tried.append(entry)
-                    results[link.source] = items
-                    if items:
-                        chosen, reason = link.source, UNTAGGED_LAST_RESORT
-                        break
+            chosen, reason = decide(tried, relevance_on)
         decision = {
             "tried": tried,
             "chosen": chosen,
             "reason": reason,
+            "empty": chosen is None,
             "chain": [link.source for link in links],
             "unavailable": [{"source": source, "reason": "no_api_key"} for source in unavailable],
             "min_relevance": min_relevance,
             "min_candidates": min_candidates,
         }
+        items = list(results.get(chosen) or []) if chosen else []
+        if chosen is None and on_empty is not None:
+            # The term would stay empty: a later step (AI-generated scenes) may fill it.
+            try:
+                filled = list(on_empty(search_term, decision) or [])
+            except Exception as exc:
+                logger.warning(f"empty term hook failed: term={search_term!r}, {type(exc).__name__}: {exc}")
+                filled = []
+            if filled:
+                items = filled
+                decision.update(chosen=str(getattr(filled[0], "provider", "") or "hook"), reason=FILLED,
+                                empty=False, empty_reason=reason)
+        state.record(search_term, decision)
         if len(links) > 1:
             # One parseable line per term (batch_package reads it for the quality report):
             # tried=<source>:<candidates>/<suitable, - when not measured>[:429|:skipped],...
             logger.info(f"material source chain: term={search_term!r}, tried={describe_tried(tried)}, "
-                        f"using={chosen}, reason={reason}")
+                        f"using={decision['chosen']}, reason={decision['reason']}")
         if on_decision is not None:
             try:
                 on_decision(search_term, decision)
             except Exception as exc:  # recording must never break the search
                 logger.warning(f"source chain decision was not recorded: {type(exc).__name__}: {exc}")
-        return list(results.get(chosen) or []) if chosen else []
+        return items
 
+    search_videos.state = state
     return search_videos
 
 
+def _screened(link: Link, suitable: list, min_candidates: int, entry: dict) -> list:
+    """Run the link's file-based filter on the suitable candidates in order until
+    ``min_candidates`` pass; rejected ones are dropped, the rest stay unchecked (the
+    download screens them again, from the cache)."""
+    kept, passed, rejected, index = [], 0, 0, 0
+    for index, item in enumerate(suitable):
+        if passed >= min_candidates:
+            kept.extend(suitable[index:])
+            break
+        try:
+            usable = bool(link.screen(item))
+        except Exception as exc:
+            logger.warning(f"{link.source} screening failed, candidate kept: {type(exc).__name__}: {exc}")
+            usable = True
+        if usable:
+            kept.append(item)
+            passed += 1
+        else:
+            rejected += 1
+    entry["screened"] = passed + rejected
+    if rejected:
+        entry["screen_rejected"] = rejected
+    return kept
+
+
 def describe_tried(tried: list[dict]) -> str:
-    """The sources tried as ``nasa:0/0,pixabay:12/3,pexels:5/-`` (candidates/suitable)."""
+    """The sources tried as ``nasa:6/1:faces=1,pixabay:12/3,pexels:0/-:untagged``
+    (candidates/suitable; ``-`` not measured; ``:429``, ``:rate_limited`` or ``:untagged``
+    when skipped; ``:faces=<n>`` suitable candidates the face filter turned down)."""
     parts = []
     for entry in tried:
         suitable = "-" if entry.get("suitable") is None else entry["suitable"]
         text = f"{entry['source']}:{entry.get('candidates', 0)}/{suitable}"
         if entry.get("skipped"):
-            text += ":skipped"
+            text += f":{entry['skipped']}"
         elif entry.get("rate_limited"):
             text += ":429"
+        if entry.get("screen_rejected"):
+            text += f":faces={entry['screen_rejected']}"
         parts.append(text)
     return ",".join(parts)
 

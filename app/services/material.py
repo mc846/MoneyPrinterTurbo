@@ -788,28 +788,57 @@ def _stock_source_search(
     return search_videos, order_options
 
 
-def _suitable_count(
+def _suitable_items(
     search_term: str,
     items: List[MaterialInfo],
     tag_relevance: MaterialTagRelevance,
     min_relevance: float,
-) -> int | None:
+    primary: bool,
+) -> List[MaterialInfo] | None:
     """
-    素材源链用的够格候选数：主素材源沿用 ``_qualified_candidate_count``；带标签的
-    后备素材源返回的候选缺少标签数据时返回 None（无法衡量，按无标签素材源处理）。
+    素材源链用的够格候选（保持顺序）：相关度不低于 ``min_relevance`` 的候选；相关度
+    关闭时全部候选。主素材源的候选没有标签数据时按原规则全部算够格；后备素材源的
+    候选没有标签数据时返回 None（无法衡量）。与 ``_qualified_candidate_count`` 计数一致。
     """
-    if (
-        tag_relevance != MaterialTagRelevance.off
-        and items
-        and any(_material_tag_words(item) is None for item in items)
-    ):
-        return None
-    return _qualified_candidate_count(search_term, items, tag_relevance, min_relevance)
+    if tag_relevance == MaterialTagRelevance.off:
+        return list(items)
+    if any(_material_tag_words(item) is None for item in items):
+        return list(items) if primary else None
+    return [item for item in items if _tag_relevance(search_term, item)[0] >= min_relevance]
 
 
 # 按关键词记录素材源链的判定（见 source_chain.chain_search 的 on_decision）。
 # 没有记录方时为空；task_materials 等可以设置它。
 _source_decision_listener = None
+# 关键词在任何素材源里都没有够格候选时调用：(关键词, 判定) -> 候选列表或 None。
+# 预留给以后的 AI 生成场景（"Ya olsaydı" 视频）；现在没有设置，关键词留空。
+_empty_term_handler = None
+
+
+class NoSuitableMaterialsError(RuntimeError):
+    """素材源链里没有一个关键词有够格候选（全部留空）：任务失败并说明原因。"""
+
+
+def _fill_empty_term(search_term: str, decision: dict):
+    if _empty_term_handler is None:
+        return None
+    return _empty_term_handler(search_term, decision)
+
+
+def _raise_if_no_suitable_term(search_videos) -> None:
+    """素材源链的每个关键词都留空（没有够格候选）时给出明确的错误，而不是笼统的"没有素材"。"""
+    state = getattr(search_videos, "state", None)
+    if state is None or not state.all_empty():
+        return
+    terms = state.empty_terms()
+    sample = next(iter(state.decisions.values()), {})
+    chain = " → ".join(sample.get("chain") or [])
+    raise NoSuitableMaterialsError(
+        f"no search term has a suitable candidate in the source chain ({chain}): with tag relevance on, "
+        f"every term needs a candidate whose tag relevance is at least "
+        f"{sample.get('min_relevance')} (video_source_fallback_min_relevance); all {len(terms)} terms stayed "
+        f"empty: {', '.join(repr(term) for term in terms[:8])}. Change the search terms or lower the threshold."
+    )
 
 
 def _record_source_decision(search_term: str, decision: dict) -> None:
@@ -823,21 +852,16 @@ def _chain_links(
     source: str,
     chain: Sequence[str],
     searches: Sequence[tuple[Callable[..., List[MaterialInfo]], MaterialTagRelevance]],
+    screens: dict | None = None,
 ) -> list:
     return [
         source_chain.Link(
             source=name, search=search, tag_relevance=relevance,
             tagged=name in MATERIAL_TAG_SOURCES, primary=index == 0,
+            screen=(screens or {}).get(name),
         )
         for index, (name, (search, relevance)) in enumerate(zip([source, *chain], searches))
     ]
-
-
-def _count_for_chain(search_term, items, tag_relevance, min_relevance, primary: bool) -> int | None:
-    # 主素材源保持原规则（没有标签数据时数全部候选）；后备素材源无法衡量时返回 None。
-    if primary:
-        return _qualified_candidate_count(search_term, items, tag_relevance, min_relevance)
-    return _suitable_count(search_term, items, tag_relevance, min_relevance)
 
 
 def _chain_search_function(links: list, relevance_on: bool,
@@ -847,9 +871,10 @@ def _chain_search_function(links: list, relevance_on: bool,
         links,
         min_relevance=min_relevance,
         min_candidates=min_candidates,
-        count_suitable=_count_for_chain,
+        suitable_items=_suitable_items,
         relevance_on=relevance_on,
         on_decision=_record_source_decision,
+        on_empty=_fill_empty_term,
         unavailable=unavailable,
     )
 
@@ -863,6 +888,7 @@ def chain_source_search(
     exclude_ai_generated: bool,
     anchors: Sequence[str],
     unavailable: Sequence[str] = (),
+    screens: dict | None = None,
 ) -> tuple[Callable[..., List[MaterialInfo]], dict[str, Any]]:
     """
     主素材源加后备素材源链的（关键词搜索函数, 合并的排序选项）。
@@ -870,14 +896,16 @@ def chain_source_search(
     每个素材源用自己的缓存和自己支持的裁剪、相关度、AI 排除设置（``_stock_source_search``）；
     每个关键词的候选只来自一个素材源（``source_chain.chain_search``）。合并候选池里
     多个素材源的候选一起排序，任一素材源支持的选项都要生效。``unavailable`` 是因缺少
-    API Key 被跳过的素材源，写进每个判定。
+    API Key 被跳过的素材源，写进每个判定。``screens`` 是需要文件的检查（素材源 → 函数，
+    如 NASA 的人脸检查），在判定前对够格候选依次运行。搜索函数的 ``state`` 记录每个
+    关键词的判定。
     """
     options = {
         "crop_to_aspect": crop_to_aspect, "tag_relevance": tag_relevance,
         "exclude_ai_generated": exclude_ai_generated, "anchors": anchors,
     }
     built = [_stock_source_search(name, **options) for name in (source, *chain)]
-    links = _chain_links(source, chain, [(search, order["tag_relevance"]) for search, order in built])
+    links = _chain_links(source, chain, [(search, order["tag_relevance"]) for search, order in built], screens)
     relevance_on = MaterialTagRelevance(tag_relevance or MaterialTagRelevance.off) != MaterialTagRelevance.off
     search_videos = _chain_search_function(links, relevance_on, unavailable)
     return search_videos, source_chain.merged_options([order for _search, order in built], anchors)
@@ -3103,8 +3131,14 @@ def download_videos(
     if fallback_chain:
         # 因缺少 API Key 被跳过的素材源也写进每个判定（materials.json 能看到整条链）。
         unavailable = [name for name in source_chain.parse_lenient(fallback_source) if name not in fallback_chain]
+        # NASA 的人脸检查要下载图片：在判定前对够格候选依次运行（下面的 screen_material，
+        # 调用时才取值），被拒绝的候选不计入，够格候选用完时换到链中的下一个素材源。
+        screens = (
+            {"nasa": lambda item: screen_material(item) if screen_material is not None else True}
+            if "nasa" in (source, *fallback_chain) and nasa.face_filter_active() else None
+        )
         search_videos, order_options = chain_source_search(
-            source, fallback_chain, unavailable=unavailable, **source_options
+            source, fallback_chain, unavailable=unavailable, screens=screens, **source_options
         )
     # 后备素材源（可能有多个）的候选和主素材源的候选按候选自己的素材源分别处理。
     fallback_source = fallback_chain
@@ -3232,7 +3266,7 @@ def download_videos(
         )
 
     if match_script_order:
-        return _download_videos_by_script_order(
+        paths = _download_videos_by_script_order(
             task_id=task_id,
             search_terms=search_terms,
             search_videos=search_videos,
@@ -3244,6 +3278,9 @@ def download_videos(
             **({"save_material": save_material} if save_material is not None else {}),
             **({"screen_material": screen_material} if screen_material is not None else {}),
         )
+        if not paths:
+            _raise_if_no_suitable_term(search_videos)
+        return paths
 
     valid_video_items = []
     valid_video_urls = []
@@ -3259,6 +3296,8 @@ def download_videos(
                 valid_video_items.append(item)
                 valid_video_urls.append(item.url)
                 found_duration += item.duration
+    if not valid_video_items:
+        _raise_if_no_suitable_term(search_videos)
 
     logger.info(
         f"found total videos: {len(valid_video_items)}, required duration: {audio_duration} seconds, found duration: {found_duration} seconds"

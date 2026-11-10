@@ -38,7 +38,7 @@ def _item(provider, term, name, tags=None, creator=None):
     return MaterialInfo(provider=provider, url=url, duration=5, source_info=info)
 
 
-def _run(terms, results, *, chain, settings=None, rate_limited=(), audio_duration=None, **kwargs):
+def _run(terms, results, *, chain, settings=None, rate_limited=(), audio_duration=None, faces=False, **kwargs):
     """NASA primary; ``results[source][term]`` lists; returns the calls, decisions and sources."""
     calls = {source: [] for source in ("nasa", "pixabay", "coverr", "pexels")}
     decisions, sources = [], []
@@ -63,7 +63,7 @@ def _run(terms, results, *, chain, settings=None, rate_limited=(), audio_duratio
             stack.enter_context(patch.object(material, f"search_videos_{source}", side_effect=search(source)))
         stack.enter_context(patch.object(nasa, "save_image_clip",
                                          side_effect=lambda item, save_dir="", **o: f"/tmp/{item.source_info['asset_id']}.mp4"))
-        stack.enter_context(patch.object(nasa, "face_filter_active", return_value=False))
+        stack.enter_context(patch.object(nasa, "face_filter_active", return_value=faces))
         # The NASA text filter comes with a later branch (feat/nasa-text-filter); off here.
         stack.enter_context(patch.object(nasa, "text_filter_active", return_value=False, create=True))
         stack.enter_context(patch.object(material, "save_video", side_effect=fake_save_video))
@@ -154,36 +154,114 @@ def test_when_none_is_enough_the_most_suitable_source_wins_and_ties_go_to_the_ea
     assert run.by_term == {"t": {"pixabay"}}
 
 
-def test_a_source_without_candidates_is_never_chosen():
-    results = {"nasa": {"t": []}, "pixabay": {"t": []},
-               "coverr": {"t": [_item("coverr", "t", "C1", ["other words"])]}}
-    run = _run(["t"], results, chain=["pixabay", "coverr"])
-    decision = run.decisions["t"]
+FILLER = {"nasa": {"moon": [_item("nasa", "moon", "M1", ["moon"]), _item("nasa", "moon", "M2", ["moon"])]}}
+
+
+def _with_filler(results):
+    """Another term with suitable NASA images, so a task never ends with every term empty."""
+    merged = {source: dict(terms) for source, terms in results.items()}
+    merged.setdefault("nasa", {}).update(FILLER["nasa"])
+    return merged
+
+
+def test_without_a_suitable_candidate_the_term_stays_empty_and_others_fill_its_time():
+    # "vacuum sealed pouch": NASA has nothing, Pixabay only a kangaroo ("pouch", 1/3 < 0.5).
+    results = _with_filler({"nasa": {"vacuum sealed pouch": []}, "pixabay": {"vacuum sealed pouch": [
+        _item("pixabay", "vacuum sealed pouch", "KANGAROO", ["kangaroo", "pouch"])]}})
+    run = _run(["vacuum sealed pouch", "moon"], results, chain=["pixabay", "coverr"], audio_duration=10)
+    decision = run.decisions["vacuum sealed pouch"]
     assert [(e["source"], e["candidates"], e["suitable"]) for e in decision["tried"]] == [
-        ("nasa", 0, 0), ("pixabay", 0, 0), ("coverr", 1, 0)]
-    assert (decision["chosen"], decision["reason"]) == ("coverr", "no_suitable")
-    empty = _run(["t"], {}, chain=["pixabay"])
+        ("nasa", 0, 0), ("pixabay", 1, 0), ("coverr", 0, 0)]
+    assert (decision["chosen"], decision["reason"], decision["empty"]) == (None, "no_suitable", True)
+    # The kangaroo is never used; the other term's images cover the time.
+    assert "KANGAROO.mp4" not in run.paths and run.paths == ["M1.mp4", "M2.mp4"]
+    assert run.by_term == {"moon": {"nasa"}}
+    empty = _run(["t", "moon"], _with_filler({}), chain=["pixabay"])
     assert (empty.decisions["t"]["chosen"], empty.decisions["t"]["reason"]) == (None, "no_candidates")
-    assert empty.paths == []
 
 
-def test_an_untagged_fallback_is_only_the_last_resort():
-    weak = {"nasa": {"t": [_item("nasa", "t", "N1", ["other"])]},
-            "pixabay": {"t": [_item("pixabay", "t", "P1", ["t", "x"])]},
-            "pexels": {"t": [_item("pexels", "t", f"X{i}") for i in range(5)]}}
-    # Pixabay has a suitable candidate (relevance 1 >= 0.5) but fewer than 2: it still beats
-    # five untagged Pexels clips, and Pexels gets no request.
-    run = _run(["t"], weak, chain=["pexels", "pixabay"], settings={"video_source_fallback_min_candidates": 2})
-    assert run.calls["pexels"] == [] and run.by_term == {"t": {"pixabay"}}
+def test_when_every_term_stays_empty_the_task_fails_with_a_clear_error():
+    results = {"nasa": {"black hole": [_item("nasa", "black hole", "N1", ["galaxy"])]}, "pixabay": {"black hole": []}}
+    with pytest.raises(material.NoSuitableMaterialsError, match=r"no search term has a suitable candidate"):
+        _run(["black hole"], results, chain=["pixabay"])
+
+
+def test_the_task_reports_why_every_term_stayed_empty():
+    from app.services import task as tm
+    from app.services.state import MemoryState
+
+    error = material.NoSuitableMaterialsError("no search term has a suitable candidate in the source chain")
+    state = MemoryState()
+    with patch.object(tm.material, "download_videos", side_effect=error), patch.object(tm.sm, "state", state):
+        assert tm.get_video_materials("empty-task", VideoParams(video_subject="t", video_source="nasa",
+                                                                video_source_fallback="pixabay"), ["comet"], 5) is None
+    task = state.get_task("empty-task")
+    assert task["failed_stage"] == "materials" and "no search term has a suitable candidate" in task["error"]
+
+
+def test_the_empty_term_hook_can_fill_a_term(monkeypatch):
+    generated = _item("wavespeed", "pouch food", "AI1")
+    seen = []
+    monkeypatch.setattr(material, "_empty_term_handler",
+                        lambda term, decision: seen.append((term, decision["reason"])) or [generated])
+    run = _run(["pouch food"], {"nasa": {"pouch food": []}, "pixabay": {"pouch food": []}}, chain=["pixabay"])
+    assert seen == [("pouch food", "no_candidates")]
+    decision = run.decisions["pouch food"]
+    assert (decision["chosen"], decision["reason"], decision["empty"], decision["empty_reason"]) == (
+        "wavespeed", "filled", False, "no_candidates")
+    assert run.paths == ["AI1.mp4"]
+
+
+def test_untagged_fallbacks_are_not_asked_with_tag_relevance_on():
+    weak = _with_filler({"nasa": {"t": [_item("nasa", "t", "N1", ["other"])]},
+                         "pixabay": {"t": [_item("pixabay", "t", "P1", ["t", "x"])]},
+                         "pexels": {"t": [_item("pexels", "t", f"X{i}") for i in range(5)]}})
+    # Pixabay has one suitable candidate (1.0 >= 0.5) but fewer than 2: it still wins.
+    run = _run(["t", "moon"], weak, chain=["pexels", "pixabay"],
+               settings={"video_source_fallback_min_candidates": 2})
+    assert run.calls["pexels"] == [] and run.by_term["t"] == {"pixabay"}
     assert run.decisions["t"]["reason"] == "most_suitable"
-    # No tagged source has a single suitable candidate: Pexels is asked, in chain order.
-    none = {"nasa": {"t": [_item("nasa", "t", "N1", ["other"])]}, "pixabay": {"t": []},
-            "pexels": {"t": [_item("pexels", "t", "X1")]}}
-    run = _run(["t"], none, chain=["pexels", "pixabay"])
-    assert run.calls["pexels"] == ["t"] and run.by_term == {"t": {"pexels"}}
-    decision = run.decisions["t"]
-    assert (decision["chosen"], decision["reason"]) == ("pexels", "untagged_last_resort")
-    assert decision["tried"][-1] == {"source": "pexels", "tagged": False, "candidates": 1, "suitable": None}
+    assert run.decisions["t"]["tried"][1] == {"source": "pexels", "tagged": False, "candidates": 0,
+                                               "suitable": None, "skipped": "untagged"}
+    # No tagged source has a suitable candidate: the term stays empty, Pexels is not asked.
+    none = _with_filler({"nasa": {"t": [_item("nasa", "t", "N1", ["other"])]}, "pixabay": {"t": []},
+                         "pexels": {"t": [_item("pexels", "t", "X1")]}})
+    run = _run(["t", "moon"], none, chain=["pexels", "pixabay"])
+    assert run.calls["pexels"] == [] and "t" not in run.by_term
+    assert (run.decisions["t"]["chosen"], run.decisions["t"]["reason"]) == (None, "no_suitable")
+
+
+def test_a_term_gets_only_its_suitable_candidates():
+    # "tortilla": NASA has 1 suitable image and 3 that do not match (score 0).
+    results = {"nasa": {"tortilla": [_item("nasa", "tortilla", "T1", ["tortilla"])]
+                        + [_item("nasa", "tortilla", f"Z{i}", ["galaxy"]) for i in range(3)]}}
+    run = _run(["tortilla"], results, chain=["pixabay"], audio_duration=20)
+    assert run.paths == ["T1.mp4"]
+
+
+def test_the_face_filter_runs_before_the_decision(monkeypatch):
+    """Suitable NASA images rejected by the face filter do not count: the next suitable one of
+    the same source is used, and when none is left the next source in the chain."""
+    screened = []
+
+    def screen(item, save_dir="", **options):
+        screened.append(item.source_info["asset_id"])
+        return not item.source_info["asset_id"].startswith("FACE")
+
+    monkeypatch.setattr(nasa, "screen_image", screen)
+    results = {
+        "nasa": {"comet": [_item("nasa", "comet", "FACE1", ["comet"]), _item("nasa", "comet", "OK1", ["comet"]),
+                           _item("nasa", "comet", "Z1", ["other"])],
+                 "nebula": [_item("nasa", "nebula", "FACE2", ["nebula"]), _item("nasa", "nebula", "Z2", ["other"])]},
+        "pixabay": {"nebula": [_item("pixabay", "nebula", "P2", ["nebula"])]},
+    }
+    run = _run(["comet", "nebula"], results, chain=["pixabay"], settings={}, faces=True, audio_duration=10)
+    a, b = run.decisions["comet"], run.decisions["nebula"]
+    assert (a["chosen"], a["tried"][0]["suitable"], a["tried"][0]["screen_rejected"]) == ("nasa", 1, 1)
+    assert (b["chosen"], b["reason"]) == ("pixabay", "met")
+    assert b["tried"][0]["suitable"] == 0 and b["tried"][0]["screen_rejected"] == 1
+    # The unsuitable Z1/Z2 are never used, nor screened.
+    assert sorted(run.paths) == ["OK1.mp4", "P2.mp4"] and not {"Z1", "Z2"} & set(screened)
 
 
 def test_with_tag_relevance_off_every_source_counts_its_candidates():
@@ -439,10 +517,10 @@ def caplog_loguru():
 
 
 def test_one_parseable_log_line_per_term(caplog_info):
-    results = {"nasa": {"t": []}, "pixabay": {"t": []}, "pexels": {"t": [_item("pexels", "t", "X1")]}}
-    _run(["t"], results, chain=["pixabay", "pexels"], rate_limited={"pixabay"})
-    (line,) = [m for m in caplog_info if "material source chain" in m]
-    assert "term='t', tried=nasa:0/0,pixabay:0/0:429,pexels:1/-, using=pexels, reason=untagged_last_resort" in line
+    results = _with_filler({"nasa": {"t": []}, "pixabay": {"t": []}, "pexels": {"t": [_item("pexels", "t", "X1")]}})
+    _run(["t", "moon"], results, chain=["pixabay", "pexels"], rate_limited={"pixabay"})
+    (line,) = [m for m in caplog_info if "material source chain: term='t'" in m]
+    assert "tried=nasa:0/0,pixabay:0/0:429,pexels:0/-:untagged, using=None, reason=no_candidates" in line
 
 
 @pytest.fixture
