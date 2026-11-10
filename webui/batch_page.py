@@ -847,6 +847,17 @@ def _render_history(tr, running: bool) -> None:
             if files:
                 with st.expander(tr("batch.history.files")):
                     st.markdown("\n".join(f"- {line}" for line in files))
+            finished = [item for item in status.items if item.task_id and item.status in ("done", "review")]
+            if finished:
+                with st.expander(tr("revision.batch_tasks")):
+                    for item in finished:
+                        row = st.columns([5, 1.4], vertical_alignment="center")
+                        row[0].markdown(f"{item.index}. {item.subject}")
+                        if row[1].button(tr("revision.button"), key=f"batch_revise_{folder.name}_{item.index}",
+                                         icon=":material/auto_fix_high:"):
+                            from webui.revision_page import open_revision
+
+                            open_revision(item.task_id, folder, item.index)
 
 
 def subtitle_listing(status: batch_runner.BatchStatus) -> list[str]:

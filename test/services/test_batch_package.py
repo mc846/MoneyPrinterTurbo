@@ -2,6 +2,7 @@
 
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -301,6 +302,34 @@ def test_package_contents(finished_task, tmp_path):
                        "altyazilar": ["altyazi.tr.srt", "altyazi.en.srt"]}
     moments = quality["kareler_sn"]
     assert len(moments) == bpk.SHEET_FRAMES and moments == sorted(moments) and 0 < moments[0] and moments[-1] < 4
+
+
+def test_package_for_a_revision_uses_its_subtitles_sources_and_audit(finished_task, tmp_path):
+    """task_revisions.refresh_package: the revision's own subtitle, sources and audit; the text is not re-audited."""
+    revision = finished_task / "revisions" / "r002"
+    revision.mkdir(parents=True)
+    shutil.copy2(finished_task / "subtitle.srt", revision / "subtitle.srt")
+    make_video(revision / "final.mp4", "testsrc2", seconds=4)
+    folder = tmp_path / "batch" / "01-notron-yildizlari" / "revizyonlar" / "r002"
+    audit = {"durum": "tamam", "iddialar": [], "sayim": {"D": 3, "B": 0, "Y": 0, "X": 0}, "isaretli": []}
+    item = bp.ItemState(index=1, subject="Nötron yıldızları", task_id=finished_task.name, folder="01-notron-yildizlari")
+    script = (finished_task / "script.json").read_text(encoding="utf-8")
+    script = json.loads(script)["script"]
+    ask = asker(("social", json.dumps(SOCIAL)), ("translate", TRANSLATION))
+    summary = bpk.build_package(
+        item, {"videos": [str(revision / "final.mp4")], "script": script}, bp.load_preset(PRESET), folder, LOG,
+        ask=ask, revision={"name": "r002", "subtitle": str(revision / "subtitle.srt"),
+                           "material_sources": [dict(PIXABAY, local_file="stock.mp4")],
+                           "params": {"font_name": "STHeitiMedium.ttc", "video_source": "nasa"}, "audit": audit},
+    )
+    assert [kind for kind, _prompt in ask.prompts] == ["translate", "social"]  # no audit call
+    assert (folder / "video.mp4").read_bytes() == (revision / "final.mp4").read_bytes()
+    # Only Pixabay footage in this revision: no NASA credits file, unlike the original package.
+    assert not (folder / "credits.txt").exists()
+    quality = json.loads((folder / "kalite.json").read_text(encoding="utf-8"))
+    assert quality["revizyon"] == "r002" and quality["dogruluk"] == audit
+    assert quality["altyazi"]["dosyalar"] == ["altyazi.tr.srt", "altyazi.en.srt"]
+    assert summary["sayim"] == audit["sayim"]
 
 
 def test_frame_extraction_never_reads_the_console(finished_task):

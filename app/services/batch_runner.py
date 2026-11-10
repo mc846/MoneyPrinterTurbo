@@ -440,6 +440,7 @@ class ItemStatus:
     attempts: int = 0
     note: str = ""
     folder: str = ""
+    task_id: str = ""
 
 
 @dataclass
@@ -561,7 +562,7 @@ def batch_status(batch_dir: Path, lock: dict | None = None, now: datetime | None
             status = "pending"  # süreç öldüyse yarıda kalan konu devam ettirilince baştan üretilir
         items.append(ItemStatus(item.index, item.subject, status, current_stage(log_lines, item.index)
                                 if status in live_statuses else "", round(seconds, 1),
-                                item.attempts + item.prepare_attempts, note, item.folder))
+                                item.attempts + item.prepare_attempts, note, item.folder, item.task_id))
     elapsed = state.run_seconds
     if running:
         elapsed += _seconds_since(lock.get("started", ""), now)
