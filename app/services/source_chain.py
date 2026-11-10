@@ -244,8 +244,12 @@ def chain_search(
     relevance_on: bool,
     state: ChainState | None = None,
     on_decision: Callable[[str, dict], None] | None = None,
+    unavailable: Sequence[str] = (),
 ) -> Callable[..., list]:
-    """A search function trying ``links`` (the primary first) per term by the rules above."""
+    """A search function trying ``links`` (the primary first) per term by the rules above.
+
+    ``unavailable``: chain sources left out for the task (no API key); each decision
+    names them so the record shows the whole chain."""
     state = state or ChainState()
     links = list(links)
 
@@ -307,6 +311,7 @@ def chain_search(
             "chosen": chosen,
             "reason": reason,
             "chain": [link.source for link in links],
+            "unavailable": [{"source": source, "reason": "no_api_key"} for source in unavailable],
             "min_relevance": min_relevance,
             "min_candidates": min_candidates,
         }

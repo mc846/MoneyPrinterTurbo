@@ -199,6 +199,9 @@ def test_a_source_without_a_key_is_skipped_with_one_warning_per_task(caplog_logu
                                                      "b": [_item("pixabay", "b", "P2", ["b"])]}}
     run = _run(["a", "b"], results, chain=["coverr", "pixabay"], settings={"coverr_api_keys": []})
     assert run.calls["coverr"] == [] and run.by_term == {"a": {"pixabay"}, "b": {"pixabay"}}
+    # The decision still names the skipped source, so the record shows the whole chain.
+    assert run.decisions["a"]["chain"] == ["nasa", "pixabay"]
+    assert run.decisions["a"]["unavailable"] == [{"source": "coverr", "reason": "no_api_key"}]
     warnings = [m for m in caplog_loguru if "coverr is skipped for this task" in m]
     assert len(warnings) == 1 and "coverr_api_keys" in warnings[0]
 
