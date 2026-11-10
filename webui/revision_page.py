@@ -8,6 +8,7 @@ background process (``task_revisions.start_background``); this page follows its 
 """
 
 import os
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -161,6 +162,14 @@ def _render_scenes(tr, task_id: str, base: dict) -> None:
                     id=row["id"], term=row["term"], seconds=f"{float(row['duration'] or 0):.1f}"))
 
 
+def _local_time(value) -> str:
+    """revision.json keeps UTC; the page shows the computer's local time."""
+    try:
+        return datetime.fromisoformat(str(value)).astimezone().strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return str(value or "").replace("T", " ")[:16]
+
+
 def _summary(tr, record: dict) -> str:
     changes = record.get("changes") or {}
     parts = []
@@ -178,7 +187,7 @@ def _render_history(tr, task_id: str, records: list[dict], busy: bool) -> None:
     for record in reversed(records):
         name = record["revision"]
         with st.container(border=True, key=f"revision_history_{name}"):
-            created = str(record.get("created_at") or "").replace("T", " ")[:16]
+            created = _local_time(record.get("created_at"))
             title = f"**{name}** · {created}"
             if name == task_revisions.FIRST:
                 title += f" · {tr('revision.original')}"
@@ -191,7 +200,8 @@ def _render_history(tr, task_id: str, records: list[dict], busy: bool) -> None:
             st.markdown(title)
             st.caption(_summary(tr, record))
             video = task_revisions.file_path(task_id, record, "video")
-            details = st.columns([2, 3])
+            # A portrait video in a narrow column; a wide one would fill the screen.
+            details = st.columns([1, 3])
             if video is not None and video.is_file():
                 details[0].video(str(video))
             with details[1]:
