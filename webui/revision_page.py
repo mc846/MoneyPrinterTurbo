@@ -216,6 +216,8 @@ def _describe(tr, op: scene_edits.SceneOp) -> str:
 
 
 FILTER_NAMES = ("text", "face")
+# Stock source names in the new-search source list (labels, not format_func: AppTest).
+SOURCE_LABELS = {"nasa": "NASA", "pixabay": "Pixabay", "pexels": "Pexels", "coverr": "Coverr"}
 
 
 def _reason(tr, choice: dict) -> str:
@@ -253,15 +255,28 @@ def _replace_dialog(tr, task_id: str, base: dict, scene_id: str) -> None:
     scene = next(s for s in base["scenes"] if s["id"] == scene_id)
     aspect = VideoAspect((base.get("params") or {}).get("video_aspect") or VideoAspect.portrait)
     key = f"revision_replace_{task_id}_{scene_id}"
+    where = scene_edits.search_sources(task_id)
+    # The task's chain first (the default), then each stock source with a key on its own.
+    source_values = ([scene_edits.TASK_CHAIN] if where["chain"] else []) + where["sources"]
+    source_labels = [
+        tr("revision.replace.source_chain").format(chain=" → ".join(SOURCE_LABELS.get(s, s) for s in where["chain"]))
+        if value == scene_edits.TASK_CHAIN else SOURCE_LABELS.get(value, value)
+        for value in source_values
+    ]
     with st.form(f"{key}_search_form", border=False):
-        columns = st.columns([4, 1], vertical_alignment="bottom")
+        columns = st.columns([3, 2, 1], vertical_alignment="bottom")
         words = columns[0].text_input(tr("revision.replace.search"), key=f"{key}_words")
-        if columns[1].form_submit_button(tr("revision.replace.search_button")) and words.strip():
+        chosen_label = columns[1].selectbox(tr("revision.replace.source"), source_labels, index=0,
+                                            key=f"{key}_source") if source_labels else None
+        if columns[2].form_submit_button(tr("revision.replace.search_button"), key=f"{key}_search") \
+                and words.strip():
+            source = source_values[source_labels.index(chosen_label)] if chosen_label else scene_edits.TASK_CHAIN
             try:
                 with st.spinner(tr("revision.replace.searching")):
-                    found = scene_edits.search(task_id, scene, words)
-                st.session_state[f"{key}_flash"] = tr("revision.replace.search_done").format(
-                    count=len(found["candidates"]), term=found["term"])
+                    found = scene_edits.search(task_id, scene, words, source)
+                st.session_state[f"{key}_flash"] = tr("revision.replace.search_done_source").format(
+                    count=len(found["candidates"]), term=found["term"],
+                    source=SOURCE_LABELS.get(found.get("provider") or "", found.get("provider") or "—"))
             except Exception as exc:
                 st.session_state[f"{key}_flash"] = tr("revision.replace.search_failed").format(error=exc)
             manifest, materials = task_revisions._materials(task_id)
