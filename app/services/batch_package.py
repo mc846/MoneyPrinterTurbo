@@ -432,7 +432,10 @@ def log_summary(log_lines: list[str], terms: list[str]) -> dict:
         elif line.startswith("vision screening: skipped"):
             eliminations["gorsel_tarama"] = eliminations.get("gorsel_tarama", 0) + 1
         elif match := _VISION_SUMMARY.search(line):
+            # "gemini:x→claude:sonnet": the task switched to material_vision_fallback_model.
+            first, _, switched = match["model"].partition("→")
             vision = {"model": match["model"], "cagri": int(match["calls"]), "onbellek": int(match["cached"]),
+                      **({"yedege_gecti": {"ilk": first, "yedek": switched}} if switched else {}),
                       "kabul": int(match["accepted"]), "ret": int(match["rejected"]),
                       "taranmadi": int(match["unscreened"]), "sure_sn": float(match["seconds"]),
                       "durum": "tamamlandı" if match["status"] == "complete" else
@@ -510,6 +513,23 @@ def label_checks(material_sources) -> dict:
     }
 
 
+def unscreened_scenes(material_sources) -> list[dict]:
+    """
+    Görsel taraması açık bir görevde taranmadan kullanılan klipler (kayıttaki ``vision.decision``
+    = ``unscreened``: tarama durdu, görüntü yoktu ya da yanıt okunamadı). Gerçek kanalında böyle
+    bir sahne CGI ya da konu dışı olabilir: video kontrol gerektirir.
+    """
+    scenes = []
+    for record in material_sources or []:
+        vision = record.get("vision") if isinstance(record, dict) else None
+        if isinstance(vision, dict) and vision.get("decision") == "unscreened":
+            scenes.append({"asset_id": str(record.get("asset_id") or record.get("local_file") or ""),
+                           "provider": str(record.get("provider") or ""),
+                           "terim": str(record.get("search_term") or ""),
+                           "neden": ", ".join(str(reason) for reason in vision.get("reasons") or [])})
+    return scenes
+
+
 def technical_checks(task_dir: Path, final_video: Path, script: str, params: dict, terms: list[str],
                      material_sources, log_lines: list[str], preset) -> dict:
     duration = round(_media_duration(final_video), 1)
@@ -529,6 +549,7 @@ def technical_checks(task_dir: Path, final_video: Path, script: str, params: dic
         "kredi_sorunlari": credit_problems(material_sources),
         "goruntuler": material_summary(material_sources),
         **label_checks(material_sources),
+        "taranmamis_sahneler": unscreened_scenes(material_sources),
     }
     checks.update(log_summary(log_lines, terms))
     return checks
@@ -545,6 +566,10 @@ def review_reasons(audit: dict, checks: dict) -> list[str]:
         reasons.append(f"yazı tipinde glifi olmayan karakter: {' '.join(checks['glifsiz_karakterler'])}")
     if checks.get("kredi_sorunlari"):
         reasons.append(f"NASA/izinli ortak dışı kredi: {len(checks['kredi_sorunlari'])}")
+    if checks.get("taranmamis_sahneler"):
+        scenes = checks["taranmamis_sahneler"]
+        reasons.append(f"görsel tarama: {len(scenes)} sahne taranmadan kullanıldı "
+                       f"({', '.join(scene['asset_id'] for scene in scenes)})")
     return reasons
 
 
@@ -796,6 +821,9 @@ def _item_card(batch_dir: Path, item) -> str:
         ("Görsel tarama", (lambda v: f"{v['model']} · {v['cagri']} çağrı, {v['onbellek']} önbellekten, "
                                      f"{v['ret']} ret, {v['taranmadi']} taranmadı · {v['sure_sn']:g} sn · {v['durum']}"
                            if v else "kapalı")(checks.get("gorsel_tarama"))),
+        *([("Taranmamış sahne", "; ".join(f"{s['provider']}:{s['asset_id']} ({s['terim']}; {s['neden']})"
+                                          for s in checks["taranmamis_sahneler"]))]
+          if checks.get("taranmamis_sahneler") else []),
         ("Boş terim", ", ".join(checks.get("bos_terimler", [])) or "yok"),
         ("Yedeğe geçen terim", ", ".join(checks.get("yedege_gecen_terimler", [])) or "yok"),
         ("Filtre elemeleri", ", ".join(f"{ELIMINATION_LABELS.get(k, k)} {v}" for k, v in elim.items() if v) or "yok"),

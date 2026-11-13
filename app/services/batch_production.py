@@ -81,6 +81,7 @@ APP_OPTIONS = {
     "material_vision_max_per_term": int,
     "material_vision_max_per_task": int,
     "material_vision_gemini_rpm": int,
+    "material_vision_fallback_model": str,
     "video_source_fallback_min_relevance": float,
     "video_source_fallback_min_candidates": int,
     "video_codec": str,

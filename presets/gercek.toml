@@ -60,10 +60,13 @@ material_require_anchor = true
 # pencerenin 3 karesi). Reddedilir: çizim, CGI, diyagram; konusu çapa değil; tanınabilir kişi; logo. Veri
 # görselleştirmesi kabul edilir, kalite raporunda "etiket gerekli" yazar. Kota/oturum sınırında tarama durur, iş sürer.
 # Model: Gemini 3.5 Flash-Lite (gemini_api_key; ölçüm 13.11: CGI'ı gerçek sanma 0/13, ret/kabul 50/50, 1,5 sn;
-# sonnet 0/13, 48/50, 4,1 sn). İstekler dakikada en çok material_vision_gemini_rpm; günlük kota dolunca tarama durur.
-# Anahtar yoksa ya da Gemini kullanılmayacaksa: material_vision_model = "claude:sonnet".
+# sonnet 0/13, 48/50, 4,1 sn). İstekler dakikada en çok material_vision_gemini_rpm.
+# Gemini kullanılamazsa (günlük kota, katman, kalıcı hata, anahtar yok) görev claude:sonnet'e geçer
+# (material_vision_fallback_model). İkisi de kullanılamazsa kalan adaylar taranmadan kullanılır ve video
+# "kontrol gerekli" olur; kalite raporu taranmamış sahneleri listeler.
 material_vision_screening = true
 material_vision_model = "gemini:gemini-3.5-flash-lite"
+material_vision_fallback_model = "claude:sonnet"
 material_vision_max_per_term = 3
 material_vision_max_per_task = 40
 material_vision_gemini_rpm = 10
