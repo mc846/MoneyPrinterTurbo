@@ -398,4 +398,5 @@ def test_the_report_reads_the_summary_and_the_stop():
 def test_the_gercek_preset_screens():
     preset = batch_production.load_preset(ROOT_DIR / "presets" / "gercek.toml")
     assert preset.app["material_vision_screening"] is True
-    assert preset.app["material_vision_model"].startswith("claude:")
+    assert vision_screen.parse_model(preset.app["material_vision_model"]) == ("gemini", "gemini-3.5-flash-lite")
+    assert preset.app["material_vision_gemini_rpm"] == 10
