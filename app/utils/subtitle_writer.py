@@ -3,8 +3,28 @@ from contextlib import contextmanager
 import os
 import re
 import tempfile
+import time
 
 from loguru import logger
+
+# Windows: a freshly written file can be held for a moment by another process (an
+# antivirus or indexer scan), and renaming it then fails with "Access is denied"
+# (WinError 5). The subtitle was lost that way in a real render (14.11), so the
+# publication is retried for a short while before it gives up.
+REPLACE_ATTEMPTS = 50
+REPLACE_DELAY_SECONDS = 0.1
+
+
+def publish_staged(staged, destination) -> None:
+    """``os.replace`` that retries a PermissionError for up to ~5 seconds."""
+    for attempt in range(REPLACE_ATTEMPTS):
+        try:
+            os.replace(staged, destination)
+            return
+        except PermissionError:
+            if attempt == REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(REPLACE_DELAY_SECONDS)
 
 
 @contextmanager
@@ -61,5 +81,5 @@ def write_subtitle_file(destination, content) -> bool:
     with staged_subtitle_file(destination) as staged:
         with open(staged, "w", encoding="utf-8") as output:
             output.write(content)
-        os.replace(staged, destination)
+        publish_staged(staged, destination)
     return True
