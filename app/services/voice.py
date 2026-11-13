@@ -34,7 +34,7 @@ from app.config import config
 from app.services import bgm
 from app.utils import ffmpeg_inputs, utils
 from app.utils.subtitle_reader import moviepy_subtitles
-from app.utils.subtitle_writer import staged_subtitle_file
+from app.utils.subtitle_writer import publish_staged, staged_subtitle_file
 
 # MoviePy's audio reader and pydub start ffmpeg themselves; restrict their inputs too.
 ffmpeg_inputs.guard_libraries()
@@ -3571,7 +3571,7 @@ def _write_subtitle_items(sub_items: list[str], subtitle_file: str) -> bool:
             if not sbs:
                 raise ValueError("subtitle output contains no cues")
             duration = max(tb for ((ta, tb), txt) in sbs)
-            os.replace(staged, subtitle_file)
+            publish_staged(staged, subtitle_file)
         logger.info(
             f"completed, subtitle file created: {subtitle_file}, duration: {duration}"
         )

@@ -50,7 +50,7 @@ from app.services import (
 from app.services import upload_post
 from app.services import state as sm
 from app.utils import file_security, utils
-from app.utils.subtitle_writer import staged_subtitle_file
+from app.utils.subtitle_writer import publish_staged, staged_subtitle_file
 
 
 # 发布请求最长可等待数分钟，不能继续占用视频生成任务的并发名额。
@@ -778,7 +778,7 @@ def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
             logger.warning(f"subtitle file is invalid: {subtitle_path}")
             return ""
 
-        os.replace(subtitle_path, final_subtitle_path)
+        publish_staged(subtitle_path, final_subtitle_path)
         return final_subtitle_path
 
 
