@@ -25,11 +25,14 @@ never goes to a log, an error text, the cache or a record.
 Per task (``Session``): at most ``material_vision_max_per_term`` candidates screened per term
 and source, cached decisions included, so a warm cache decides the same as a cold one (then
 the term moves on to the next source of the chain), and ``material_vision_max_per_task``
-model calls in all. When the task limit is reached, or the
-backend fails (quota, session limit, login, timeout), screening stops for the task
-with a warning, the remaining candidates are used unscreened and the quality report
-says the screening did not complete. Decisions are cached on disk by provider, asset,
-frames, prompt version, model and anchors.
+model calls in all. When the backend fails (daily quota, tier, session limit, login,
+timeout) and ``material_vision_fallback_model`` names another model, the task switches to it
+once (the same candidate is asked again); within the task a candidate keeps the decision it
+got, whichever model gave it. When the task limit is reached, or no model is left, screening
+stops for the task with a warning, the remaining candidates are used unscreened and the
+quality report says the screening did not complete (a batch video showing an unscreened
+scene needs a check). Decisions are cached on disk by provider, asset, frames, prompt
+version, model and anchors.
 """
 
 from __future__ import annotations
@@ -174,6 +177,15 @@ def parse_model(value: Any) -> tuple[str, str]:
 def model_setting() -> tuple[str, str]:
     """(backend, model) from material_vision_model."""
     return parse_model(config.app.get("material_vision_model"))
+
+
+def fallback_setting(primary: tuple[str, str]) -> tuple[str, str] | None:
+    """(backend, model) from material_vision_fallback_model; None when empty or the same as the primary."""
+    value = str(config.app.get("material_vision_fallback_model") or "").strip()
+    if not value:
+        return None
+    fallback = parse_model(value)
+    return None if fallback == primary else fallback
 
 
 # ---------------------------------------------------------------- the model's answer
@@ -494,8 +506,12 @@ class Session:
     unscreened: int = 0
     seconds: float = 0.0
     stopped: str = ""
+    # material_vision_fallback_model: (backend, model) taken once when the first one fails.
+    fallback: tuple | None = None
+    switched_from: str = ""  # "<backend>:<model>" of the model the task started with, once switched
     # (term, source) -> the candidates screened for it, cached decisions included: the limit is
-    # on candidates, so a task decides the same with a cold or a warm cache.
+    # on candidates, so a task decides the same with a cold or a warm cache. Both this and
+    # ``decisions`` are keyed by the candidate (``identity``), not by the model that answered.
     screened: dict = field(default_factory=dict)
     decisions: dict = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -508,6 +524,36 @@ class Session:
             self.stopped = reason
         logger.warning(f"vision screening stopped: {reason}; the remaining candidates are used unscreened")
 
+    def _switch(self, reason: str) -> bool:
+        """Take the fallback model for the rest of the task (once); False when there is none."""
+        with self.lock:
+            if not self.fallback or self.switched_from or self.fallback == (self.backend, self.model):
+                return False
+            self.switched_from = f"{self.backend}:{self.model}"
+            self.backend, self.model = self.fallback
+        logger.warning(f"vision screening: {self.switched_from} unavailable ({reason}); "
+                       f"switching to {self.backend}:{self.model} for this task")
+        return True
+
+    def _ask(self, images: list[str], prompt: str) -> tuple[dict | None, str, str]:
+        """The parsed answer (asked twice when unreadable) and the model that gave it; a model
+        that cannot answer is replaced by the fallback once, then VisionUnavailable."""
+        while True:
+            backend, model = self.backend, self.model
+            try:
+                result = None
+                for _attempt in range(2):
+                    result = parse(BACKENDS[backend](images, prompt, model))
+                    if result is not None:
+                        break
+                return result, backend, model
+            except VisionUnavailable as exc:
+                reason = str(exc)
+            except Exception as exc:  # the task never fails because of the screening
+                reason = redact(f"{type(exc).__name__}: {exc}", _gemini_key())
+            if not self._switch(reason):
+                raise VisionUnavailable(reason)
+
     def screen(self, item) -> bool:
         """True when the candidate may be used; the decision goes to source_info["vision"] and materials.json."""
         info = item.source_info if isinstance(item.source_info, dict) else {}
@@ -516,26 +562,29 @@ class Session:
         signature = _signature(item)
         if signature is None:
             return self._unscreened(item, "no_image")
-        key = cache_key(item, signature, self.backend, self.model, self.anchors)
+        # The candidate within the task, whichever model screens it (a switch to the fallback
+        # must not turn a used candidate into a new one); the disk cache is per model.
+        identity = cache_key(item, signature, "", "", self.anchors)
         with self.lock:
-            known = self.decisions.get(key)
+            known = self.decisions.get(identity)
             if known is not None:
                 self.repeats += 1
             else:
                 seen = self.screened.setdefault((term, provider), set())
-                limited = key not in seen and len(seen) >= self.max_per_term
+                limited = identity not in seen and len(seen) >= self.max_per_term
                 if not limited:
-                    seen.add(key)
+                    seen.add(identity)
+            backend, model = self.backend, self.model
         if known is not None:
             return self._apply(item, known, cached=True, count=False)
         if limited:
             # This source has had its share of candidates for the term: the chain moves on.
             task_materials.rejected(item, "vision", f"limit: {self.max_per_term} screened for {term!r}")
             return False
-        known = _load(key)
+        known = _load(cache_key(item, signature, backend, model, self.anchors))
         if known is not None:
             with self.lock:
-                self.decisions[key] = known
+                self.decisions[identity] = known
                 self.cached += 1
             return self._apply(item, known, cached=True)
         with self.lock:
@@ -562,18 +611,11 @@ class Session:
             prompt = build_prompt(len(frames), self.subject or term, term, self.anchors, context_text(item))
             images = [_encode(frame) for frame in frames]
         started = time.perf_counter()
-        result = None
         try:
             with self.call_lock:  # one model call at a time per task
-                for _attempt in range(2):
-                    result = parse(BACKENDS[self.backend](images, prompt, self.model))
-                    if result is not None:
-                        break
+                result, backend, model = self._ask(images, prompt)
         except VisionUnavailable as exc:
             self.stop(str(exc))
-            return self._unscreened(item, "stopped")
-        except Exception as exc:  # the task never fails because of the screening
-            self.stop(f"{type(exc).__name__}: {exc}")
             return self._unscreened(item, "stopped")
         finally:
             with self.lock:
@@ -582,12 +624,12 @@ class Session:
             logger.warning(f"vision screening: unreadable answer for {info.get('asset_id')}; used unscreened")
             return self._unscreened(item, "unreadable")
         use, reasons, label = decide(result, self.anchors)
-        decision = {"prompt_version": PROMPT_VERSION, "model": f"{self.backend}:{self.model}", "result": result,
+        decision = {"prompt_version": PROMPT_VERSION, "model": f"{backend}:{model}", "result": result,
                     "use": use, "reasons": reasons, "label": label, "frames": len(frames),
                     "seconds": round(time.perf_counter() - started, 2)}
-        _store(key, decision)
+        _store(cache_key(item, signature, backend, model, self.anchors), decision)
         with self.lock:
-            self.decisions[key] = decision
+            self.decisions[identity] = decision
         return self._apply(item, decision, cached=False)
 
     def _apply(self, item, decision: dict, *, cached: bool, count: bool = True) -> bool:
@@ -621,7 +663,10 @@ class Session:
         return True
 
     def summary(self) -> str:
-        return (f"vision screening: model={self.backend}:{self.model or 'default'}, calls={self.calls}, "
+        model = f"{self.backend}:{self.model or 'default'}"
+        if self.switched_from:
+            model = f"{self.switched_from}→{model}"  # no space: the batch report reads one token
+        return (f"vision screening: model={model}, calls={self.calls}, "
                 f"cached={self.cached}, repeats={self.repeats}, accepted={self.accepted}, rejected={self.rejected}, "
                 f"unscreened={self.unscreened}, seconds={self.seconds:.1f}, "
                 f"status={'stopped: ' + self.stopped if self.stopped else 'complete'}")
@@ -635,12 +680,14 @@ def start(anchors: Sequence[str], subject: str = "") -> Session | None:
     if not enabled():
         return None
     backend, model = model_setting()
+    fallback = fallback_setting((backend, model))
     session = Session(anchors=[str(a) for a in anchors or () if str(a).strip()], subject=str(subject or ""),
-                      backend=backend, model=model,
+                      backend=backend, model=model, fallback=fallback,
                       max_per_term=_count("material_vision_max_per_term", DEFAULT_MAX_PER_TERM),
                       max_per_task=_count("material_vision_max_per_task", DEFAULT_MAX_PER_TASK))
     _current.set(session)
-    logger.info(f"vision screening on: {backend}:{model or 'default'}, at most {session.max_per_term} per term "
+    logger.info(f"vision screening on: {backend}:{model or 'default'}"
+                f"{', fallback ' + ':'.join(fallback) if fallback else ''}, at most {session.max_per_term} per term "
                 f"and source, {session.max_per_task} per task")
     return session
 

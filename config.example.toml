@@ -459,9 +459,15 @@ material_require_anchor = false
 # again three times, a daily quota (or a model outside the project's tier)
 # stops the screening for the task with a warning. On the free tier the
 # requests cost nothing; on a paid project they are billed per token.
+# material_vision_fallback_model: when material_vision_model cannot answer
+# (daily quota, tier, a lasting error), the task switches to this model once
+# (e.g. "claude:sonnet"); empty = no fallback, the screening stops. If no model
+# is left the remaining candidates are used unscreened and a batch video that
+# shows one needs a check (the report lists the unscreened scenes).
 # 默认关闭；开启后库存素材在使用前由视觉模型检查（类型、主体、锚点、人物、标志）。
 material_vision_screening = false
 material_vision_model = "claude:sonnet"
+material_vision_fallback_model = ""
 material_vision_max_per_term = 3
 material_vision_max_per_task = 40
 material_vision_gemini_rpm = 10
