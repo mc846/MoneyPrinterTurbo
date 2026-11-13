@@ -229,11 +229,20 @@ def _json_object(text: str) -> dict:
     return data
 
 
+def _clip(text: Any, limit: int) -> str:
+    """Metni sınırda keser; kesmek gerekirse son tam cümlede (kelime ortasında değil)."""
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = max(cut.rfind(". "), cut.rfind("; "))
+    return (cut[:end + 1] if end > limit // 2 else cut[:cut.rfind(" ")]).strip()
+
+
 def _clean_style(raw: Any) -> dict:
     raw = raw if isinstance(raw, dict) else {}
-    style = {key: str(raw.get(key) or "").strip()[:600] for key in STYLE_FIELDS}
-    style["recurring"] = [{"name": str(item.get("name") or "").strip()[:80],
-                           "description": str(item.get("description") or "").strip()[:300]}
+    style = {key: _clip(raw.get(key), 1200) for key in STYLE_FIELDS}
+    style["recurring"] = [{"name": _clip(item.get("name"), 80), "description": _clip(item.get("description"), 400)}
                           for item in raw.get("recurring") or [] if isinstance(item, dict) and item.get("name")][:8]
     if not style["visual_language"]:
         raise ValueError("stil kitabında görsel dil yok")

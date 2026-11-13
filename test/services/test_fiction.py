@@ -169,6 +169,12 @@ def test_the_plan_style_book_and_prompt_rules(plan):
     assert fiction.plan_current(plan, SCRIPT) and not fiction.plan_current(plan, SCRIPT + " Ek.")
 
 
+def test_a_long_style_field_is_cut_at_a_sentence_end():
+    long_text = " ".join(["Shadows are hard and black with no fill light at all."] * 40)
+    style = fiction._clean_style({"visual_language": "x", "science": long_text})
+    assert 600 < len(style["science"]) <= 1200 and style["science"].endswith("at all.")
+
+
 def test_an_unreadable_plan_answer_is_asked_again_then_fails():
     answers = iter(["bozuk", plan_answer("narrated over 6 clips")])
     plan = fiction.build_plan("x", SCRIPT, 40.0, ask=lambda prompt: next(answers))
