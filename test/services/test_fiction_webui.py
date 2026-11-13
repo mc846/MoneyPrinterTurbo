@@ -96,9 +96,9 @@ def test_after_approval_the_scene_cards_wait_for_clips(batch):
     app.button(key=f"fx_{batch.name}_1_check").click()
     app = run(app)
     assert "1/" in markdown(app) and "These files have no scene number" in "\n".join(str(w.value) for w in app.warning)
-    box = app.selectbox(key=f"fx_{batch.name}_1_assign_ay yuzeyi.mp4")
+    box = app.selectbox(key=f"fx_{batch.name}_1_assign_ay_yuzeyi_mp4")  # file name made key-safe
     box.set_value(2)
-    app.button(key=f"fx_{batch.name}_1_assign_btn_ay yuzeyi.mp4").click()
+    app.button(key=f"fx_{batch.name}_1_assign_btn_ay_yuzeyi_mp4").click()
     app = run(app)
     states = {s["index"]: s["status"] for s in fiction.scene_states(folder, plan)}
     assert states[1] == states[2] == fiction.ARRIVED and states[3] == fiction.WAITING
