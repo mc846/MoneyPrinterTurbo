@@ -34,7 +34,8 @@ def plan_answer(prompt: str) -> str:
                        "recurring": [{"name": "mining rover", "description": "six-wheeled white rover"}],
                        "science": "Moon: black sky, hard shadows, no atmosphere"},
         "scenes": [{"index": i, "visual_tr": f"Sahne {i} tarifi", "action": f"shot {i} of the rover",
-                    "camera": "slow dolly", "light": "low sun"} for i in range(1, count + 1)],
+                    "camera": "slow dolly", "light": "low sun",
+                    "elements": ["Mining Rover", "unknown thing"] if i % 2 else []} for i in range(1, count + 1)],
     })
 
 
@@ -160,7 +161,11 @@ def test_the_plan_style_book_and_prompt_rules(plan):
     assert "mining rover: six-wheeled white rover" in style and "black sky" in style
     for scene in plan["scenes"]:
         prompt = scene["prompt"]
-        assert prompt.startswith(style)  # the style book opens every prompt
+        # The style book opens every prompt; of the recurring objects only those seen in the shot.
+        assert prompt.startswith(fiction.style_text(plan["style_book"], scene["elements"]))
+        assert ("six-wheeled white rover" in prompt) == bool(scene["index"] % 2)
+        assert scene["elements"] == (["mining rover"] if scene["index"] % 2 else [])  # unknown names dropped
+        assert "black sky" in prompt and "Lighting: low sun, hard shadows" in prompt
         assert "Vertical 9:16" in prompt and "8 seconds" in prompt and "one continuous shot" in prompt
         for rule in ("No text", "no logos", "no insignia", "no real people", "no recognizable faces"):
             assert rule in prompt
@@ -172,7 +177,7 @@ def test_the_plan_style_book_and_prompt_rules(plan):
 def test_a_long_style_field_is_cut_at_a_sentence_end():
     long_text = " ".join(["Shadows are hard and black with no fill light at all."] * 40)
     style = fiction._clean_style({"visual_language": "x", "science": long_text})
-    assert 600 < len(style["science"]) <= 1200 and style["science"].endswith("at all.")
+    assert 350 < len(style["science"]) <= 700 and style["science"].endswith("at all.")
 
 
 def test_an_unreadable_plan_answer_is_asked_again_then_fails():
