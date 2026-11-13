@@ -253,6 +253,12 @@ def _close_dialog() -> None:
 def _replace_dialog(tr, task_id: str, base: dict, scene_id: str) -> None:
     st.markdown(f"**{tr('revision.replace.title').format(scene=scene_id)}**")
     manifest, materials = task_revisions._materials(task_id)
+    if (base.get("params") or {}).get("video_source") == "ai_manual":
+        # Fiction: no search; the scene's Veo prompt (edit, copy to Flow) and the new clip.
+        from webui import fiction_panel
+
+        fiction_panel.revision_replace(tr, task_id, base, scene_id, materials, _add_op, _close_dialog)
+        return
     scene = next(s for s in base["scenes"] if s["id"] == scene_id)
     aspect = VideoAspect((base.get("params") or {}).get("video_aspect") or VideoAspect.portrait)
     key = f"revision_replace_{task_id}_{scene_id}"

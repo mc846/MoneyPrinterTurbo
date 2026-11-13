@@ -61,6 +61,8 @@ _CLI_VIDEO_SOURCES = (
     "openai_image",
     "codex_image",
     "local",
+    # Kurgu kanalı: klipler kullanıcıdan (Google Flow / Veo), --ai-manual-plan ile (app/services/fiction.py).
+    "ai_manual",
 )
 
 
@@ -421,6 +423,14 @@ Batch manifests:
             "video material provider; online providers require matching API keys in "
             "config.toml (default: [app].video_source from config.toml; pexels when "
             "unset)"
+        ),
+    )
+    material_group.add_argument(
+        "--ai-manual-plan",
+        default=None,
+        help=(
+            "render plan of an ai_manual (fiction) video: the JSON the batch review writes "
+            "(render-plani.json; scene clips with their SHA-256 and prompts)"
         ),
     )
     material_group.add_argument(
@@ -902,6 +912,9 @@ Batch manifests:
         )
     if not args.batch_file and args.video_source != "local" and has_video_materials:
         parser.error("--video-materials can only be used with --video-source local")
+    # A missing --ai-manual-plan is reported by the task's preflight: presets are checked through this parser.
+    if (args.ai_manual_plan or "").strip() and args.video_source != "ai_manual":
+        parser.error("--ai-manual-plan can only be used with --video-source ai_manual")
     if (
         not args.batch_file
         and args.video_source == "wavespeed"
@@ -1149,6 +1162,7 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
     }
 
     optional_arg_names = [
+        "ai_manual_plan",
         "video_language",
         "paragraph_number",
         "video_script_prompt",

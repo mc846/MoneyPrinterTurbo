@@ -346,10 +346,10 @@ def _subtitles(params: VideoParams, script: str, sub_maker, audio_file: Path, su
     return subtitle_file.is_file() and bool(subtitle.file_to_subtitles(str(subtitle_file)))
 
 
-def _audit(subject: str, script: str) -> dict:
+def _audit(subject: str, script: str, mode: str = "") -> dict:
     from app.services import batch_package
 
-    return batch_package.audit_script(subject, script)
+    return batch_package.audit_script(subject, script, mode=mode)
 
 
 # ------------------------------------------------------------------ added scenes
@@ -741,7 +741,13 @@ def _apply_scene_ops(task_id: str, name: str, ops: list, records: list[dict], ma
         # A replacement from outside the scene's term (a search, a file, another term's
         # candidate) turns the term down: its other candidates are not added on their own.
         change["blocks_term"] = True
-        if op.path:
+        if op.path and params.video_source == "ai_manual":
+            # A fiction scene: the new clip from Flow is validated and recorded as ai_manual (prompt kept).
+            added, file_warnings = scene_edits.add_fiction_clip(
+                task_id, name, record, op.path, materials[record["material"]].get("source"), op.prompt)
+            change.update(file=os.path.basename(op.path), warnings=file_warnings, prompt_edited=bool(op.prompt))
+            warnings += [f"{op.scene}: {warning}" for warning in file_warnings]
+        elif op.path:
             added, file_warnings = scene_edits.add_local_file(
                 task_id, name, record, op.path, aspect, params.video_clip_duration, params.image_motion)
             change.update(file=os.path.basename(op.path), warnings=file_warnings)
@@ -876,7 +882,9 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
             step = time.monotonic()
             progress("audit")
             network["audit"] = True
-            audit = _audit(str(params.video_subject or ""), new_script)
+            # A fiction task (ai_manual clips) is audited in the fiction mode, like its preparation.
+            audit = _audit(str(params.video_subject or ""), new_script,
+                           **({"mode": "kurgu"} if params.video_source == "ai_manual" else {}))
             if batch_review.audit_blocks(audit):
                 reasons.append(batch_review.describe_audit(audit))
             timings["audit"] = round(time.monotonic() - step, 1)
@@ -1231,6 +1239,8 @@ def parser() -> argparse.ArgumentParser:
                         help='yeni aramayla değiştir (ilk kullanılabilir sonuç), ör. v1-s03="earth rise"')
     scenes.add_argument("--sahne-dosya", action="append", metavar="SAHNE=YOL",
                         help="yerel görsel ya da videoyla değiştir (NASA filtreleri yalnız uyarı)")
+    scenes.add_argument("--sahne-istemi", action="append", metavar="SAHNE=METIN",
+                        help="kurgu görevinde --sahne-dosya ile gelen klibin Veo istemi (kayda yazılır)")
     scenes.add_argument("--sahne-kaldir", action="append", metavar="SAHNE", help="sahneyi çıkar (son sahne kalmalı)")
     scenes.add_argument("--kirpma", action="append", metavar="SAHNE=X[,Y]",
                         help="görsel sahnenin kırpma konumu 0-1 (0,5 merkez), ör. v1-s02=0.3")

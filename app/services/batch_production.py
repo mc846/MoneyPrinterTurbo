@@ -30,7 +30,7 @@ import uuid
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from loguru import logger
 
@@ -61,6 +61,7 @@ PER_VIDEO_OPTIONS = {
     "video_count": "her konu için tek video üretilir",
     "video_materials": "yerel malzeme toplu üretimde desteklenmez",
     "custom_audio_file": "her video kendi seslendirmesini kullanır",
+    "ai_manual_plan": "kurgu kliplerinin planı her konu için render'da verilir",
 }
 # [app] 段落：只写入本进程的 config.app，不写回 config.toml。
 APP_OPTIONS = {
@@ -86,10 +87,14 @@ APP_OPTIONS = {
     "video_source_fallback_min_candidates": int,
     "video_codec": str,
 }
-SCRIPT_OPTIONS = {"prompt", "target_words"}
+SCRIPT_OPTIONS = {"prompt", "target_words", "content"}
+# [script] content: "gercek" (varsayılan) ya da "kurgu" ("Ya olsaydı": denetçi kurgu kipinde, sahne planı).
+SCRIPT_CONTENTS = ("gercek", "kurgu")
 QUALITY_OPTIONS = {"target_duration", "audit", "review_before_render"}
 PACKAGE_OPTIONS = {"subtitle_translations"}
-PRESET_SECTIONS = {"video", "app", "script", "quality", "package"}
+# [fiction]: kurgu kanalının sahne planı ve klipleri (app/services/fiction.py).
+FICTION_OPTIONS = {"clip_seconds": int, "tool": str, "scene_label": str, "style": str}
+PRESET_SECTIONS = {"video", "app", "script", "quality", "package", "fiction"}
 PROMPT_PLACEHOLDERS = {"kelime_min", "kelime_max", "konu"}
 
 _TURKISH_ASCII = str.maketrans({
@@ -199,6 +204,12 @@ class Preset:
     subtitle_translations: tuple[str, ...] = ()  # altyazi.<dil>.srt çevirileri
     # İki aşamalı akış: önce metin + terim + denetim, onaydan sonra yalnız onaylananların videosu.
     review_before_render: bool = False
+    content: str = "gercek"  # [script] content; "kurgu": denetçi kurgu kipinde, hazırlıkta sahne planı
+    fiction: Any = None  # [fiction] → fiction.Settings (kurgu reçetesinde)
+
+    @property
+    def is_fiction(self) -> bool:
+        return self.content == "kurgu"
 
     def script_prompt(self, subject: str, instruction: str = "") -> str:
         """Reçetedeki talimat şablonu (yer tutucular dolu) ve satırın talimatı."""
@@ -305,8 +316,9 @@ def load_preset(path: str | Path) -> Preset:
     script = dict(data.get("script", {}))
     quality = dict(data.get("quality", {}))
     package = dict(data.get("package", {}))
+    fiction_options = dict(data.get("fiction", {}))
     for section, keys, values in (("script", SCRIPT_OPTIONS, script), ("quality", QUALITY_OPTIONS, quality),
-                                  ("package", PACKAGE_OPTIONS, package)):
+                                  ("package", PACKAGE_OPTIONS, package), ("fiction", FICTION_OPTIONS, fiction_options)):
         for key in values:
             if key not in keys:
                 raise PresetError(f"[{section}] bilinmeyen anahtar: {key}{_suggest(key, keys)}; "
@@ -335,11 +347,44 @@ def load_preset(path: str | Path) -> Preset:
     if not isinstance(raw_translations, list):  # virgüllü metin yalnız CLI'da (--altyazi-cevirileri)
         raise PresetError('[package] subtitle_translations dil kodları listesi olmalı, ör. ["en"]')
     translations = parse_languages(raw_translations, "[package] subtitle_translations")
+    content = script.get("content", "gercek")
+    if content not in SCRIPT_CONTENTS:
+        raise PresetError(f"[script] content şunlardan biri olmalı: {', '.join(SCRIPT_CONTENTS)}")
+    fiction_settings = _fiction_settings(fiction_options, content, video, review_before_render)
     return Preset(
         path=str(path.resolve()), sha256=hashlib.sha256(raw).hexdigest(), video=video, app=app,
         prompt=prompt, target_words=target_words, target_duration=target_duration, audit=audit,
-        subtitle_translations=translations, review_before_render=review_before_render,
+        subtitle_translations=translations, review_before_render=review_before_render, content=content,
+        fiction=fiction_settings,
     )
+
+
+def _fiction_settings(options: dict, content: str, video: dict, review_before_render: bool):
+    """[fiction] → fiction.Settings; kurgu kaynağı (ai_manual) yalnız iki aşamalı akışla ve kurgu içeriğiyle."""
+    from app.services import fiction
+
+    for key, value in options.items():
+        expected = FICTION_OPTIONS[key]
+        if not isinstance(value, expected) or isinstance(value, bool):
+            raise PresetError(f"[fiction] {key} {expected.__name__} olmalı")
+    if video.get("video_source") != fiction.PROVIDER:
+        if options:
+            raise PresetError(f"[fiction] yalnız video_source = \"{fiction.PROVIDER}\" ile kullanılır")
+        return None
+    if content != "kurgu":
+        raise PresetError(f"video_source = \"{fiction.PROVIDER}\" yalnız [script] content = \"kurgu\" ile")
+    if not review_before_render:
+        raise PresetError(f"video_source = \"{fiction.PROVIDER}\" iki aşamalı akış ister "
+                          "([quality] review_before_render = true): klipler onaydan sonra gelir")
+    clip_seconds = options.get("clip_seconds", fiction.DEFAULT_CLIP_SECONDS)
+    if not 3 <= clip_seconds <= 15:
+        raise PresetError("[fiction] clip_seconds 3 ile 15 arasında olmalı")
+    if video.get("video_clip_duration") not in (None, clip_seconds):
+        raise PresetError("[video] video_clip_duration ile [fiction] clip_seconds aynı olmalı")
+    label = options.get("scene_label")
+    return fiction.Settings(clip_seconds=clip_seconds, tool=options.get("tool", fiction.TOOL),
+                            scene_label=({"tr": label, "en": label} if label else dict(fiction.SCENE_LABEL)),
+                            style=options.get("style", ""))
 
 
 def parse_languages(value, name: str) -> tuple[str, ...]:
@@ -514,10 +559,13 @@ def build_render_argv(preset: Preset, item: ItemState, approved: dict) -> list[s
     böylece task.generate_script / generate_terms LLM'e sormadan bunları kullanır. Metin talimatı
     (yalnız metin üretiminde kullanılır) eklenmez. "--x=değer" biçimi "-" ile başlayan değerleri de korur.
     """
-    argv = ["--video-subject", item.subject, *video_option_argv(preset.video),
-            f"--video-script={approved['script']}", f"--video-terms={', '.join(approved['terms'])}"]
+    argv = ["--video-subject", item.subject, *video_option_argv(preset.video), f"--video-script={approved['script']}"]
+    if approved.get("terms"):
+        argv.append(f"--video-terms={', '.join(approved['terms'])}")
     if approved.get("anchors"):
         argv.append(f"--video-anchors={', '.join(approved['anchors'])}")
+    if approved.get("ai_manual_plan"):  # kurgu: klipler ve istemler (fiction.write_render_plan)
+        argv.append(f"--ai-manual-plan={approved['ai_manual_plan']}")
     if item.voice:
         argv.extend(["--voice-name", item.voice])
     return argv
@@ -561,8 +609,11 @@ def run_text_task(argv: list[str], task_id: str) -> dict:
     from app.services import task as tm
 
     result = tm.start(task_id=task_id, params=params, stop_at="terms", allow_server_file_input=True)
+    from app.services import fiction
+
+    needs_terms = params.video_source != fiction.PROVIDER  # kurgu klipleri aranmaz: terim yok
     if not result or result.get("state") == const.TASK_STATE_FAILED or not result.get("script") \
-            or not result.get("terms"):
+            or (needs_terms and not result.get("terms")):
         stage = (result or {}).get("failed_stage", "")
         error = (result or {}).get("error") or "görev metin ya da arama terimi üretmedi"
         raise TaskFailed(str(error), stage)
@@ -793,6 +844,11 @@ def _prepare_item(item: ItemState, state: BatchState, preset: Preset, batch_dir:
         **preparation, "subject": item.subject, "instruction": item.instruction, "task_id": item.prepare_task_id,
         "seconds": seconds, "prepared_at": datetime.now().isoformat(timespec="seconds"),
     })
+    if preparation.get("scene_plan"):  # kurgu: istem paketi konu klasörüne, gelen/ klasörü hazır
+        from app.services import fiction
+
+        fiction.write_package(batch_dir / item.folder, preparation["scene_plan"])
+        fiction.inbox(batch_dir / item.folder)
     item.prepared, item.status = True, AWAITING_REVIEW
     state.save(batch_dir)
     counts = (preparation.get("audit") or {}).get("sayim") or {}
@@ -808,18 +864,21 @@ def _review_finished(state: BatchState) -> bool:
                for item in state.items)
 
 
-def _render_snapshot(state: BatchState, batch_dir: Path) -> dict[int, dict]:
+def _render_snapshot(state: BatchState, batch_dir: Path, preset: Preset | None = None) -> dict[int, dict]:
     """
     Render süreci başlarken onay kararlarını review.json'dan bir kez okur: geçerli onaylı ve henüz videosu
-    olmayan konular bu turda üretilir; sonradan onaylananlar sonraki "render" çağrısını bekler.
+    olmayan konular bu turda üretilir; sonradan onaylananlar sonraki "render" çağrısını bekler. Kurgu konusu
+    (sahne planı olan) ancak bütün sahnelerin klibi gelmişse alınır; render planı (dosyalar, SHA-256'ları,
+    istemler) yazılıp göreve verilir.
     """
-    from app.services import batch_review
+    from app.services import batch_review, fiction
 
     snapshot = {}
     for item in state.items:
         if item.status == DONE or not item.prepared:
             continue
-        review = batch_review.load_review(batch_dir / item.folder)
+        folder = batch_dir / item.folder
+        review = batch_review.load_review(folder)
         if review and review.get("skipped"):
             item.status = SKIPPED
             continue
@@ -827,8 +886,16 @@ def _render_snapshot(state: BatchState, batch_dir: Path) -> dict[int, dict]:
         if approved is None:
             item.status = AWAITING_REVIEW
             continue
-        snapshot[item.index] = approved
         item.status = APPROVED
+        plan = approved.get("scene_plan")
+        if plan:
+            try:
+                label = preset.fiction.scene_label if preset is not None and preset.fiction else None
+                approved["ai_manual_plan"] = str(fiction.write_render_plan(folder, plan, item.subject, label))
+            except fiction.FictionError as exc:
+                logger.info(f"toplu üretim [{item.index}] klip bekleniyor: {item.subject} ({exc})")
+                continue
+        snapshot[item.index] = approved
     return snapshot
 
 
@@ -856,7 +923,7 @@ def _run_review_folder(state: BatchState, batch_dir: Path, preset: Preset, phase
     started = time.monotonic()
     snapshot: dict[int, dict] = {}
     if phase == "render":
-        snapshot = _render_snapshot(state, batch_dir)
+        snapshot = _render_snapshot(state, batch_dir, preset)
         state.save(batch_dir)
         logger.info(f"toplu üretim: {len(state.items)} konu, render: {len(snapshot)} onaylı konu, klasör {batch_dir}")
     else:

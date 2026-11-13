@@ -112,7 +112,10 @@ _SUPPORTED_VIDEO_SOURCES = frozenset({
     "pexels", "pixabay", "coverr", "nasa", "local", "wavespeed",
     "volcengine_seedance", "ofox", "metaso_minimax", "muapi",
     "loomloom", "openai_image", "codex_image", "infistar", "jalapeno",
+    "ai_manual",  # kurgu kanalı: kullanıcının Flow / Veo klipleri (fiction.py)
 })
+# Arama terimi üretilmeyen kaynaklar: klipler kullanıcıdan gelir.
+_NO_TERM_SOURCES = frozenset({"local", "ai_manual"})
 
 
 def _video_source_fallback(params) -> list[str]:
@@ -788,6 +791,15 @@ def get_video_materials(
     jalapeno_video_endpoint: volcengine_seedance.SeedanceEndpoint | None = None,
     codex_image_context: codex_image.CodexImageContext | None = None,
 ):
+    if params.video_source == "ai_manual":
+        from app.services import fiction
+
+        logger.info("\n\n## fiction clips (ai_manual)")
+        try:
+            return fiction.task_clips(task_id, params.ai_manual_plan, audio_duration)
+        except fiction.FictionError as exc:
+            _mark_task_failed(task_id, "materials", str(exc))
+            return None
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
         # preprocess_video replaces an image's path with the clip rendered from it.
@@ -1165,7 +1177,13 @@ def generate_final_videos(
             _load_material_sources(task_id), params.video_language
         )
     # Matching preserves keyword order; batch allocation varies each keyword's candidates.
-    if params.match_materials_to_script:
+    # Fiction clips (ai_manual) are the scenes in order, each for an equal share of the narration.
+    clip_duration = params.video_clip_duration
+    if params.video_source == "ai_manual":
+        from app.services import fiction
+
+        clip_duration = fiction.scene_seconds(audio_duration, len(downloaded_videos))
+    if params.match_materials_to_script or params.video_source == "ai_manual":
         video_concat_mode = VideoConcatMode.sequential
     elif params.video_count == 1:
         video_concat_mode = params.video_concat_mode
@@ -1215,7 +1233,7 @@ def generate_final_videos(
             video_fit_mode=params.video_fit_mode,
             video_concat_mode=video_concat_mode,
             video_transition_mode=video_transition_mode,
-            max_clip_duration=params.video_clip_duration,
+            max_clip_duration=clip_duration,
             threads=params.n_threads,
             clip_speed=params.video_clip_speed,
             progress_callback=_stage_progress_reporter(
@@ -1730,6 +1748,13 @@ def _run_pipeline(
         return _mark_task_failed(
             task_id, "preflight", f"unsupported video source: {params.video_source!r}"
         )
+    if stop_at in {"materials", "video"} and params.video_source == "ai_manual" \
+            and not str(getattr(params, "ai_manual_plan", "") or "").strip():
+        return _mark_task_failed(
+            task_id, "preflight",
+            "ai_manual needs the clips' render plan (--ai-manual-plan; written by the batch review once every "
+            "scene's clip has arrived)",
+        )
     fallback_value = getattr(params, "video_source_fallback", "") or ""
     if stop_at in {"materials", "video"} and source_chain.is_set(fallback_value):
         try:
@@ -1909,7 +1934,7 @@ def _run_pipeline(
     generation_progress.stage("terms")
     # 2. Generate terms
     video_terms = ""
-    if stop_at in {"terms", "materials", "video"} and params.video_source != "local":
+    if stop_at in {"terms", "materials", "video"} and params.video_source not in _NO_TERM_SOURCES:
         video_terms = generate_terms(task_id, params, video_script)
         if not video_terms:
             return _mark_task_failed(

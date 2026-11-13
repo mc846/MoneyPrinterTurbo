@@ -36,6 +36,19 @@ SHEET_FRAMES = 5
 PIXABAY_CREDIT = "Ek görüntüler: Pixabay (pixabay.com)"
 SVS_CREDIT = "Veri görselleştirmeleri: NASA's Scientific Visualization Studio (svs.gsfc.nasa.gov)"
 SVS_NOTE = "Not: bazı sahneler gerçek görev verisinden üretilmiş veri görselleştirmesidir."
+# Kurgu kanalı (ai_manual): paylaşım metninin atıfı ve açıklama notu; paylasim.md'de yükleme hatırlatması.
+AI_CREDIT = "Görüntüler yapay zekâ ile üretilmiştir (Google Veo)."
+AI_NOTE = "Not: Bu bir \"Ya olsaydı\" canlandırmasıdır; sahneler gerçek görüntü değildir."
+AI_UPLOAD_REMINDER = [
+    "## Yükleme notu: yapay zekâ etiketi",
+    "",
+    "Sahneler yapay zekâ ile üretildi; yüklerken platformun etiketini açın:",
+    "",
+    "- **YouTube:** Studio > Ayrıntılar > \"Değiştirilmiş veya yapay içerik\" → Evet.",
+    "- **TikTok:** Gönderi ayarları > \"Yapay zekâ ile üretilmiş içerik\" etiketi.",
+    "- **Instagram:** Paylaşmadan önce Gelişmiş ayarlar > \"Yapay zekâ bilgisi\" etiketi.",
+    "",
+]
 # Paylaşım metninde stok kaynakların adı ve sitesi (credit_lines).
 STOCK_CREDITS = {"pixabay": "Pixabay (pixabay.com)", "coverr": "Coverr (coverr.co)",
                  "pexels": "Pexels (pexels.com)"}
@@ -81,6 +94,21 @@ script claim by claim.
 ## Script
 {script}
 """.strip()
+# Denetçi isteminin sürümü (kalite.json → dogruluk.istem_surumu). 2: kurgu kipi eklendi (13.11); kurgu
+# olmayan reçetelerin istemi 1. sürümle birebir aynı.
+AUDIT_PROMPT_VERSION = 2
+# Kurgu ("Ya olsaydı") metni: gerçek arka plan her zamanki gibi; açıkça çerçevelenmiş kurgu iddia sayılmaz,
+# kurguyu gerçekmiş gibi sunan cümle Y.
+AUDIT_FICTION_RULES = """
+5. This script is a "what if" FICTION piece: it mixes real background with an imagined scenario.
+   - Rate the real background claims (facts about today's world, science, history) as usual.
+   - A sentence that is clearly framed as imagination ("Hayal edelim", "Ya … olsaydı?", "olsaydı",
+     "olabilirdi", "-ecekti", "belki", a question) is not a factual claim: do not list it, unless it
+     contains a real fact (rate that fact) or a scientifically impossible detail presented as plausible ("X").
+   - A sentence that presents the imagined scenario as real, current or already done (e.g. "yapılıyor",
+     "keşfedildi", "başladı", "kuruldu", "çıkarılıyor" without fiction framing) is "Y"; the reason says
+     that the fiction is presented as fact.
+""".rstrip()
 
 SOCIAL_PROMPT = """
 # Görev: kısa video paylaşım metinleri
@@ -175,9 +203,17 @@ def parse_audit(response: str) -> list[dict]:
     return parsed
 
 
-def audit_script(subject: str, script: str, ask=_ask) -> dict:
-    """Metni yazan istemden bağımsız, şüpheci bir denetçiyle iddia iddia D/B/Y/X değerlendirmesi."""
+def audit_prompt(subject: str, script: str, mode: str = "") -> str:
+    """Denetçi istemi; ``mode="kurgu"`` iken kurgu kuralı (5) eklenir, diğer kiplerde 1. sürümle aynı metin."""
     prompt = AUDIT_PROMPT.format(subject=subject, script=script)
+    if mode == "kurgu":
+        prompt = prompt.replace("\n\n## Topic\n", f"\n{AUDIT_FICTION_RULES}\n\n## Topic\n", 1)
+    return prompt
+
+
+def audit_script(subject: str, script: str, ask=_ask, mode: str = "") -> dict:
+    """Metni yazan istemden bağımsız, şüpheci bir denetçiyle iddia iddia D/B/Y/X değerlendirmesi."""
+    prompt = audit_prompt(subject, script, mode)
     last_error = ""
     for _ in range(2):
         try:
@@ -188,7 +224,8 @@ def audit_script(subject: str, script: str, ask=_ask) -> dict:
             continue
         counts = {rating: sum(c["rating"] == rating for c in claims) for rating in RATINGS}
         return {"durum": "tamam", "iddialar": claims, "sayim": counts,
-                "isaretli": [c for c in claims if c["rating"] in FLAGGED_RATINGS]}
+                "isaretli": [c for c in claims if c["rating"] in FLAGGED_RATINGS],
+                "istem_surumu": AUDIT_PROMPT_VERSION, **({"kip": mode} if mode == "kurgu" else {})}
     return {"durum": "yapılamadı", "hata": last_error, "iddialar": [], "sayim": {}, "isaretli": []}
 
 
@@ -209,6 +246,9 @@ def credit_lines(material_sources) -> list[str]:
         # NASA SVS: credit the Studio and say that some scenes are data visualizations, not footage.
         lines.append(SVS_CREDIT)
         lines.append(SVS_NOTE)
+    if "ai_manual" in providers:
+        lines.append(AI_CREDIT)
+        lines.append(AI_NOTE)
     others = []
     for provider in ("pixabay", "coverr", "pexels"):
         if provider not in providers:
@@ -272,6 +312,8 @@ def social_texts(subject: str, script: str, material_sources, ask=_ask) -> dict:
                        "hashtags": hashtags}
     texts["krediler"] = credits
     texts["yedek_metin"] = fallback
+    texts["yapay_zeka"] = any(str((record or {}).get("provider") or "").lower() == "ai_manual"
+                              for record in material_sources or [])
     return texts
 
 
@@ -296,6 +338,8 @@ def social_markdown(subject: str, texts: dict, subtitle_files: list[str] | None 
     ]
     if texts.get("yedek_metin"):
         lines += ["> Not: LLM yanıtı kullanılamadı; metin konudan ve ilk cümleden üretildi, elle düzenleyin.", ""]
+    if texts.get("yapay_zeka"):
+        lines += AI_UPLOAD_REMINDER
     return "\n".join(lines)
 
 
@@ -479,7 +523,8 @@ def credit_problems(material_sources) -> list[str]:
     ]
 
 
-MATERIAL_LABELS = {"pixabay": "Pixabay", "coverr": "Coverr", "pexels": "Pexels", "nasa_svs": "NASA SVS"}
+MATERIAL_LABELS = {"pixabay": "Pixabay", "coverr": "Coverr", "pexels": "Pexels", "nasa_svs": "NASA SVS",
+                   "ai_manual": "Yapay zekâ (Flow / Veo)"}
 
 
 def material_summary(material_sources) -> dict:
@@ -655,7 +700,8 @@ def build_package(item, result: dict, preset, folder: Path, log_lines: list[str]
     elif review is not None:
         audit = review.get("audit") or {"durum": "kapalı", "iddialar": [], "sayim": {}, "isaretli": []}
     elif preset.audit:
-        audit = audit_script(item.subject, script, ask=ask)
+        audit = audit_script(item.subject, script, ask=ask,
+                             **({"mode": "kurgu"} if getattr(preset, "is_fiction", False) else {}))
     else:
         audit = {"durum": "kapalı", "iddialar": [], "sayim": {}, "isaretli": []}
     # The glyph check reads <folder>/subtitle.srt: a revision's own folder has one too.

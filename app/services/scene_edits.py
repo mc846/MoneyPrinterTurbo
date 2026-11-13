@@ -59,6 +59,7 @@ class SceneOp:
     search: str = ""
     path: str = ""
     position: tuple[float, float] | None = None
+    prompt: str = ""  # fiction (ai_manual) tasks: the Veo prompt of the new clip
 
     def to_dict(self) -> dict:
         return {key: value for key, value in asdict(self).items() if value not in ("", None)}
@@ -68,7 +69,7 @@ class SceneOp:
         position = data.get("position")
         return cls(op=data["op"], scene=data["scene"], candidate=data.get("candidate", ""),
                    search=data.get("search", ""), path=data.get("path", ""),
-                   position=tuple(position) if position else None)
+                   position=tuple(position) if position else None, prompt=data.get("prompt", ""))
 
     def describe(self) -> str:
         if self.op == REMOVE:
@@ -112,9 +113,12 @@ def from_arguments(args) -> list[SceneOp]:
     for value in args.sahne_ara or []:
         scene, words = _split(value, "--sahne-ara")
         ops.append(SceneOp(REPLACE, scene, search=words))
+    prompts = dict(_split(value, "--sahne-istemi") for value in getattr(args, "sahne_istemi", None) or [])
     for value in args.sahne_dosya or []:
         scene, path = _split(value, "--sahne-dosya")
-        ops.append(SceneOp(REPLACE, scene, path=path))
+        ops.append(SceneOp(REPLACE, scene, path=path, prompt=prompts.pop(scene, "")))
+    if prompts:
+        raise SceneEditError(f"--sahne-istemi needs a --sahne-dosya for the same scene: {', '.join(prompts)}")
     for value in args.sahne_kaldir or []:
         ops.append(SceneOp(REMOVE, str(value).strip()))
     for value in args.kirpma or []:
@@ -137,6 +141,8 @@ def to_arguments(ops: list[SceneOp]) -> list[str]:
             arguments.append(f"--sahne-ara={op.scene}={op.search}")
         else:
             arguments.append(f"--sahne-dosya={op.scene}={op.path}")
+            if op.prompt:
+                arguments.append(f"--sahne-istemi={op.scene}={op.prompt}")
     return arguments
 
 
@@ -359,6 +365,52 @@ def local_file_warnings(path: str, aspect: VideoAspect, clip_duration: float, mo
     if faces:
         warnings.append(f"face(s) in the image: {faces}")
     return prepared, warnings
+
+
+def add_fiction_clip(task_id: str, revision: str, scene: dict, path: str, previous: dict | None,
+                     prompt: str = "") -> tuple[dict, list[str]]:
+    """
+    A new clip for a fiction (ai_manual) scene: validated like the batch intake (readable video, at least the
+    scene's duration, short side ≥ 720; another aspect and sound are warnings), copied into the task, recorded
+    as ai_manual with the tool, the prompt (the edited one, else the scene's), the SHA-256 and the label.
+    """
+    from datetime import datetime
+
+    from app.services import fiction
+    from app.utils import utils
+
+    source = Path(path)
+    if source.suffix.lower() not in fiction.VIDEO_SUFFIXES:
+        raise SceneEditError(f"{scene['id']}: a fiction scene takes a video clip, not {source.name}")
+    info = fiction.probe(source)
+    status, reason, warnings = fiction.validate_clip(info, float(scene.get("duration") or 0))
+    if status != fiction.ARRIVED:
+        raise SceneEditError(f"{scene['id']}: {reason}")
+    folder = Path(utils.task_dir(task_id)) / "ai_clips"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{scene['id']}-{revision}{source.suffix.lower()}"
+    shutil.copy2(source, target)
+    previous = previous or {}
+    asset = str(previous.get("asset_id") or scene["id"])
+    info_record = {
+        "provider": fiction.PROVIDER, "asset_id": asset, "search_term": scene.get("search_term") or "",
+        "credit": previous.get("tool") or fiction.TOOL, "tool": previous.get("tool") or fiction.TOOL,
+        "prompt": (prompt or previous.get("prompt") or "").strip(), "style_version": previous.get("style_version") or "",
+        "sha256": fiction._sha256(target), "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+        "scene_label": previous.get("scene_label") or fiction.SCENE_LABEL, "ai_generated": True,
+    }
+    from app.services import material
+
+    item = MaterialInfo(provider=fiction.PROVIDER, url=str(target), duration=max(1, int(info["duration"])),
+                        source_info=info_record)
+    # The whitelisted record (outside a task run the materials recorder is inactive: nothing else happens).
+    record = material._material_source_record(item, str(target))
+    added = task_materials.add_material(task_id, item, {"video": str(target)}, record,
+                                        search_term=scene.get("search_term") or "", term_index=scene.get("term_index"),
+                                        added_by=revision)
+    for warning in warnings:
+        logger.warning(f"revizyon {revision}: {scene['id']} kurgu klibi: {warning}")
+    return added, warnings
 
 
 def add_local_file(task_id: str, revision: str, scene: dict, path: str, aspect: VideoAspect,

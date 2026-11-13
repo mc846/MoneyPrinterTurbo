@@ -63,7 +63,9 @@ READ_DELAY_SECONDS = 0.05
 # kelime sayısıyla en büyük sapma 5,2 sn). Video süresi seslendirmeyle aynı (±0,03 sn). Hız ayarı süreyi böler.
 EDGE_TR_SECONDS_PER_CHAR = 0.067
 EDGE_TR_BASE_SECONDS = 7.7
-COMMANDS = ("durum", "render", "onayla", "yeniden-uret", "yeniden-denetle", "atla", "temizleri-onayla")
+COMMANDS = ("durum", "render", "onayla", "yeniden-uret", "yeniden-denetle", "atla", "temizleri-onayla", "klipler")
+# Görünen durum (state.json'da yok): onaylı kurgu konusu, bütün sahnelerin klibi gelene kadar.
+AWAITING_CLIPS = "awaiting_clips"
 # Komut adı → işlem anahtarı (review.json last_action, işlem kilidi ve WebUI çevirileri: batch.review.action.<anahtar>)
 ACTION_KEYS = {"onayla": "approve", "yeniden-uret": "regenerate", "yeniden-denetle": "reaudit", "atla": "skip",
                "temizleri-onayla": "approve_clean"}
@@ -194,6 +196,9 @@ def initial_review(preparation: dict) -> dict:
         "history": [],  # yeniden üretimler: talimat ve önceki metin, terimler, denetim
         "last_action": {},
         "updated_at": "",
+        # Kurgu: sahne planı (fiction.build_plan); planın "script_sha256"ı ait olduğu metin. Elle düzenlenen
+        # istemler ("prompt_edited") ve stil kitabı metin değişince yeniden üretilen planda korunur.
+        "scene_plan": preparation.get("scene_plan"),
     }
 
 
@@ -223,6 +228,14 @@ def terms_current(review: dict) -> bool:
     return bool(review.get("terms_edited")) or review.get("terms_sha256") == script_sha256(review.get("script", ""))
 
 
+def plan_current(review: dict) -> bool:
+    """Kurgu konusunun sahne planı güncel metne ait mi (kurgu olmayan konuda her zaman True)."""
+    from app.services import fiction
+
+    plan = review.get("scene_plan")
+    return plan is None or fiction.plan_current(plan, review.get("script", ""))
+
+
 def audit_blocks(audit: dict | None) -> bool:
     """Onayı "yine de onayla"ya bağlayan denetim: Y ya da X var, ya da denetim yapılamadı. Kapalıysa engellemez."""
     audit = audit or {}
@@ -244,8 +257,9 @@ def is_approved(review: dict | None) -> bool:
 
 
 def is_clean(review: dict | None) -> bool:
-    """Temizleri onayla'nın ölçütü: güncel denetim, güncel (ya da elle düzenlenmiş) terimler, Y/X yok."""
-    return bool(review and audit_current(review) and terms_current(review) and not audit_blocks(review.get("audit")))
+    """Temizleri onayla'nın ölçütü: güncel denetim, güncel (ya da elle düzenlenmiş) terimler ve sahne planı, Y/X yok."""
+    return bool(review and audit_current(review) and terms_current(review) and plan_current(review)
+                and not audit_blocks(review.get("audit")))
 
 
 def approved_copy(review: dict | None) -> dict | None:
@@ -262,6 +276,7 @@ def approved_copy(review: dict | None) -> dict | None:
         "script_edited": bool(review.get("script_edited")),
         "terms_edited": bool(review.get("terms_edited")),
         "regenerations": len(review.get("history") or []),
+        **({"scene_plan": review["scene_plan"]} if review.get("scene_plan") else {}),
     }
 
 
@@ -288,7 +303,7 @@ def effective_status(item: bp.ItemState, review: dict | None, running: bool = Fa
     return bp.PENDING
 
 
-def _apply_edits(review: dict, script=None, terms=None, anchors=None) -> None:
+def _apply_edits(review: dict, script=None, terms=None, anchors=None, plan_edits: dict | None = None) -> None:
     if script is not None:
         script = normalize_script(script)
         if not script:
@@ -300,15 +315,42 @@ def _apply_edits(review: dict, script=None, terms=None, anchors=None) -> None:
             value = parse_list(value)
             if value != review.get(key):
                 review[key], review["terms_edited"] = value, True
-    if not review.get("terms"):
+    if plan_edits and review.get("scene_plan"):
+        from app.services import fiction
+
+        try:
+            review["scene_plan"] = fiction.apply_edits(review["scene_plan"], plan_edits.get("prompts"),
+                                                       plan_edits.get("style_book"))
+        except ValueError as exc:
+            raise ReviewError("plan_edit", str(exc)) from exc
+    if not review.get("terms") and not review.get("scene_plan"):  # kurgu klipleri aranmaz
         raise ReviewError("empty_terms", "en az bir arama terimi gerekli")
 
 
 def needs_llm(review: dict, script=None, terms=None, anchors=None) -> bool:
-    """Onay bu düzenlemelerle LLM gerektirir mi (yeniden denetim ya da terim üretimi)? WebUI buna göre seçer."""
+    """Onay bu düzenlemelerle LLM gerektirir mi (yeniden denetim, terim ya da sahne planı)? WebUI buna göre seçer."""
     preview = copy.deepcopy(review)
     _apply_edits(preview, script, terms, anchors)
-    return not audit_current(preview) or not terms_current(preview)
+    return not audit_current(preview) or not terms_current(preview) or not plan_current(preview)
+
+
+def save_plan_edits(folder: Path, plan_edits: dict) -> dict:
+    """Sahne planındaki istem ve stil kitabı düzenlemeleri (LLM yok); istem paketi yeniden yazılır."""
+    review = _editable(Path(folder))
+    if not review.get("scene_plan"):
+        raise ReviewError("no_plan", "bu konunun sahne planı yok")
+    _apply_edits(review, plan_edits=plan_edits)
+    _record(review, "plan_edit")
+    save_review(Path(folder), review)
+    _write_package(Path(folder), review)
+    return review
+
+
+def _write_package(folder: Path, review: dict) -> None:
+    from app.services import fiction
+
+    if review.get("scene_plan"):
+        fiction.write_package(folder, review["scene_plan"])
 
 
 def _subject(folder: Path) -> str:
@@ -337,15 +379,22 @@ def _refresh(review: dict, services, subject: str, folder: Path | None = None) -
     """
     sha = script_sha256(review["script"])
     stale_audit, stale_terms = review.get("audit_sha256") != sha, not terms_current(review)
-    if (stale_audit or stale_terms) and services is None:
+    stale_plan = not plan_current(review)
+    if review.get("scene_plan"):
+        stale_terms = False  # kurgu: terim yok, sahne planı var
+    if (stale_audit or stale_terms or stale_plan) and services is None:
         raise ReviewError("needs_llm", "metin değişti: yeniden denetim ve terim üretimi için onay komutu gerekli")
     if stale_audit:
         review["audit"], review["audit_sha256"] = services.audit(subject, review["script"]), sha
-        if stale_terms and folder is not None:
+        if (stale_terms or stale_plan) and folder is not None:
             save_review(folder, review)
     if stale_terms:
         review["terms"], review["anchors"] = services.terms(subject, review["script"])
         review["terms_sha256"] = sha
+    if stale_plan:
+        review["scene_plan"] = services.scene_plan(subject, review["script"], review["scene_plan"])
+        if folder is not None:
+            _write_package(folder, review)
 
 
 @dataclass
@@ -355,11 +404,14 @@ class Outcome:
     message: str = ""
 
 
-def approve(folder: Path, services=None, *, script=None, terms=None, anchors=None, force: bool = False) -> Outcome:
+def approve(folder: Path, services=None, *, script=None, terms=None, anchors=None, force: bool = False,
+            plan_edits: dict | None = None) -> Outcome:
     folder = Path(folder)
     review = _editable(folder)
-    _apply_edits(review, script, terms, anchors)
+    _apply_edits(review, script, terms, anchors, plan_edits)
     _refresh(review, services, _subject(folder), folder)
+    if plan_edits:
+        _write_package(folder, review)
     blocked = audit_blocks(review.get("audit"))
     if blocked and not force:
         message = describe_audit(review.get("audit"))
@@ -380,10 +432,14 @@ def reaudit(folder: Path, services, *, script=None, terms=None, anchors=None) ->
     subject = _subject(folder)
     sha = script_sha256(review["script"])
     review["audit"], review["audit_sha256"] = services.audit(subject, review["script"]), sha
-    if not terms_current(review):
+    if not terms_current(review) and not review.get("scene_plan"):
         save_review(folder, review)  # terim üretimi başarısız olursa denetim kaybolmasın
         review["terms"], review["anchors"] = services.terms(subject, review["script"])
         review["terms_sha256"] = sha
+    if not plan_current(review):
+        save_review(folder, review)  # plan üretimi başarısız olursa denetim kaybolmasın
+        review["scene_plan"] = services.scene_plan(subject, review["script"], review["scene_plan"])
+        _write_package(folder, review)
     _record(review, "reaudit", message=describe_audit(review["audit"]))
     save_review(folder, review)
     return Outcome("audited", review)
@@ -401,10 +457,14 @@ def regenerate(folder: Path, services, *, instruction: str = "") -> Outcome:
         raise ReviewError("empty_script", "yeniden üretim boş metin döndürdü")
     sha = script_sha256(script)
     audit = services.audit(subject, script)
+    plan = services.scene_plan(subject, script, review["scene_plan"]) if review.get("scene_plan") else None
     review["history"] = [*review.get("history", []), {"at": _now(), "instruction": instruction.strip(), **previous}]
     review.update(script=script, terms=parse_list(generated.get("terms") or []),
                   anchors=parse_list(generated.get("anchors") or []), script_edited=False, terms_edited=False,
                   terms_sha256=sha, audit=audit, audit_sha256=sha, approved=False, approved_sha256="")
+    if plan is not None:
+        review["scene_plan"] = plan
+        _write_package(folder, review)
     _record(review, "regenerate", message=describe_audit(audit))
     save_review(folder, review)
     return Outcome("regenerated", review)
@@ -500,7 +560,7 @@ class Overview:
 
     @property
     def approved_waiting(self) -> int:
-        """Onaylı ama henüz videosu üretilmemiş konular."""
+        """Onaylı, render'a hazır ama henüz videosu üretilmemiş konular (kurguda bütün klipler gelmiş)."""
         return self.count(bp.APPROVED)
 
 
@@ -511,11 +571,17 @@ def overview(batch_dir: Path, running: bool = False) -> Overview:
         preset = bp.load_preset(state.preset)
     except (bp.PresetError, OSError):
         preset = None
+    from app.services import fiction
+
     entries = []
     for item in state.items:
         folder = batch_dir / item.folder
         review = load_review(folder) if item.prepared else None
-        entries.append(ItemReview(item, folder, effective_status(item, review, running), review,
+        status = effective_status(item, review, running)
+        if status == bp.APPROVED and review and review.get("scene_plan") \
+                and not fiction.clips_complete(folder, review["scene_plan"]):
+            status = AWAITING_CLIPS
+        entries.append(ItemReview(item, folder, status, review,
                                   load_preparation(folder) if item.prepared else None, busy(folder)))
     return Overview(batch_dir, state, preset, entries, running)
 
@@ -641,22 +707,44 @@ class PipelineServices:
         self._prepare()
         from app.services import batch_package
 
-        return batch_package.audit_script(subject, script)
+        # Kurgu dışındaki reçetelerde çağrı ve istem eskisi gibi (mode yalnız kurguda).
+        return batch_package.audit_script(subject, script, **({"mode": "kurgu"} if self.preset.is_fiction else {}))
+
+    def scene_plan(self, subject: str, script: str, previous: dict | None = None) -> dict:
+        """Kurgu: metnin sahne planı; eski planın elle düzenlenmiş istemleri ve stil kitabı korunur."""
+        self._prepare()
+        from app.services import fiction
+
+        seconds = estimate(script, self.preset.video.get("voice_rate", 1.0))["tahmini_sn"]
+        style = previous.get("style_book") if previous and previous.get("style_book_edited") else None
+        return fiction.build_plan(subject, script, seconds, self.preset.fiction, style_book=style, previous=previous)
 
 
 def prepare_item(preset: bp.Preset, item: bp.ItemState, task_id: str) -> dict:
-    """Hazırlık aşamasının varsayılan işi (arka plan süreci): metin, terimler, çapalar, denetim ve tahmin."""
+    """Hazırlık aşamasının varsayılan işi (arka plan süreci): metin, terimler, çapalar, denetim ve tahmin;
+    kurguda ayrıca sahne planı ve konu klasörüne istem paketi."""
     services = PipelineServices(preset, item)
     generated = services.generate(item.subject, task_id=task_id)
     script = normalize_script(generated["script"])
     logger.info(f"toplu üretim [{item.index}] denetleniyor")  # batch_runner bu satırı aşama olarak okur
     audit = services.audit(item.subject, script)
-    return {
+    preparation = {
         "script": script, "script_sha256": script_sha256(script), "terms": parse_list(generated["terms"]),
         "anchors": parse_list(generated.get("anchors") or []), "audit": audit,
         "prompt": preset.script_prompt(item.subject, item.instruction),
         **estimate(script, preset.video.get("voice_rate", 1.0)),
     }
+    if preset.fiction is not None:
+        from app.services import fiction
+
+        from app.utils import utils
+
+        logger.info(f"toplu üretim [{item.index}] sahne planı hazırlanıyor")
+        preparation["scene_plan"] = services.scene_plan(item.subject, script)
+        preparation["terms"] = []
+        # Görev klasörüne de (konu klasörüne _prepare_item yazar).
+        fiction.write_package(Path(utils.task_dir(task_id)), preparation["scene_plan"], {})
+    return preparation
 
 
 # ---------------------------------------------------------------- komutlar
@@ -674,7 +762,7 @@ def resolve_batch_dir(value: str) -> Path:
 STATUS_LABELS = {
     bp.PENDING: "bekliyor", bp.PREPARING: "hazırlanıyor", bp.AWAITING_REVIEW: "onay bekliyor",
     bp.APPROVED: "onaylandı", bp.RENDERING: "render ediliyor", bp.RUNNING: "çalışıyor", bp.DONE: "bitti",
-    "review": "kontrol gerekli", bp.FAILED: "başarısız", bp.SKIPPED: "atlandı",
+    "review": "kontrol gerekli", bp.FAILED: "başarısız", bp.SKIPPED: "atlandı", AWAITING_CLIPS: "klip bekleniyor",
 }
 
 
@@ -690,6 +778,12 @@ def status_lines(view: Overview) -> list[str]:
             stale = "" if audit_current(entry.review) else " (eski denetim)"
             line += (f"; {info['kelime']} kelime" + (f" (hedef {target[0]}-{target[1]})" if target else "")
                      + f", ~{info['tahmini_sn']} sn; denetim {describe_audit(entry.review.get('audit'))}{stale}")
+            plan = entry.review.get("scene_plan")
+            if plan:
+                from app.services import fiction
+
+                arrived = sum(s["status"] == fiction.ARRIVED for s in fiction.scene_states(entry.folder, plan))
+                line += f"; {plan['scene_count']} sahne, klip {arrived}/{plan['scene_count']}"
             for claim in flagged_claims(entry.review.get("audit")):
                 line += f"\n      {claim['rating']}: {claim['claim']} — {claim.get('reason', '')}"
         if entry.item.status == bp.FAILED and entry.item.error:
@@ -759,6 +853,12 @@ def cli_main(argv: list[str], prog: str = "batch.py") -> int:
     command.add_argument("--geri-al", action="store_true", help="atlamayı geri al")
     command = commands.add_parser("temizleri-onayla", help="güncel denetimi temiz (Y/X yok) bütün bekleyenleri onayla")
     command.add_argument("folder", metavar="klasör")
+    command = commands.add_parser("klipler", help="kurgu konusunun klip durumu; gelen/ klasörünü kontrol et, eşleştir")
+    command.add_argument("folder", metavar="klasör")
+    command.add_argument("indexes", metavar="sıra", type=int, nargs=1)
+    command.add_argument("--kontrol", action="store_true", help="gelen/ klasöründeki yeni dosyaları sahnelere bağla")
+    command.add_argument("--ata", action="append", default=[], metavar="DOSYA=SAHNE",
+                         help="gelen/ klasöründeki numarasız bir dosyayı bir sahneye bağla (tekrarlanabilir)")
     args = parser.parse_args(argv)
 
     import app.config  # noqa: F401 -- yapılandırma ve günlük ayarları
@@ -786,6 +886,8 @@ def cli_main(argv: list[str], prog: str = "batch.py") -> int:
             approved = approve_clean(batch_dir, state)
             print(f"onaylandı: {', '.join(map(str, approved)) or 'yok'}")
             return 0
+        if args.command == "klipler":
+            return _clips_command(args, batch_dir, state)
         return _item_command(args, batch_dir, state)
     except (bp.BatchInputError, bp.PresetError) as exc:
         logger.error(str(exc))
@@ -793,6 +895,55 @@ def cli_main(argv: list[str], prog: str = "batch.py") -> int:
     except BatchBusy as exc:
         logger.error(str(exc))
         return 3
+
+
+def clip_fit_mode(state: bp.BatchState) -> str:
+    """Kliplerin sığdırma kipi (uyarı metni için): reçetenin video_fit_mode'u, yoksa blur."""
+    try:
+        return str(bp.load_preset(state.preset).video.get("video_fit_mode") or "blur")
+    except (bp.PresetError, OSError):
+        return "blur"
+
+
+def _clips_command(args, batch_dir: Path, state: bp.BatchState) -> int:
+    from app.services import fiction
+
+    try:
+        item = _item(state, args.indexes[0])
+    except ReviewError as exc:
+        logger.error(str(exc))
+        return 2
+    folder = batch_dir / item.folder
+    review = load_review(folder) if item.prepared else None
+    plan = (review or {}).get("scene_plan")
+    if not plan:
+        logger.error(f"{item.index}. {item.subject}: kurgu konusu değil (sahne planı yok)")
+        return 2
+    if not is_approved(review):
+        logger.error(f"{item.index}. {item.subject}: önce metni onaylayın; klipler onaylı planın istemleriyle üretilir")
+        return 2
+    fit = clip_fit_mode(state)
+    try:
+        if args.kontrol:
+            result = fiction.check_inbox(folder, plan, fit)
+            matched = ", ".join(f"{m['file']} → sahne {m['scene']:02d}" for m in result["matched"])
+            print(f"eşleşen: {matched or 'yok'}")
+        for pair in args.ata:
+            name, _, scene = pair.rpartition("=")
+            fiction.assign(folder, plan, name, int(scene), fit_mode=fit)
+    except (fiction.FictionError, ValueError) as exc:
+        logger.error(str(exc))
+        return 2
+    clips = fiction.load_clips(folder)
+    for state_ in fiction.scene_states(folder, plan):
+        label = fiction.STATUS_TEXT.get(state_["status"], state_["status"])
+        detail = f" — {state_['reason']}" if state_["reason"] else ""
+        warnings = f" ({'; '.join(state_['warnings'])})" if state_["warnings"] else ""
+        print(f"sahne {state_['index']:02d}: {label}{detail}{warnings} {state_['file']}".rstrip())
+    if clips.get("unmatched"):
+        print(f"eşleşmeyen dosyalar (--ata DOSYA=SAHNE): {', '.join(clips['unmatched'])}")
+    print("render'a hazır" if fiction.clips_complete(folder, plan) else "klip bekleniyor")
+    return 0
 
 
 def _item_command(args, batch_dir: Path, state: bp.BatchState) -> int:

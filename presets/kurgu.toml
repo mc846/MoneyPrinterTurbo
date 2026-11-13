@@ -1,0 +1,73 @@
+# Kurgu reçetesi ("Ya olsaydı"): görüntüler yapay zekâ ile elle üretilir (Google Flow / Veo, AI Pro).
+# Kullanım: uv run python batch.py konular.csv --preset presets/kurgu.toml
+#
+# Akış iki aşamalıdır: hazırlık metni, denetimi ve sahne planını (istem paketi) üretir; metin ve istemler
+# onaylanınca her sahnenin klibi Flow'da üretilip yüklenir (WebUI'da sahne kartı ya da konu klasöründeki
+# gelen/ klasörü); bütün klipler gelince "batch.py render <klasör>". Ağ araması yok, görsel tarama yok.
+# Ayrıntı: CLAUDE.md "Kurgu kanalı" ve app/services/fiction.py.
+
+[video]
+llm_provider = "claude_code"
+video_language = "tr-TR"
+script_accuracy_rules = true
+# Klipler kullanıcıdan gelir (arama terimi üretilmez); her sahne bir klip.
+video_source = "ai_manual"
+video_aspect = "9:16"
+# 9:16 olmayan klip bulanık arka planla sığdırılır (doğrulamada uyarı).
+video_fit_mode = "blur"
+video_clip_duration = 8
+voice_name = "tr-TR-EmelNeural-Female"
+voice_rate = 1.0
+font_name = "STHeitiMedium.ttc"
+stroke_width = 3
+final_render_engine = "ffmpeg"
+subtitle_enabled = true
+# Altyazı alt kenarın biraz üstünde: Flow'un görünür Veo filigranı sağ alt köşede (yüksekliğin son ~%8'i);
+# altyazı alt yarıda olduğu için sahne etiketi sol üstte kalır.
+subtitle_position = "custom"
+custom_position = 85
+font_size = 60
+text_fore_color = "#FFFFFF"
+stroke_color = "#000000"
+
+# Yalnız bu süreçte geçerli config.app ayarları; config.toml'a yazılmaz.
+[app]
+material_concurrency = 3
+video_clip_concurrency = 3
+material_vision_screening = false
+scene_labels_enabled = true
+
+# "Ya olsaydı" metni. Yer tutucular: {kelime_min}, {kelime_max} (target_words'ten), {konu}.
+# content = "kurgu": denetçi gerçek iddiaları her zamanki gibi denetler, kurguyu gerçek gibi sunan cümleyi
+# Y işaretler; hazırlık sahne planı da üretir.
+[script]
+content = "kurgu"
+target_words = [95, 110]
+prompt = """
+"Ya olsaydı" biçiminde, en az {kelime_min}, en çok {kelime_max} kelimelik bir bilimkurgu metni yaz; \
+{kelime_min} kelimenin altına inme. Şu sırayı izle: \
+(1) Kancayla aç: bir soru ya da çarpıcı bir imge ("Ya … olsaydı?"). \
+(2) Kısa ve doğru gerçek arka plan: bugün bilineni bir iki cümleyle, adları ve sayıları doğru ver. \
+(3) Kurguyu açıkça çerçevele: "Hayal edelim…", "Ya … olsaydı?", "-saydı", "-abilirdi", "belki" gibi \
+ifadelerle anlat; kurguyu asla olmuş ya da oluyormuş gibi sunma ("yapılıyor", "keşfedildi", "başladı" deme). \
+(4) Bilimsel olarak makul ayrıntılar: nasıl çalışırdı, neler gerekirdi, önündeki engeller neler (enerji, \
+teknoloji, maliyet, doğa koşulları). \
+(5) Düşündüren bir kapanış: izleyiciye bir soru ya da bir sonuç bırak. \
+Doğruluk kuralları gerçek arka plan cümlelerine uygulanır. Akıcı, sade ve merak uyandıran bir dil kullan.
+"""
+
+# Sahne planı ve klipler (app/services/fiction.py): her sahne bir klip, 8 sn, 9:16. Sahne sayısı tahmini
+# seslendirme süresinden (+3 sn pay) / 8 sn. Ekran etiketi her sahnede "Canlandırma · yapay zekâ"
+# (İngilizce videoda "Animation · AI-generated"); scene_label ile değiştirilebilir.
+[fiction]
+clip_seconds = 8
+tool = "Google Flow / Veo"
+style = "gerçekçi, sinematik bilimkurgu; yakın gelecek (2040'lar); sakin ve geniş planlar; ajans logosu ya da bayrak yok"
+
+[quality]
+target_duration = [40, 70]
+audit = true
+review_before_render = true
+
+[package]
+subtitle_translations = ["en"]
