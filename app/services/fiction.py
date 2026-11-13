@@ -57,7 +57,7 @@ CLIPS_FILE = "klipler.json"
 RENDER_PLAN_FILE = "render-plani.json"
 INBOX = "gelen"
 PLAN_VERSION = 1
-PLAN_PROMPT_VERSION = 1
+PLAN_PROMPT_VERSION = 2  # 2: compact style book, per-scene "elements" (E2E: 4000-character prompts)
 DEFAULT_CLIP_SECONDS = 8
 # Sahne sayısı tahmini süreye bu payla hesaplanır: Edge TR tahmininin en büyük sapması 3,1 sn (batch_review).
 SCENE_MARGIN_SECONDS = 3.0
@@ -83,16 +83,18 @@ scene, vertical 9:16. Write ONE style book shared by every clip and, for every s
 1. Style book: the visual language, lighting, color palette, era and setting, the recurring objects with one
    fixed description each (e.g. a mining rover, the base modules) and the physical plausibility of the setting
    (e.g. on the Moon: black sky, hard shadows, no atmosphere, no haze or clouds, low gravity). Every clip must
-   look like the same world.
+   look like the same world. Keep it compact, it opens every prompt: one or two sentences per field, at most 5
+   recurring objects with one sentence each.
 2. Every scene is ONE continuous {seconds}-second shot (no cuts) with its own camera movement and light, and
    shows what the narration of that scene is about. It is clearly an animated dramatization, not documentary
-   footage.
+   footage. "elements": the names of the recurring objects seen in that shot (only their descriptions go into
+   its prompt).
 3. Nothing on screen may be text, captions or numbers; no logos or insignia (no NASA meatball or worm, no
    flags); no real or recognizable people (people only as small figures in suits with opaque visors).
 4. "visual_tr": one or two Turkish sentences for the user (what the clip shows). "action", "camera", "light":
    concrete English for the video model (what is seen, how the camera moves, the light); no story, no narration.
 5. Respond ONLY with one minified JSON object, no markdown:
-{{"style_book":{{"visual_language":"...","lighting":"...","color":"...","era":"...","recurring":[{{"name":"...","description":"..."}}],"science":"..."}},"scenes":[{{"index":1,"visual_tr":"...","action":"...","camera":"...","light":"..."}}]}}
+{{"style_book":{{"visual_language":"...","lighting":"...","color":"...","era":"...","recurring":[{{"name":"...","description":"..."}}],"science":"..."}},"scenes":[{{"index":1,"visual_tr":"...","action":"...","camera":"...","light":"...","elements":["..."]}}]}}
 {style_hint}
 ## Topic
 {subject}
@@ -185,15 +187,20 @@ def file_name(index: int) -> str:
     return f"sahne-{index:02d}.mp4"
 
 
-def style_text(style: dict) -> str:
-    """Her istemin başına eklenen stil kitabı metni (İngilizce)."""
+def style_text(style: dict, elements: list | None = None) -> str:
+    """
+    Her istemin başına eklenen stil kitabı metni (İngilizce). ``elements`` verilirse tekrarlayan öğelerden
+    yalnız o çekimde görünenlerin tarifi girer (istem kısa kalır; Veo istemi ~1024 token); None: hepsi.
+    """
     style = style or {}
+    wanted = None if elements is None else {str(name).strip().casefold() for name in elements}
     parts = [f"Style book (identical in every clip): {style.get('visual_language', '').strip()}".rstrip(": ")]
     for key, label in (("lighting", "Lighting"), ("color", "Color palette"), ("era", "Era and setting")):
         if str(style.get(key) or "").strip():
             parts.append(f"{label}: {str(style[key]).strip()}")
     recurring = [f"{str(item.get('name') or '').strip()}: {str(item.get('description') or '').strip()}"
-                 for item in style.get("recurring") or [] if isinstance(item, dict) and item.get("name")]
+                 for item in style.get("recurring") or [] if isinstance(item, dict) and item.get("name")
+                 and (wanted is None or str(item["name"]).strip().casefold() in wanted)]
     if recurring:
         parts.append("Recurring elements, always the same: " + "; ".join(recurring))
     if str(style.get("science") or "").strip():
@@ -212,7 +219,8 @@ def compose_prompt(style: dict, scene: dict, count: int, seconds: int) -> str:
         shot.append(f"Camera: {str(scene['camera']).strip()}")
     if str(scene.get("light") or "").strip():
         shot.append(f"Lighting: {str(scene['light']).strip()}")
-    return "\n\n".join([style_text(style), "\n".join(line.rstrip(".") + "." for line in shot),
+    elements = scene.get("elements") if isinstance(scene.get("elements"), list) else None
+    return "\n\n".join([style_text(style, elements), "\n".join(line.rstrip(".") + "." for line in shot),
                         FIXED_RULES.format(seconds=seconds)])
 
 
@@ -241,9 +249,9 @@ def _clip(text: Any, limit: int) -> str:
 
 def _clean_style(raw: Any) -> dict:
     raw = raw if isinstance(raw, dict) else {}
-    style = {key: _clip(raw.get(key), 1200) for key in STYLE_FIELDS}
-    style["recurring"] = [{"name": _clip(item.get("name"), 80), "description": _clip(item.get("description"), 400)}
-                          for item in raw.get("recurring") or [] if isinstance(item, dict) and item.get("name")][:8]
+    style = {key: _clip(raw.get(key), 700) for key in STYLE_FIELDS}
+    style["recurring"] = [{"name": _clip(item.get("name"), 80), "description": _clip(item.get("description"), 300)}
+                          for item in raw.get("recurring") or [] if isinstance(item, dict) and item.get("name")][:6]
     if not style["visual_language"]:
         raise ValueError("stil kitabında görsel dil yok")
     return style
@@ -260,8 +268,12 @@ def parse_plan_answer(text: str, count: int) -> tuple[dict, list[dict]]:
     for position, scene in enumerate(scenes, start=1):
         if not isinstance(scene, dict) or not str(scene.get("action") or "").strip():
             raise ValueError(f"sahne {position}: çekim tarifi yok")
-        cleaned.append({key: str(scene.get(key) or "").strip()[:600]
-                        for key in ("visual_tr", "action", "camera", "light")})
+        shot = {key: str(scene.get(key) or "").strip()[:600] for key in ("visual_tr", "action", "camera", "light")}
+        if isinstance(scene.get("elements"), list):
+            names = {item["name"].casefold(): item["name"] for item in style["recurring"]}
+            shot["elements"] = [names[str(name).strip().casefold()] for name in scene["elements"]
+                                if str(name).strip().casefold() in names]
+        cleaned.append(shot)
     return style, cleaned
 
 

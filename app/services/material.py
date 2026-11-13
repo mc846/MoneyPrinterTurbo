@@ -270,7 +270,7 @@ def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, An
                 record[name] = value.strip()[:120]
         prompt = source.get("prompt")
         if isinstance(prompt, str) and prompt.strip():
-            record["prompt"] = prompt.strip()[:4000]
+            record["prompt"] = prompt.strip()[:8000]
         record["ai_generated"] = True
     # Every successful download gets this record; the task's materials snapshot
     # keeps the full path and the item next to it (see task_materials).
