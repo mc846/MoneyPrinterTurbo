@@ -262,6 +262,16 @@ def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, An
     scene_label = _scene_label_record(source.get("scene_label"))
     if scene_label:
         record["scene_label"] = scene_label
+    # 用户用 Google Flow / Veo 生成并上传的剧情片段（ai_manual）：工具、提示词、风格手册版本、文件 SHA-256、上传时间。
+    if record["provider"] == "ai_manual":
+        for name in ("tool", "style_version", "sha256", "uploaded_at"):
+            value = source.get(name)
+            if isinstance(value, str) and value.strip():
+                record[name] = value.strip()[:120]
+        prompt = source.get("prompt")
+        if isinstance(prompt, str) and prompt.strip():
+            record["prompt"] = prompt.strip()[:4000]
+        record["ai_generated"] = True
     # Every successful download gets this record; the task's materials snapshot
     # keeps the full path and the item next to it (see task_materials).
     task_materials.downloaded(item, local_path, record)

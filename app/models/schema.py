@@ -172,6 +172,9 @@ class VideoParams(BaseModel):
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
     )
+    # video_source "ai_manual" (fiction channel): the render plan the batch review writes
+    # (scene clips from Google Flow / Veo, their SHA-256 and prompts; app/services/fiction.py).
+    ai_manual_plan: Optional[str] = ""
 
     custom_audio_file: Optional[str] = (
         None  # Custom audio file path, will ignore TTS and can still use Whisper subtitles

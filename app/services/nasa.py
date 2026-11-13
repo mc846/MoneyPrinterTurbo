@@ -1420,7 +1420,10 @@ CREDITS_DISCLAIMER = (
 # credits.txt 每行开头的素材源名称。Pixabay 等库存素材源只在作为 NASA 的后备
 # （video_source_fallback）时出现；它们的许可不要求署名，这里写作者名和素材页面。
 CREDIT_SOURCE_LABELS = {"nasa": "NASA", "nasa_svs": "NASA SVS", "pixabay": "Pixabay", "pexels": "Pexels",
-                        "coverr": "Coverr"}
+                        "coverr": "Coverr", "ai_manual": "Yapay zekâ"}
+# 用户用 Google Flow / Veo 生成的剧情片段（ai_manual）：credits.txt 的说明行（不署名 NASA）。
+AI_CREDIT_LINE = ("Görüntüler yapay zekâ ile üretilmiştir (Google Veo) / "
+                  "Footage generated with AI (Google Veo)")
 # NASA 科学可视化工作室（nasa_svs）的数据可视化：credits.txt 与分享文本里的说明行。
 SVS_CREDIT_LINE = ("Veri görselleştirmeleri: NASA's Scientific Visualization Studio (svs.gsfc.nasa.gov) / "
                    "Data visualizations: NASA's Scientific Visualization Studio")
@@ -1470,7 +1473,7 @@ def _credited_sources(material_sources: Any) -> list[dict]:
 # Attribution"；Pro 及以上不需要，这里无法知道 API 等级，因此一律署名）。Pixabay 和
 # Pexels 的许可不要求署名：它们只在已有 credits.txt 时列出，Pexels 按其 API 指南写
 # "Video by … on Pexels"（https://www.pexels.com/api/documentation/）。
-ATTRIBUTION_REQUIRED_SOURCES = frozenset({"nasa", "nasa_svs", "coverr"})
+ATTRIBUTION_REQUIRED_SOURCES = frozenset({"nasa", "nasa_svs", "coverr", "ai_manual"})
 COVERR_SITE = "https://coverr.co"
 
 
@@ -1480,6 +1483,9 @@ def _credit_line(record: dict) -> str:
     label = CREDIT_SOURCE_LABELS[provider]
     creator = record.get("creator") if isinstance(record.get("creator"), dict) else {}
     name = str(creator.get("name") or "").strip()
+    if provider == "ai_manual":
+        scene = str(record.get("asset_id") or "").replace("sahne-", "Sahne ")
+        return f"[{label}] {scene} — {record.get('tool') or record.get('credit') or 'Google Flow / Veo'}"
     if provider in ("nasa", "nasa_svs"):
         line = f"[{label}] {record.get('credit') or DEFAULT_CREDIT}"
         segment = record.get("segment") if isinstance(record.get("segment"), dict) else {}
@@ -1519,9 +1525,13 @@ def credits_text(material_sources: Any) -> str:
         lines.append(f"{index}. {_credit_line(record)}")
         if page:
             lines.append(f"   {page}")
-        if provider not in ("nasa", "nasa_svs") and CREDIT_SOURCE_LABELS[provider] not in other_labels:
+        if provider not in ("nasa", "nasa_svs", "ai_manual") and CREDIT_SOURCE_LABELS[provider] not in other_labels:
             other_labels.append(CREDIT_SOURCE_LABELS[provider])
     others = ", ".join(other_labels)
+    if "ai_manual" in providers:
+        lines += ["", AI_CREDIT_LINE]
+        if not providers - {"ai_manual"}:
+            return "\n".join([*lines, ""])
     if "nasa_svs" in providers:
         lines += ["", SVS_CREDIT_LINE]
     if "nasa" in providers or ("nasa_svs" in providers and not others):

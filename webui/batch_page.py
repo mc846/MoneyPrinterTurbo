@@ -27,6 +27,7 @@ from app import paths
 from app.config import config
 from app.services import batch_package, batch_review, batch_runner, batch_subtitles, source_chain, voice
 from app.services import batch_production as bp
+from webui import fiction_panel
 
 VIEW_PARAM = "view"
 VIEW_BATCH = "batch"
@@ -516,7 +517,7 @@ def has_unsaved_edits(batch_dir: Path, entry: batch_review.ItemReview) -> bool:
         return False
     text, terms, anchors = _edits(batch_dir, entry)
     return (batch_review.normalize_script(text) != entry.review["script"] or terms != entry.review["terms"]
-            or anchors != entry.review["anchors"])
+            or anchors != entry.review["anchors"] or fiction_panel.plan_edits(batch_dir, entry) is not None)
 
 
 def _find_entry(batch_dir: Path, index: int) -> tuple[batch_review.Overview, batch_review.ItemReview] | None:
@@ -614,13 +615,17 @@ def _review_item(tr, view: batch_review.Overview, entry: batch_review.ItemReview
             st.caption(line)
         stale = batch_review.script_sha256(text) != review.get("audit_sha256")
         _render_audit(tr, review, stale)
-        with st.expander(tr("batch.review.terms_header")):
-            st.text_area(tr("batch.review.terms"), key=keys["terms"], height=170, disabled=busy,
-                         help=tr("batch.review.terms_help"))
-            st.text_input(tr("batch.review.anchors"), key=keys["anchors"], disabled=busy,
-                          help=tr("batch.review.anchors_help"))
-            if review.get("terms_edited"):
-                st.caption(tr("batch.review.terms_edited"))
+        save_plan = False
+        if review.get("scene_plan"):  # kurgu: arama terimi yok, sahne planı ve Veo istemleri var
+            save_plan = fiction_panel.render_plan_editor(tr, batch_dir, entry, text, busy)
+        else:
+            with st.expander(tr("batch.review.terms_header")):
+                st.text_area(tr("batch.review.terms"), key=keys["terms"], height=170, disabled=busy,
+                             help=tr("batch.review.terms_help"))
+                st.text_input(tr("batch.review.anchors"), key=keys["anchors"], disabled=busy,
+                              help=tr("batch.review.anchors_help"))
+                if review.get("terms_edited"):
+                    st.caption(tr("batch.review.terms_edited"))
         instruction = st.text_input(tr("batch.review.instruction"), key=keys["instruction"], disabled=busy,
                                     placeholder=tr("batch.review.instruction_placeholder"))
         blocked = not stale and batch_review.audit_blocks(review.get("audit"))
@@ -648,12 +653,20 @@ def _review_item(tr, view: batch_review.Overview, entry: batch_review.ItemReview
                 action = batch_review.action_key(last.get("action", ""))
                 st.error(tr("batch.review.action_failed").format(action=tr(f"batch.review.action.{action}"),
                                                                  error=last.get("message", "")))
-    if not (approve or regenerate or reaudit or skip):
+    if not (approve or regenerate or reaudit or skip or save_plan):
         return
     if batch_review.busy(entry.folder):
         _flash("error", tr("batch.review.error.busy"))
         st.rerun()
     edits = _edits(batch_dir, entry)
+    plan_edits = fiction_panel.plan_edits(batch_dir, entry)
+    if save_plan or (plan_edits and (regenerate or reaudit or (approve and batch_review.needs_llm(review, *edits)))):
+        # İstem ve stil kitabı düzenlemeleri LLM gerektirmez: önce kaydedilir (LLM işlemi korunmuş istemle çalışır).
+        if _direct(tr, batch_review.save_plan_edits, entry.folder, plan_edits or {}) is not None and save_plan:
+            _flash("success", tr("batch.fiction.plan_saved").format(index=item.index, subject=item.subject))
+        plan_edits = None
+        if save_plan:
+            st.rerun()
     if approve:
         try:
             needs_llm = batch_review.needs_llm(review, *edits)
@@ -664,7 +677,7 @@ def _review_item(tr, view: batch_review.Overview, entry: batch_review.ItemReview
             _start_llm_action(tr, batch_dir, entry, "onayla", edits=edits)
         else:
             outcome = _direct(tr, batch_review.approve, entry.folder, script=edits[0], terms=edits[1],
-                              anchors=edits[2], force=blocked)
+                              anchors=edits[2], force=blocked, plan_edits=plan_edits)
             if outcome is not None and outcome.status == "approved":
                 _flash("success", tr("batch.review.approved").format(index=item.index, subject=item.subject))
     elif regenerate:
@@ -745,6 +758,8 @@ def _render_review(tr, running: bool) -> None:
                ("batch.review.count.flagged", view.flagged),
                ("batch.review.count.skipped", view.count(bp.SKIPPED)),
                ("batch.review.count.done", view.count(bp.DONE) + view.count("review")))
+    if view.count(batch_review.AWAITING_CLIPS):  # kurgu: onaylı, klipleri gelmemiş
+        metrics = (*metrics[:2], ("batch.status.awaiting_clips", view.count(batch_review.AWAITING_CLIPS)), *metrics[2:])
     for column, (key, value) in zip(st.columns(len(metrics)), metrics):
         column.metric(tr(key), value)
     unsaved = {entry.item.index for entry in view.items
@@ -780,6 +795,8 @@ def _render_review(tr, running: bool) -> None:
     for entry in view.items:
         if entry.status == bp.AWAITING_REVIEW and entry.review is not None:
             (_review_item_live if entry.busy else _review_item_static)(tr, batch_dir, entry.item.index)
+        elif fiction_panel.shows_clips(entry):  # onaylı kurgu konusu: klipler
+            fiction_panel.render_clips(tr, view, entry, _flash)
         else:
             _review_item_compact(tr, view, entry)
 
