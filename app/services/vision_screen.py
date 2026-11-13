@@ -14,7 +14,13 @@ visualization" once that label exists).
 
 Backends (``material_vision_model`` = "<backend>:<model>"): ``claude`` runs the claude
 CLI headless with stream-json image input and no tools (the subscription login, like
-the claude_code LLM provider); ``ollama`` posts to /api/chat (e.g. gemma4:31b-cloud).
+the claude_code LLM provider); ``ollama`` posts to /api/chat (e.g. gemma4:31b-cloud);
+``gemini`` calls the Gemini API with google-genai and ``gemini_api_key`` (the key of the
+Gemini LLM provider), the same prompt plus the answer's JSON schema. Gemini's quota is per
+project, so its requests are spaced across tasks and threads by
+``material_vision_gemini_rpm``; a 429 waits the server's retry delay and tries again
+(``GEMINI_RETRIES``), a daily or zero quota stops the screening for the task. The key
+never goes to a log, an error text, the cache or a record.
 
 Per task (``Session``): at most ``material_vision_max_per_term`` candidates screened per term
 and source, cached decisions included, so a warm cache decides the same as a cold one (then
@@ -60,6 +66,24 @@ IMAGE_TYPES = ("observation", "photo", "data_visualization", "illustration", "cg
 PERSON_VALUES = ("none", "unrecognizable", "recognizable")
 REJECT_TYPES = frozenset({"illustration", "cgi", "diagram"})
 LABEL_TYPES = frozenset({"data_visualization"})
+# The answer's JSON schema, the same fields as the prompt (Gemini's structured output).
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "image_type": {"type": "string", "enum": list(IMAGE_TYPES)},
+        "subject": {"type": "string"},
+        "subject_matches_anchor": {"type": "boolean"},
+        "text_overlay": {"type": "boolean"},
+        "person": {"type": "string", "enum": list(PERSON_VALUES)},
+        "logo": {"type": "boolean"},
+    },
+    "required": ["image_type", "subject", "subject_matches_anchor", "text_overlay", "person", "logo"],
+}
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_GEMINI_RPM = 10
+GEMINI_RETRIES = 3
+GEMINI_MAX_WAIT = 90.0
+GEMINI_RETRY_CODES = frozenset({429, 500, 502, 503, 504})
 
 SYSTEM = ("You are an image screening assistant for a science video channel that uses real footage only. "
           "Reply with one JSON object only.")
@@ -129,15 +153,27 @@ def enabled() -> bool:
     return _flag("material_vision_screening", False)
 
 
-def model_setting() -> tuple[str, str]:
-    """(backend, model) from material_vision_model ("claude:sonnet", "ollama:gemma4:31b-cloud")."""
-    value = str(config.app.get("material_vision_model") or DEFAULT_MODEL).strip()
-    backend, _, model = value.partition(":")
-    backend = backend.strip().lower()
-    if backend not in ("claude", "ollama"):
-        logger.warning(f"unknown material_vision_model backend {value!r}, using {DEFAULT_MODEL}")
+def parse_model(value: Any) -> tuple[str, str]:
+    """
+    (backend, model) of a material_vision_model value: "claude:sonnet",
+    "ollama:gemma4:31b-cloud" (the model keeps its own colon), "gemini:gemini-3.5-flash-lite"
+    ("models/" dropped; "gemini:" alone is DEFAULT_GEMINI_MODEL). An unknown backend falls
+    back to DEFAULT_MODEL with a warning.
+    """
+    text = str(value or "").strip() or DEFAULT_MODEL
+    backend, _, model = text.partition(":")
+    backend, model = backend.strip().lower(), model.strip()
+    if backend not in BACKENDS:
+        logger.warning(f"unknown material_vision_model backend {text!r}, using {DEFAULT_MODEL}")
         backend, _, model = DEFAULT_MODEL.partition(":")
-    return backend, model.strip()
+    if backend == "gemini":
+        model = model.removeprefix("models/").strip() or DEFAULT_GEMINI_MODEL
+    return backend, model
+
+
+def model_setting() -> tuple[str, str]:
+    """(backend, model) from material_vision_model."""
+    return parse_model(config.app.get("material_vision_model"))
 
 
 # ---------------------------------------------------------------- the model's answer
@@ -266,7 +302,110 @@ def ask_ollama(images: list[str], prompt: str, model: str) -> str:
     return str((payload.get("message") or {}).get("content") or "")
 
 
-BACKENDS: dict[str, Callable[[list[str], str, str], str]] = {"claude": ask_claude, "ollama": ask_ollama}
+# Gemini: the quota is per project, so the spacing is shared by every task and thread.
+_gemini_lock = threading.Lock()
+_gemini_next = 0.0  # time.monotonic() of the earliest next request
+_sleep = time.sleep  # tests replace it
+
+
+def _gemini_key() -> str:
+    """The Gemini API key: gemini_api_key (shared with the Gemini LLM and TTS), else GEMINI_API_KEY."""
+    return str(config.app.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY") or "").strip()
+
+
+def redact(text: Any, key: str = "") -> str:
+    """The text with the key, and anything shaped like a Google API key, masked."""
+    text = str(text)
+    if key:
+        text = text.replace(key, "***")
+    return re.sub(r"AIza[0-9A-Za-z_\-]{20,}", "***", text)
+
+
+def _gemini_pace() -> None:
+    """Wait until 60 / material_vision_gemini_rpm seconds have passed since the previous request."""
+    global _gemini_next
+    interval = 60.0 / _count("material_vision_gemini_rpm", DEFAULT_GEMINI_RPM)
+    with _gemini_lock:
+        now = time.monotonic()
+        start = max(now, _gemini_next)
+        _gemini_next = start + interval
+    if start > now:
+        _sleep(start - now)
+
+
+def quota_details(error: Any) -> tuple[float | None, list[dict]]:
+    """(the retry delay in seconds, the quota violations) of a Gemini API error."""
+    body = getattr(error, "details", None)
+    body = body if isinstance(body, dict) else {}
+    delay, violations = None, []
+    for detail in (body.get("error") or body).get("details") or []:
+        if not isinstance(detail, dict):
+            continue
+        if str(detail.get("@type") or "").endswith("RetryInfo"):
+            match = re.fullmatch(r"\s*([\d.]+)s\s*", str(detail.get("retryDelay") or ""))
+            delay = float(match.group(1)) if match else delay
+        violations += [item for item in detail.get("violations") or [] if isinstance(item, dict)]
+    return delay, violations
+
+
+def _thinking(model: str) -> dict:
+    """Low thinking for Gemini 3 and newer (the screening is a short classification)."""
+    from google.genai import types
+
+    match = re.match(r"gemini-(\d+)", model)
+    if match and int(match.group(1)) >= 3:
+        return {"thinking_config": types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)}
+    return {}
+
+
+def ask_gemini(images: list[str], prompt: str, model: str) -> str:
+    """
+    One Gemini generateContent call with the images (google-genai, no SDK retries): requests
+    spaced by material_vision_gemini_rpm; 429 and 5xx wait (the server's retryDelay, else
+    10, 20, 40 s) and try again up to GEMINI_RETRIES times; a daily quota or a quota of 0
+    (the model is not in the project's tier) stops at once.
+    """
+    from google import genai
+    from google.genai import errors, types
+
+    key = _gemini_key()
+    if not key:
+        raise VisionUnavailable("gemini: no API key (gemini_api_key)")
+    parts = [types.Part.from_bytes(data=base64.b64decode(data), mime_type="image/jpeg") for data in images]
+    parts.append(types.Part.from_text(text=prompt))
+    generation = types.GenerateContentConfig(system_instruction=SYSTEM, response_mime_type="application/json",
+                                             response_json_schema=RESPONSE_SCHEMA, **_thinking(model))
+    for attempt in range(GEMINI_RETRIES + 1):
+        _gemini_pace()
+        try:
+            with genai.Client(api_key=key, http_options=types.HttpOptions(timeout=CALL_TIMEOUT * 1000)) as client:
+                response = client.models.generate_content(
+                    model=model, contents=[types.Content(role="user", parts=parts)], config=generation)
+            return str(response.text or "")
+        except errors.APIError as exc:
+            code, status, message = exc.code, exc.status, exc.message
+            delay, violations = quota_details(exc) if code == 429 else (None, [])
+        except Exception as exc:  # network, timeout: the message may name the URL, never the header
+            raise VisionUnavailable(redact(f"gemini: {type(exc).__name__}: {exc}", key)[:300]) from None
+        final = [item for item in violations
+                 if "PerDay" in str(item.get("quotaId") or "") or str(item.get("quotaValue")) == "0"]
+        if final:
+            quota = final[0]
+            raise VisionUnavailable(f"gemini quota {quota.get('quotaId')} = {quota.get('quotaValue')} reached")
+        if code not in GEMINI_RETRY_CODES:
+            raise VisionUnavailable(redact(f"gemini {code} {status}: {message}", key)[:300])
+        if attempt >= GEMINI_RETRIES:
+            raise VisionUnavailable(f"gemini {code} {status} after {GEMINI_RETRIES} retries")
+        wait = min(GEMINI_MAX_WAIT, delay if delay is not None else 10.0 * 2 ** attempt)
+        quotas = ", ".join(f"{item.get('quotaId')}={item.get('quotaValue')}" for item in violations)
+        logger.warning(f"vision screening: gemini {code} {status}{' (' + quotas + ')' if quotas else ''}, "
+                       f"retrying in {wait:.0f}s ({attempt + 1}/{GEMINI_RETRIES})")
+        _sleep(wait)
+    raise VisionUnavailable("gemini: no answer")  # not reached
+
+
+BACKENDS: dict[str, Callable[[list[str], str, str], str]] = {
+    "claude": ask_claude, "ollama": ask_ollama, "gemini": ask_gemini}
 
 
 # ---------------------------------------------------------------- inputs and cache
