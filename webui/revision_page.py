@@ -316,7 +316,10 @@ def _replace_dialog(tr, task_id: str, base: dict, scene_id: str) -> None:
     upload = st.file_uploader(tr("revision.replace.upload"), key=f"{key}_upload",
                               type=[suffix.lstrip(".") for suffix in scene_edits.IMAGE_SUFFIXES + scene_edits.VIDEO_SUFFIXES])
     if upload is not None and st.session_state.get(f"{key}_uploaded") != upload.file_id:
-        saved = material_upload.save_material_upload(upload.name, upload)
+        # save_material_upload returns the stored file's name in the uploads folder, not a path: the
+        # revision process and the preview need the full path (a bare name was not found; E2E 14.11).
+        saved = os.path.join(material_upload.uploaded_material_dir(),
+                             material_upload.save_material_upload(upload.name, upload))
         st.session_state[f"{key}_uploaded"] = upload.file_id
         st.session_state[f"{key}_selected"] = {"path": saved, "preview": saved}
     selected = st.session_state.get(f"{key}_selected")

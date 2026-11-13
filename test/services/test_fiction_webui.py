@@ -141,6 +141,31 @@ fiction_panel.revision_replace(tr, "t1", base, "v1-s02", materials, lambda *a: N
 """
 
 
+def test_an_uploaded_clip_is_kept_with_its_full_path(tmp_path, monkeypatch):
+    """save_material_upload returns a bare file name; the dialogs keep the full path (E2E 14.11)."""
+    import streamlit as st
+
+    from app.services import material_upload
+    from webui import fiction_panel
+
+    (tmp_path / "uploads").mkdir()
+    clip = make_clip(tmp_path / "uploads" / "x.mp4")
+    monkeypatch.setattr(material_upload, "uploaded_material_dir", lambda create=True: str(tmp_path / "uploads"))
+    monkeypatch.setattr(material_upload, "save_material_upload", lambda name, source: "x.mp4")
+    upload = type("Upload", (), {"name": "flow.mp4", "file_id": "f1"})()
+    added = []
+    state = {}
+    monkeypatch.setattr(st, "session_state", state)
+    for name in ("caption", "code", "markdown", "error", "button"):
+        monkeypatch.setattr(st, name, lambda *args, **kwargs: False)
+    monkeypatch.setattr(st, "text_area", lambda *args, **kwargs: kwargs.get("value", ""))
+    monkeypatch.setattr(st, "file_uploader", lambda *args, **kwargs: upload)
+    base = {"revision": "r001", "scenes": [{"id": "v1-s02", "material": "m02", "duration": 7.4}]}
+    fiction_panel.revision_replace(lambda key: key + " {seconds}", "t1", base, "v1-s02",
+                                   {"m02": {"source": {"prompt": "p"}}}, lambda *a: added.append(a), lambda: None)
+    assert state["revision_fiction_t1_v1-s02_path"] == str(clip)
+
+
 def test_the_revision_dialog_of_a_fiction_scene_offers_its_prompt():
     app = AppTest.from_string(REVISION_SCRIPT.format(path=str(ROOT / "webui/i18n/en.json")), default_timeout=60)
     app = run(app)
