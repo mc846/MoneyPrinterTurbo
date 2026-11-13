@@ -217,7 +217,9 @@ def revision_replace(tr, task_id: str, base: dict, scene_id: str, materials: dic
                               type=[suffix.lstrip(".") for suffix in fiction.VIDEO_SUFFIXES])
     if upload is not None and st.session_state.get(f"{key}_uploaded") != upload.file_id:
         st.session_state[f"{key}_uploaded"] = upload.file_id
-        st.session_state[f"{key}_path"] = material_upload.save_material_upload(upload.name, upload)
+        # save_material_upload returns the stored file's name in the uploads folder, not a path.
+        stored = material_upload.save_material_upload(upload.name, upload)
+        st.session_state[f"{key}_path"] = str(Path(material_upload.uploaded_material_dir()) / stored)
     path = st.session_state.get(f"{key}_path")
     if path:
         info = fiction.probe(path)
