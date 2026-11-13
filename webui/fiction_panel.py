@@ -145,12 +145,14 @@ def render_clips(tr, view, entry, flash) -> None:
             st.warning(tr("batch.fiction.unmatched"), icon=":material/help:")
             options = [scene["index"] for scene in plan["scenes"]]
             for name in unmatched:
+                # The element key (and its st-key-… CSS class) without dots and spaces from the file name.
+                slug = re.sub(r"[^0-9A-Za-z_-]", "_", name)
                 columns = st.columns([3, 2, 1], vertical_alignment="bottom")
                 columns[0].markdown(f"`{_md(name)}`")
                 chosen = columns[1].selectbox(tr("batch.fiction.assign_scene").format(name=name), options,
-                                              key=f"{base}_assign_{name}",
+                                              key=f"{base}_assign_{slug}",
                                               format_func=lambda index: f"{index:02d}")
-                if columns[2].button(tr("batch.fiction.assign"), key=f"{base}_assign_btn_{name}"):
+                if columns[2].button(tr("batch.fiction.assign"), key=f"{base}_assign_btn_{slug}"):
                     try:
                         fiction.assign(folder, plan, name, int(chosen), fit_mode=fit)
                     except fiction.FictionError as exc:
