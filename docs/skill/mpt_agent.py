@@ -45,6 +45,8 @@ SUPPORTED_SOURCES = {
     "openai_image",
     "codex_image",
     "local",
+    # Fiction channel: clips from Google Flow / Veo, given with --ai-manual-plan (batch review only).
+    "ai_manual",
 }
 # Keep aligned with ``_FALLBACK_VIDEO_SOURCES`` in cli.py: only stock sources can
 # back each other up through --video-source-fallback.
@@ -473,6 +475,11 @@ def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[st
         raise SkillError(
             "Local video source requires --video-materials pointing to a "
             "directory of video files"
+        )
+    if source == "ai_manual" and not has_cli_option(cli_args, "--ai-manual-plan"):
+        raise SkillError(
+            "ai_manual (fiction) clips come from the batch review: use batch.py with "
+            "presets/kurgu.toml, or give --ai-manual-plan"
         )
     if source == "volcengine_seedance":
         # 与运行时 Provider 保持完全一致的凭据优先级，避免 Skill 预检通过后
