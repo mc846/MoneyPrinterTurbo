@@ -93,6 +93,7 @@ def render_plan_editor(tr, batch_dir: Path, entry, text: str, busy: bool) -> boo
     with st.expander(title, expanded=True):
         if not fiction.plan_current(plan, batch_review.normalize_script(text)):
             st.warning(tr("batch.fiction.plan_stale"), icon=":material/sync_problem:")
+        _timing_warnings(tr, plan)
         st.markdown(f"**{tr('batch.fiction.style_book')}**")
         columns = st.columns(2)
         for position, name in enumerate(STYLE_TEXT_FIELDS):
@@ -118,6 +119,14 @@ def render_plan_editor(tr, batch_dir: Path, entry, text: str, busy: bool) -> boo
 
 def _scene_label(tr, status: str) -> str:
     return tr(f"batch.fiction.status.{status}")
+
+
+def _timing_warnings(tr, plan: dict) -> None:
+    """Render öncesi süre uyarısı: tahmini anlatımı uzun sahneler (yavaşlatma ya da kayma; metin bölünebilir)."""
+    warnings = fiction.timing_warnings(plan)
+    if warnings:
+        st.warning(tr("batch.fiction.timing_warnings") + "\n\n" + "\n".join(f"- {_md(w)}" for w in warnings),
+                   icon=":material/timer:")
 
 
 def _screen(tr, folder: Path, plan: dict, settings, indexes=None, force: bool = False) -> None:
@@ -176,6 +185,7 @@ def render_clips(tr, view, entry, flash) -> None:
         st.caption(tr("batch.fiction.clips_intro").format(seconds=plan["clip_seconds"],
                                                          folder=str(folder / fiction.INBOX)))
         st.caption(tr("batch.fiction.package_path").format(path=str(folder / fiction.PACKAGE_FILE)))
+        _timing_warnings(tr, plan)
         if st.button(tr("batch.fiction.check"), key=f"{base}_check", icon=":material/folder_open:"):
             result = fiction.check_inbox(folder, plan, fit)
             _screen(tr, folder, plan, settings)

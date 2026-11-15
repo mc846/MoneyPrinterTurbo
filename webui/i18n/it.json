@@ -698,6 +698,7 @@
     "batch.fiction.screening.running": "Controllo dei clip in corso (bandiere, emblemi, loghi, testo, volti)…",
     "batch.fiction.screening.blocked": "Il controllo richiede una verifica: scena {scenes}. Carica un nuovo clip o premi \"Usa comunque\" sulla scheda della scena.",
     "batch.fiction.screening.check_hint": "Trovati una bandiera, un emblema, un logo, testo leggibile o un volto riconoscibile: carica un nuovo clip o approvalo esplicitamente per il rendering.",
+    "batch.fiction.timing_warnings": "Durata della narrazione: queste scene hanno una narrazione lunga. Il rendering allinea le scene alla narrazione; un clip viene rallentato al massimo 1,2×, oltre la scena successiva inizia prima. Modifica il testo per dividere una frase lunga.",
     "batch.review.error.plan_edit": "La modifica del piano delle scene non è valida.",
     "batch.review.error.no_plan": "Questo argomento non ha un piano delle scene.",
     "batch.review.action.plan_edit": "Modifica del piano",

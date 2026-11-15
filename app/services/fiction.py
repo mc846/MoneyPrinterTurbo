@@ -56,8 +56,19 @@ PACKAGE_FILE = "istem-paketi.html"
 CLIPS_FILE = "klipler.json"
 RENDER_PLAN_FILE = "render-plani.json"
 INBOX = "gelen"
-PLAN_VERSION = 1
+PLAN_VERSION = 2  # 2: scenes split by the estimated narration (narration_groups), "timing": "narration"
 PLAN_PROMPT_VERSION = 2  # 2: compact style book, per-scene "elements" (E2E: 4000-character prompts)
+# Anlatıma göre sahne süreleri. Planlama: cümle sınırlarından, sahne başına tahmini anlatım ≤ MAX_NARRATION_SECONDS
+# (Edge TR, EmelNeural 1.0, helyum-3 ölçümü: konuşma ≈ 0,066 sn/harf, cümleler arası duraklama 1,1–1,5 sn).
+# Render: sahne geçişleri TTS'in gerçek zamanlarına (altyazı) hizalanır; anlatım klipten uzunsa en çok
+# MAX_SLOWDOWN kat yavaşlatılır, klip uzunsa kesilir.
+SPEECH_SECONDS_PER_LETTER = 0.066
+SENTENCE_GAP_SECONDS = 1.3
+MAX_NARRATION_SECONDS = 7.5
+MAX_SLOWDOWN = 1.2
+TIMING_NARRATION, TIMING_EQUAL = "narration", "equal"
+TIMING_FILE = "zamanlama.json"
+RENDER_TAIL_SECONDS = 0.1  # combine_videos sesten 0,1 sn uzun video ister
 DEFAULT_CLIP_SECONDS = 8
 # Sahne sayısı tahmini süreye bu payla hesaplanır: Edge TR tahmininin en büyük sapması 3,1 sn (batch_review).
 SCENE_MARGIN_SECONDS = 3.0
@@ -191,6 +202,78 @@ def split_narration(script: str, count: int) -> list[str]:
     return list(reversed(groups))
 
 
+def estimate_narration(text: str) -> float:
+    """Tahmini anlatım süresi (ilk kelimeden son kelimeye): harf × hız + cümleler arası duraklamalar."""
+    parts = sentences(text) or [str(text or "")]
+    letters = sum(len(re.sub(r"\s", "", part)) for part in parts)
+    return round(letters * SPEECH_SECONDS_PER_LETTER + SENTENCE_GAP_SECONDS * max(0, len(parts) - 1), 2)
+
+
+def narration_groups(script: str, limit: float = MAX_NARRATION_SECONDS) -> list[str]:
+    """
+    Metni cümle sınırlarından sahnelere böler: her sahnenin tahmini anlatımı ≤ ``limit`` (tek başına daha uzun
+    cümle kendi sahnesidir, ``timing_warnings`` uyarır). Sahne sayısı bu sınırla en az olandır; gruplar en uzun
+    sahneyi en kısa tutacak biçimde dengelenir.
+    """
+    pieces = sentences(script)
+    if not pieces:
+        return []
+    seconds = [estimate_narration(piece) for piece in pieces]
+
+    def cost(start: int, end: int) -> float:  # pieces[start:end] tek sahnede
+        return sum(seconds[start:end]) + SENTENCE_GAP_SECONDS * (end - start - 1)
+
+    count, start = 0, 0
+    while start < len(pieces):  # açgözlü: sınırla en az sahne
+        end = start + 1
+        while end < len(pieces) and cost(start, end + 1) <= limit:
+            end += 1
+        count, start = count + 1, end
+    inf = float("inf")
+    best = [[inf] * (len(pieces) + 1) for _ in range(count + 1)]
+    cut = [[0] * (len(pieces) + 1) for _ in range(count + 1)]
+    best[0][0] = 0.0
+    for k in range(1, count + 1):
+        for i in range(k, len(pieces) + 1):
+            for j in range(k - 1, i):
+                group = cost(j, i)
+                if i - j > 1 and group > limit:
+                    continue  # birden çok cümle sınırı aşamaz
+                value = max(best[k - 1][j], group)
+                if value < best[k][i]:
+                    best[k][i], cut[k][i] = value, j
+    groups, end = [], len(pieces)
+    for k in range(count, 0, -1):
+        begin = cut[k][end]
+        groups.append(" ".join(pieces[begin:end]))
+        end = begin
+    return list(reversed(groups))
+
+
+def timing_warnings(plan: dict) -> list[str]:
+    """
+    Render öncesi uyarılar (inceleme ve klip panelleri): tahmini anlatımı sınırı aşan sahne ve ekranda kalacağı
+    süre (anlatım + duraklama) klip × MAX_SLOWDOWN'ı aşıyorsa "metni bölün".
+    """
+    warnings = []
+    cap = float(plan.get("clip_seconds") or DEFAULT_CLIP_SECONDS) * MAX_SLOWDOWN
+    for scene in plan.get("scenes") or []:
+        estimate = estimate_narration(scene.get("narration", ""))
+        if estimate <= MAX_NARRATION_SECONDS:
+            continue
+        screen = estimate + SENTENCE_GAP_SECONDS
+        text = (f"sahne {scene['index']:02d}: anlatım ~{estimate:.1f} sn ({MAX_NARRATION_SECONDS:g} sn sınırından uzun; "
+                f"tek cümle)" if len(sentences(scene.get("narration", ""))) <= 1
+                else f"sahne {scene['index']:02d}: anlatım ~{estimate:.1f} sn ({MAX_NARRATION_SECONDS:g} sn sınırından uzun)")
+        if screen > cap:
+            text += (f"; ekranda ~{screen:.1f} sn kalmalı, klip {cap / MAX_SLOWDOWN:g} sn × {MAX_SLOWDOWN:g} = {cap:.1f} sn: "
+                     "sonraki sahne erken başlar, metni bölebilirsiniz")
+        else:
+            text += f"; klip ~{screen / (cap / MAX_SLOWDOWN):.2f}× yavaşlatılır"
+        warnings.append(text)
+    return warnings
+
+
 def file_name(index: int) -> str:
     return f"sahne-{index:02d}.mp4"
 
@@ -303,8 +386,9 @@ def build_plan(subject: str, script: str, estimated_seconds: float, settings: Se
     from app.services import batch_review
 
     settings = settings or Settings()
-    count = scene_count(estimated_seconds, settings.clip_seconds)
-    narration = split_narration(script, count)
+    # Sahneler cümle sınırlarından, tahmini anlatıma göre (sahne başına ≤ MAX_NARRATION_SECONDS); 1. sürüm
+    # sahne sayısını toplam tahminden çıkarıp metni eşit harfli parçalara bölüyordu (scene_count, split_narration).
+    narration = narration_groups(script)
     count = len(narration)
     if not count:
         raise FictionError("metin boş: sahne planı kurulamaz")
@@ -328,13 +412,15 @@ def build_plan(subject: str, script: str, estimated_seconds: float, settings: Se
         style = _clean_style(style_book)
     scenes = []
     for index, (text, shot) in enumerate(zip(narration, shots), start=1):
-        scene = {"index": index, "narration": text, "file": file_name(index), **shot, "prompt_edited": False}
+        scene = {"index": index, "narration": text, "estimated_seconds": estimate_narration(text),
+                 "file": file_name(index), **shot, "prompt_edited": False}
         scene["prompt"] = compose_prompt(style, scene, count, settings.clip_seconds)
         scenes.append(scene)
     plan = {
         "version": PLAN_VERSION, "prompt_version": PLAN_PROMPT_VERSION, "subject": subject,
         "script_sha256": batch_review.script_sha256(script), "clip_seconds": settings.clip_seconds,
         "estimated_seconds": round(float(estimated_seconds), 1), "scene_count": count, "tool": settings.tool,
+        "timing": TIMING_NARRATION,
         "style_book": style, "style_book_edited": bool(style_book), "style_version": style_version(style),
         "scenes": scenes,
     }
@@ -855,7 +941,7 @@ def write_render_plan(folder: Path, plan: dict, subject: str, scene_label: Any =
             scenes[-1]["screening"] = summary
     data = {"version": PLAN_VERSION, "subject": subject, "tool": plan.get("tool", TOOL),
             "style_version": plan["style_version"], "clip_seconds": plan["clip_seconds"],
-            "scene_label": scene_label or dict(SCENE_LABEL), "scenes": scenes}
+            "scene_label": scene_label or dict(SCENE_LABEL), "timing": TIMING_NARRATION, "scenes": scenes}
     target = folder / RENDER_PLAN_FILE
     _write_text(target, json.dumps(data, ensure_ascii=False, indent=1))
     return target
@@ -879,8 +965,154 @@ def vision_record(summary: dict | None) -> dict | None:
 
 
 def scene_seconds(audio_duration: float, count: int) -> float:
-    """Her sahnenin süresi: ses sahnelere eşit yayılır (birleştirmenin güvenlik payıyla)."""
+    """Eşit süreli sahneler (anlatım zamanlaması kurulamazsa): ses sahnelere eşit yayılır."""
     return (float(audio_duration) + 0.05) / max(1, count)
+
+
+def subtitle_cues(path: str | Path) -> list[tuple[float, float, str]]:
+    """Altyazı dosyasının (başlangıç, bitiş, metin) satırları; dosya yoksa boş."""
+    from app.utils import subtitle_reader
+
+    cues = []
+    for _index, times, text in subtitle_reader.file_to_subtitles(str(path)):
+        stamps = re.findall(r"(\d+):(\d+):(\d+)[,.](\d+)", times)
+        if len(stamps) >= 2:
+            start, end = (int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000 for h, m, s, ms in stamps[:2])
+            cues.append((start, end, text))
+    return cues
+
+
+def _tokens(text: str) -> list[str]:
+    return re.findall(r"\w+", str(text or "").lower())
+
+
+def narration_spans(narrations: list[str], cues: list[tuple[float, float, str]]) -> list[tuple[float, float]]:
+    """
+    Her sahnenin anlatımının gerçek aralığı (ilk kelimesinin başı, son kelimesinin sonu): altyazı satırlarının
+    zamanı kelimelerine harf sayısıyla paylaştırılır, metin kelimeleri altyazınınkilerle sırayla eşlenir
+    (difflib; yazım farkları atlanır). Eşleşme zayıfsa FictionError.
+    """
+    import difflib
+
+    words = []
+    for start, end, text in cues:
+        tokens = _tokens(text)
+        total = sum(len(token) for token in tokens) or 1
+        at = start
+        for token in tokens:
+            span = (end - start) * len(token) / total
+            words.append((token, at, at + span))
+            at += span
+    script, owner = [], []
+    for index, text in enumerate(narrations):
+        tokens = _tokens(text)
+        script += tokens
+        owner += [index] * len(tokens)
+    if not words or not script:
+        raise FictionError("altyazı ya da anlatım boş: sahneler anlatıma hizalanamaz")
+    matcher = difflib.SequenceMatcher(None, script, [word[0] for word in words], autojunk=False)
+    mapped = {}
+    for a, b, size in matcher.get_matching_blocks():
+        for offset in range(size):
+            mapped[a + offset] = b + offset
+    if len(mapped) < 0.8 * len(script):
+        raise FictionError(f"altyazı anlatımla eşleşmedi ({len(mapped)}/{len(script)} kelime)")
+    spans = []
+    for index in range(len(narrations)):
+        found = [position for position, scene in enumerate(owner) if scene == index and position in mapped]
+        if not found:
+            raise FictionError(f"sahne {index + 1:02d}: anlatımı altyazıda bulunamadı")
+        spans.append((words[mapped[found[0]]][1], words[mapped[found[-1]]][2]))
+    return spans
+
+
+def narration_timing(narrations: list[str], cues: list[tuple[float, float, str]], total: float,
+                     clip_durations: list[float], max_speed: float = MAX_SLOWDOWN) -> dict:
+    """
+    Anlatıma hizalı sahne aralıkları: geçiş iki sahnenin anlatımı arasındaki duraklamanın ortasında, ilk sahne
+    0'da başlar, son sahne ``total``'da biter; her sahne kendi anlatımı boyunca ekranda. Klipten uzun sahne en çok
+    ``max_speed`` kat yavaşlatılır; daha uzunsa fazlası sonraki (sonda: önceki) sahneye geçer ve uyarı yazılır
+    (anlatımın görüntü dışına taşan kısmı ``outside``). Kliplerin yavaşlatılmış toplamı yetmezse FictionError.
+    """
+    spans = narration_spans(narrations, cues)
+    count = len(spans)
+    bounds = [0.0] + [round((spans[i][1] + spans[i + 1][0]) / 2, 3) for i in range(count - 1)] + [round(total, 3)]
+    caps = [max(0.1, float(duration)) * max_speed for duration in clip_durations]
+    warnings = []
+    for i in range(count - 1):  # ileri: kapasitesini aşan sahnenin fazlası sonrakine
+        excess = bounds[i + 1] - bounds[i] - caps[i]
+        if excess > 1e-6:
+            bounds[i + 1] = round(bounds[i] + caps[i], 3)
+            warnings.append(f"sahne {i + 1:02d}: ekranda {caps[i] + excess:.1f} sn kalmalı, klip {clip_durations[i]:.1f} sn "
+                            f"× {max_speed:g} = {caps[i]:.1f} sn; sahne {i + 2:02d} {excess:.1f} sn erken başlıyor "
+                            "(metni bölebilirsiniz)")
+    for i in range(count - 1, 0, -1):  # geri: sondaki sahnelerin fazlası öncekine
+        excess = bounds[i + 1] - bounds[i] - caps[i]
+        if excess > 1e-6:
+            bounds[i] = round(bounds[i] + excess, 3)
+            warnings.append(f"sahne {i + 1:02d}: klip {clip_durations[i]:.1f} sn × {max_speed:g} = {caps[i]:.1f} sn'ye "
+                            f"sığmıyor; sahne {i:02d} {excess:.1f} sn uzun kalıyor (metni bölebilirsiniz)")
+    if bounds[1] - bounds[0] > caps[0] + 1e-6 or any(b - a < 0.2 for a, b in zip(bounds, bounds[1:])):
+        raise FictionError(f"seslendirme {total:.1f} sn: kliplerin {max_speed:g}× yavaşlatılmış toplamı "
+                           f"{sum(caps):.1f} sn, sahnelere sığmıyor (kısa klip uzatılmaz; metni kısaltın ya da sahne ekleyin)")
+    scenes = []
+    for i in range(count):
+        start, end = bounds[i], bounds[i + 1]
+        scenes.append({"index": i + 1, "narration_start": round(spans[i][0], 2), "narration_end": round(spans[i][1], 2),
+                       "start": start, "end": end, "duration": round(end - start, 3),
+                       "clip_duration": round(float(clip_durations[i]), 3),
+                       "speed": round(max(1.0, (end - start) / max(0.1, float(clip_durations[i]))), 4),
+                       "outside": round(max(0.0, start - spans[i][0], spans[i][1] - end), 2)})
+    return {"mode": TIMING_NARRATION, "total": round(total, 3), "scenes": scenes, "warnings": warnings,
+            "max_outside": max(scene["outside"] for scene in scenes)}
+
+
+def equal_timing(narrations: list[str], cues: list[tuple[float, float, str]], audio_duration: float) -> dict:
+    """Eşit süreli sahnelerin (1. sürüm) aralıkları ve anlatımın görüntü dışına taşan kısmı (karşılaştırma için)."""
+    seconds = scene_seconds(audio_duration, len(narrations))
+    try:
+        spans = narration_spans(narrations, cues)
+    except FictionError:
+        spans = [(None, None)] * len(narrations)
+    scenes = []
+    for i, (first, last) in enumerate(spans):
+        start, end = round(i * seconds, 3), round((i + 1) * seconds, 3)
+        outside = None if first is None else round(max(0.0, start - first, last - end), 2)
+        scenes.append({"index": i + 1, "narration_start": None if first is None else round(first, 2),
+                       "narration_end": None if last is None else round(last, 2), "start": start, "end": end,
+                       "duration": round(seconds, 3), "speed": 1.0, "outside": outside})
+    known = [scene["outside"] for scene in scenes if scene["outside"] is not None]
+    return {"mode": TIMING_EQUAL, "scenes": scenes, "warnings": [], "max_outside": max(known) if known else None}
+
+
+def prepare_scene_clip(source: str | Path, duration: float, speed: float, target: str | Path) -> Path:
+    """Sahnenin klibi: sessiz, ``speed`` > 1 ise o kat yavaş (setpts), ``duration`` saniyede kesilmiş."""
+    target = Path(target)
+    command = [utils.get_ffmpeg_binary(), "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+               *ffmpeg_inputs.ffmpeg_input(source), "-an"]
+    if speed > 1.0005:
+        command += ["-vf", f"setpts={speed:.6f}*PTS"]
+    command += ["-t", f"{duration:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+                "-pix_fmt", "yuv420p", str(target)]
+    result = subprocess.run(command, capture_output=True, check=False, timeout=600)
+    if result.returncode or not target.is_file() or not target.stat().st_size:
+        raise FictionError(f"sahne klibi hazırlanamadı: {Path(source).name}: "
+                           f"{result.stderr.decode('utf-8', 'replace').strip()[-200:]}")
+    return target
+
+
+def scene_clip_limit(task_id: str, audio_duration: float, count: int) -> float:
+    """
+    Birleştirmenin sahne başına kesme sınırı: anlatıma hizalı hazırlanmış kliplerde en uzun sahneden uzun (klipler
+    olduğu gibi sıralanır), eşit sürelilerde ses / sahne sayısı.
+    """
+    try:
+        data = json.loads((Path(utils.task_dir(task_id)) / "ai_clips" / TIMING_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    if isinstance(data, dict) and data.get("mode") == TIMING_NARRATION and data.get("scenes"):
+        return max(float(scene["duration"]) for scene in data["scenes"]) + 1.0
+    return scene_seconds(audio_duration, count)
 
 
 def load_render_plan(path: str | Path) -> dict:
@@ -904,10 +1136,9 @@ def task_clips(task_id: str, plan_path: str | Path, audio_duration: float) -> li
 
     plan = load_render_plan(plan_path)
     scenes = plan["scenes"]
-    seconds = scene_seconds(audio_duration, len(scenes))
     folder = Path(utils.task_dir(task_id)) / "ai_clips"
     folder.mkdir(parents=True, exist_ok=True)
-    paths, records = [], []
+    copies, durations = [], []
     for scene in scenes:
         source = Path(scene["file"])
         if not source.is_file():
@@ -916,11 +1147,43 @@ def task_clips(task_id: str, plan_path: str | Path, audio_duration: float) -> li
             raise FictionError(f"sahne {scene['index']:02d} klibi onaydan sonra değişmiş: {source.name}")
         target = folder / f"sahne-{scene['index']:02d}{source.suffix.lower()}"
         shutil.copy2(source, target)
-        duration = probe(target)["duration"]
-        if duration + DURATION_TOLERANCE < seconds:
-            raise FictionError(
-                f"seslendirme {audio_duration:.1f} sn: {len(scenes)} sahneye {seconds:.1f} sn düşüyor, sahne "
-                f"{scene['index']:02d} klibi {duration:.1f} sn (kısa klip uzatılmaz; metni kısaltın ya da sahne ekleyin)")
+        copies.append(target)
+        durations.append(probe(target)["duration"])
+    timing = None
+    if plan.get("timing") == TIMING_NARRATION:
+        cues = subtitle_cues(Path(utils.task_dir(task_id)) / "subtitle.srt")
+        try:
+            timing = narration_timing([scene.get("narration", "") for scene in scenes], cues,
+                                      float(audio_duration) + RENDER_TAIL_SECONDS, durations)
+        except FictionError as exc:
+            if not cues or "sığmıyor" not in str(exc):
+                logger.warning(f"kurgu: sahneler anlatıma hizalanamadı ({exc}); eşit süreli sahneler")
+            else:
+                raise
+    if timing is None:
+        seconds = scene_seconds(audio_duration, len(scenes))
+        for scene, duration in zip(scenes, durations):
+            if duration + DURATION_TOLERANCE < seconds:
+                raise FictionError(
+                    f"seslendirme {audio_duration:.1f} sn: {len(scenes)} sahneye {seconds:.1f} sn düşüyor, sahne "
+                    f"{scene['index']:02d} klibi {duration:.1f} sn (kısa klip uzatılmaz; metni kısaltın ya da sahne ekleyin)")
+        timing = {"mode": TIMING_EQUAL, "seconds": round(seconds, 3)}
+        paths = [str(copy) for copy in copies]
+    else:
+        paths = []
+        for position, (copy, scene_timing) in enumerate(zip(copies, timing["scenes"])):
+            duration = scene_timing["duration"]
+            if position == len(copies) - 1:  # son kare payı: birleştirme sesin sonunda keser
+                duration += 0.3
+            target = folder / f"sahne-{scene_timing['index']:02d}-sahne.mp4"
+            prepare_scene_clip(copy, duration, scene_timing["speed"], target)
+            paths.append(str(target))
+        for warning in timing["warnings"]:
+            logger.warning(f"kurgu zamanlaması: {warning}")
+    _write_text(folder / TIMING_FILE, json.dumps(timing, ensure_ascii=False, indent=1))
+    records = []
+    for scene, path in zip(scenes, paths):
+        target, duration = Path(path), probe(path)["duration"]
         info = {"provider": PROVIDER, "asset_id": f"sahne-{scene['index']:02d}", "search_term": scene.get("narration", ""),
                 "credit": plan.get("tool", TOOL), "tool": plan.get("tool", TOOL), "prompt": scene.get("prompt", ""),
                 "style_version": plan.get("style_version", ""), "sha256": scene["sha256"],
@@ -931,8 +1194,12 @@ def task_clips(task_id: str, plan_path: str | Path, audio_duration: float) -> li
             info["vision"] = vision
         item = MaterialInfo(provider=PROVIDER, url=str(target), duration=max(1, int(duration)), source_info=info)
         records.append(material._material_source_record(item, str(target)))
-        paths.append(str(target))
     material._persist_material_sources(task_id, records)
     task_materials.materials_ready()
-    logger.info(f"kurgu klipleri: {len(paths)} sahne, sahne başına {seconds:.2f} sn")
+    if timing["mode"] == TIMING_NARRATION:
+        logger.info(f"kurgu klipleri: {len(paths)} sahne anlatıma hizalı: "
+                    + ", ".join(f"{s['index']:02d} {s['duration']:.1f} sn" + (f" ×{s['speed']:.2f}" if s["speed"] > 1 else "")
+                                for s in timing["scenes"]))
+    else:
+        logger.info(f"kurgu klipleri: {len(paths)} sahne, sahne başına {timing['seconds']:.2f} sn")
     return paths

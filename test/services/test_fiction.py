@@ -355,7 +355,7 @@ def test_preparation_writes_the_plan_and_the_package(fiction_batch):
         assert (folder / name).is_file()
     assert (folder / fiction.INBOX).is_dir()
     review = batch_review.load_review(folder)
-    expected = fiction.scene_count(batch_review.estimate(SCRIPT)["tahmini_sn"], 8)
+    expected = len(fiction.narration_groups(SCRIPT))  # 2. sürüm: cümle sınırlarından, anlatım ≤ 7,5 sn
     assert review["scene_plan"]["scene_count"] == expected and review["terms"] == []
     assert batch_review.is_clean(review)  # no terms needed for fiction
     assert batch_review.overview(fiction_batch).items[0].status == bp.AWAITING_REVIEW

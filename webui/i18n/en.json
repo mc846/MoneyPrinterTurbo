@@ -956,6 +956,7 @@
     "batch.fiction.screening.running": "Screening the clips (flags, emblems, logos, text, faces)…",
     "batch.fiction.screening.blocked": "Screening needs a check: scene {scenes}. Upload a new clip or press \"Use anyway\" on the scene card.",
     "batch.fiction.screening.check_hint": "A flag, emblem, logo, readable text or recognizable face was found: upload a new clip or approve it explicitly to render.",
+    "batch.fiction.timing_warnings": "Narration length: these scenes are narrated for long. The render aligns the scenes to the narration; a clip is slowed down at most 1.2×, beyond that the next scene starts early. Edit the text to split a long sentence.",
     "batch.review.error.plan_edit": "The scene plan edit is not valid.",
     "batch.review.error.no_plan": "This subject has no scene plan.",
     "batch.review.action.plan_edit": "Plan edit",

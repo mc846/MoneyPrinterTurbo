@@ -1019,6 +1019,8 @@ def _clips_command(args, batch_dir: Path, state: bp.BatchState) -> int:
         print(f"eşleşmeyen dosyalar (--ata DOSYA=SAHNE): {', '.join(clips['unmatched'])}")
     if plan.get("production_order"):
         print("üretim sırası: " + ", ".join(f"{entry['index']:02d}" for entry in plan["production_order"]))
+    for warning in fiction.timing_warnings(plan):
+        print(f"süre uyarısı: {warning}")
     fresh = [record for _index, record in screened if not record.get("cached") and record.get("model")]
     if fresh:
         cost = fiction_screen.total_cost(fresh)

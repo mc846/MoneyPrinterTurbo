@@ -698,6 +698,7 @@
     "batch.fiction.screening.running": "Kliplər yoxlanılır (bayraq, gerb, loqo, yazı, üz)…",
     "batch.fiction.screening.blocked": "Yoxlamada nəzarət lazımdır: səhnə {scenes}. Yeni klip yükləyin və ya səhnə kartında \"Yenə də istifadə et\".",
     "batch.fiction.screening.check_hint": "Bayraq, gerb, loqo, oxunaqlı yazı və ya tanınan üz tapıldı: render üçün yeni klip yükləyin və ya açıq şəkildə təsdiqləyin.",
+    "batch.fiction.timing_warnings": "Nəql müddəti: bu səhnələrin nəqli uzundur. Render zamanı səhnələr nəqlə uyğunlaşdırılır; klip ən çox 1,2× yavaşladılır, daha uzundursa növbəti səhnə erkən başlayır. Uzun cümləni bölmək üçün mətni redaktə edin.",
     "batch.review.error.plan_edit": "Səhnə planının düzəlişi etibarlı deyil.",
     "batch.review.error.no_plan": "Bu mövzunun səhnə planı yoxdur.",
     "batch.review.action.plan_edit": "Planın düzəlişi",

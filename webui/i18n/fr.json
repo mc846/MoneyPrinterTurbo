@@ -698,6 +698,7 @@
     "batch.fiction.screening.running": "Contrôle des clips en cours (drapeaux, emblèmes, logos, texte, visages)…",
     "batch.fiction.screening.blocked": "Le contrôle demande une vérification : scène {scenes}. Importez un nouveau clip ou cliquez sur \"Utiliser quand même\" sur la carte de la scène.",
     "batch.fiction.screening.check_hint": "Un drapeau, un emblème, un logo, un texte lisible ou un visage reconnaissable a été trouvé : importez un nouveau clip ou approuvez-le explicitement pour le rendu.",
+    "batch.fiction.timing_warnings": "Durée de narration : ces scènes ont une narration longue. Le rendu aligne les scènes sur la narration ; un clip est ralenti au plus 1,2× ; au-delà, la scène suivante commence plus tôt. Modifiez le texte pour couper une phrase longue.",
     "batch.review.error.plan_edit": "La modification du plan des scènes n’est pas valide.",
     "batch.review.error.no_plan": "Ce sujet n’a pas de plan des scènes.",
     "batch.review.action.plan_edit": "Modification du plan",

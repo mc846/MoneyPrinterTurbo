@@ -1177,12 +1177,13 @@ def generate_final_videos(
             _load_material_sources(task_id), params.video_language
         )
     # Matching preserves keyword order; batch allocation varies each keyword's candidates.
-    # Fiction clips (ai_manual) are the scenes in order, each for an equal share of the narration.
+    # Fiction clips (ai_manual) are the scenes in order: prepared to their narration's length (fiction.task_clips),
+    # else each for an equal share of the narration.
     clip_duration = params.video_clip_duration
     if params.video_source == "ai_manual":
         from app.services import fiction
 
-        clip_duration = fiction.scene_seconds(audio_duration, len(downloaded_videos))
+        clip_duration = fiction.scene_clip_limit(task_id, audio_duration, len(downloaded_videos))
     if params.match_materials_to_script or params.video_source == "ai_manual":
         video_concat_mode = VideoConcatMode.sequential
     elif params.video_count == 1:

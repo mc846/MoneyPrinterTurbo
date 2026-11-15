@@ -698,6 +698,7 @@
     "batch.fiction.screening.running": "Verificando os clipes (bandeiras, emblemas, logotipos, texto, rostos)…",
     "batch.fiction.screening.blocked": "A verificação requer revisão: cena {scenes}. Envie um novo clipe ou clique em \"Usar mesmo assim\" no cartão da cena.",
     "batch.fiction.screening.check_hint": "Foi encontrada uma bandeira, um emblema, um logotipo, texto legível ou um rosto reconhecível: envie um novo clipe ou aprove-o explicitamente para renderizar.",
+    "batch.fiction.timing_warnings": "Duração da narração: estas cenas têm narração longa. A renderização alinha as cenas à narração; um clipe é desacelerado no máximo 1,2×; além disso, a cena seguinte começa mais cedo. Edite o texto para dividir uma frase longa.",
     "batch.review.error.plan_edit": "A edição do plano de cenas não é válida.",
     "batch.review.error.no_plan": "Este tema não tem plano de cenas.",
     "batch.review.action.plan_edit": "Edição do plano",
