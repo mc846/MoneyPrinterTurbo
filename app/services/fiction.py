@@ -588,9 +588,13 @@ def reference_images(plan: dict) -> list[dict]:
         if not scenes:
             continue
         description = scrub_prompt_words(str(item.get("description") or "").strip()).rstrip(".")
+        description = description + "." if description else ""
+        if re.search(r"\b(?:astronaut|spacesuit|suit|crew)\b", f"{name} {description}", re.IGNORECASE) \
+                and "unmarked" not in description.lower():
+            # Kural 3'ün olumlu tarifi: ilk gerçek videoda bu giysinin omzunda bayrak çıktı.
+            description += " The suit is plain white and grey with blank, unmarked shoulders, chest and backpack."
         references.append({"name": name, "scenes": scenes,
-                           "prompt": REFERENCE_PROMPT.format(name=name, description=description + "." if description
-                                                             else "")})
+                           "prompt": REFERENCE_PROMPT.format(name=name, description=description.strip())})
     return references
 
 

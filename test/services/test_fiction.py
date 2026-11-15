@@ -235,6 +235,11 @@ def test_reference_images_head_the_package_when_the_shots_share_objects(plan, tm
     many["style_book"]["recurring"] = [{"name": f"o{i}", "description": f"object {i}"} for i in range(5)]
     many["scenes"][0]["elements"] = [f"o{i}" for i in range(5)]
     assert fiction.scene_references(many, many["scenes"][0]) == ["o0", "o1", "o2"]
+    suited = json.loads(json.dumps(plan))
+    suited["style_book"]["recurring"] = [{"name": "astronaut", "description": "A figure in a white suit, no patches."}]
+    suited["scenes"][0]["elements"] = ["astronaut"]
+    astronaut = fiction.reference_images(suited)[0]["prompt"]
+    assert "blank, unmarked shoulders, chest and backpack" in astronaut and "patches" not in astronaut
     bare = {**plan, "scenes": [{**scene, "elements": []} for scene in plan["scenes"]]}
     assert fiction.reference_images(bare) == [] and "Önce bunları üret" not in fiction.package_html(bare)
 
