@@ -212,6 +212,41 @@ def test_the_prompt_package(plan, tmp_path):
     assert markdown.count("```text") == 7 and "## Sahne 02 · `sahne-02.mp4` · uygun değil" in markdown
     data = json.loads(paths[0].read_text(encoding="utf-8"))
     assert data["clips"]["2"]["status"] == fiction.UNSUITABLE and data["clips"]["1"]["status"] == fiction.WAITING
+    assert "Üretim sırası" not in paths[2].read_text(encoding="utf-8") and "production_order" not in data
+
+
+def test_the_production_order_heads_the_package_and_survives_rewrites(plan, tmp_path):
+    ordered = fiction.set_production_order(plan, [4, 1], {4: "ana fikir: kazıcı", 1: "kanca"})
+    assert "production_order" not in plan  # the input is not changed
+    assert [entry["index"] for entry in ordered["production_order"]] == [4, 1, 2, 3, 5, 6]
+    assert ordered["production_order"][0]["why"] == "ana fikir: kazıcı" and ordered["production_order"][2]["why"] == ""
+    assert [scene["index"] for scene in ordered["scenes"]] == [1, 2, 3, 4, 5, 6]  # the video keeps its order
+    folder = tmp_path / "konu"
+    fiction.write_package(folder, ordered)
+    page = (folder / fiction.PACKAGE_FILE).read_text(encoding="utf-8")
+    assert page.index("Üretim sırası (önem sırasına göre)") < page.index("Nasıl kullanılır") < page.index("Stil kitabı")
+    assert page.index("id='sahne-04'") < page.index("id='sahne-01'") < page.index("id='sahne-02'")
+    assert "— ana fikir: kazıcı" in page and page.count("<li>") == 6
+    markdown = (folder / fiction.PROMPTS_FILE).read_text(encoding="utf-8")
+    assert "1. Sahne 04 · bekliyor — ana fikir: kazıcı" in markdown and "3. Sahne 02 · bekliyor" in markdown
+    assert markdown.index("## Sahne 04") < markdown.index("## Sahne 01") < markdown.index("## Sahne 02")
+    # An uploaded clip rewrites the package: the order and the note stay, the status follows.
+    fiction.accept_upload(folder, ordered, 4, "x.mp4", make_clip(tmp_path / "x.mp4").read_bytes())
+    page = (folder / fiction.PACKAGE_FILE).read_text(encoding="utf-8")
+    assert "Üretim sırası" in page and "1/6 klip geldi" in page
+    assert "Sahne 04</a> <span class='badge geldi'>" in page
+    # Wrong orders are refused; a new order keeps the old reasons; an empty order removes it.
+    with pytest.raises(fiction.FictionError, match="planda yok"):
+        fiction.set_production_order(plan, [9])
+    with pytest.raises(fiction.FictionError, match="iki kez"):
+        fiction.set_production_order(plan, [2, 2])
+    with pytest.raises(fiction.FictionError, match="planda yok"):
+        fiction.set_production_order(plan, [1], {7: "x"})
+    again = fiction.set_production_order(ordered, [1, 4])
+    assert again["production_order"][1] == {"index": 4, "why": "ana fikir: kazıcı"}
+    assert "production_order" not in fiction.set_production_order(ordered, [])
+    # Plan edits keep the order.
+    assert fiction.apply_edits(ordered, {2: "yeni istem"})["production_order"] == ordered["production_order"]
 
 
 # ---------------------------------------------------------------- klipler: yükleme, eşleştirme, doğrulama
@@ -347,6 +382,7 @@ class PlanServices:
 def test_a_text_edit_regenerates_the_plan_and_keeps_edited_prompts(fiction_batch):
     folder = _folder(fiction_batch)
     batch_review.save_plan_edits(folder, {"prompts": {2: "elle yazılmış istem"}})
+    batch_review.save_production_order(folder, [3, 1], {3: "kalp"})
     review = batch_review.load_review(folder)
     assert review["scene_plan"]["scenes"][1]["prompt_edited"]
     assert "elle yazılmış istem" in (folder / fiction.PROMPTS_FILE).read_text(encoding="utf-8")
@@ -359,6 +395,9 @@ def test_a_text_edit_regenerates_the_plan_and_keeps_edited_prompts(fiction_batch
     assert outcome.status == "approved" and services.calls == ["audit", "plan"]
     plan = outcome.review["scene_plan"]
     assert fiction.plan_current(plan, edited) and plan["scenes"][1]["prompt"] == "elle yazılmış istem"
+    # A new text means new scenes: the old production order does not carry over.
+    assert "production_order" not in plan
+    assert "Üretim sırası" not in (folder / fiction.PACKAGE_FILE).read_text(encoding="utf-8")
 
 
 def test_approved_fiction_waits_for_clips_then_renders_with_the_plan(fiction_batch, tmp_path):
@@ -405,6 +444,36 @@ def test_the_clips_command(fiction_batch, capsys):
     assert "sahne-01.mp4 → sahne 01" in out and "sahne 01: geldi" in out and "eşleşmeyen dosyalar" in out
     assert batch_review.cli_main(["klipler", str(fiction_batch), "1", "--ata", "isimsiz.mp4=2"]) == 0
     assert "sahne 02: geldi" in capsys.readouterr().out
+
+
+def test_the_production_order_command_keeps_the_approval(fiction_batch, capsys):
+    folder = _folder(fiction_batch)
+    batch_review.approve(folder)
+    capsys.readouterr()
+    assert batch_review.cli_main(["klipler", str(fiction_batch), "1", "--uretim-sirasi", "3,1",
+                                  "--neden", "3=en kritik", "--neden", "1=kanca"]) == 0
+    out = capsys.readouterr().out
+    assert "üretim sırası: 03, 01, 02" in out and "klip bekleniyor" in out
+    review = batch_review.load_review(folder)
+    assert batch_review.is_approved(review)  # the order is not content: the approval stands
+    assert review["scene_plan"]["production_order"][:2] == [{"index": 3, "why": "en kritik"},
+                                                            {"index": 1, "why": "kanca"}]
+    assert "— en kritik" in (folder / fiction.PACKAGE_FILE).read_text(encoding="utf-8")
+    # The inbox check rewrites the package from review.json's plan: the order stays.
+    make_clip(fiction.inbox(folder) / "sahne-03.mp4")
+    assert batch_review.cli_main(["klipler", str(fiction_batch), "1", "--kontrol"]) == 0
+    assert "üretim sırası: 03, 01" in capsys.readouterr().out
+    page = (folder / fiction.PACKAGE_FILE).read_text(encoding="utf-8")
+    assert "Sahne 03</a> <span class='badge geldi'>" in page and "— kanca" in page
+    assert batch_review.cli_main(["klipler", str(fiction_batch), "1", "--uretim-sirasi", "99"]) == 2
+    assert batch_review.cli_main(["klipler", str(fiction_batch), "1", "--neden", "1=x"]) == 2
+    assert batch_review.cli_main(["klipler", str(fiction_batch), "1", "--uretim-sirasi", "1", "--neden", "x"]) == 2
+    # An empty value removes the order; a folder without a plan is refused.
+    assert batch_review.cli_main(["klipler", str(fiction_batch), "1", "--uretim-sirasi", ""]) == 0
+    assert "production_order" not in batch_review.load_review(folder)["scene_plan"]
+    assert "Üretim sırası" not in (folder / fiction.PACKAGE_FILE).read_text(encoding="utf-8")
+    with pytest.raises(batch_review.ReviewError, match="hazırlanmadı"):
+        batch_review.save_production_order(folder.parent / "yok", [1])
 
 
 # ---------------------------------------------------------------- görev: klipler, süre, kayıt
