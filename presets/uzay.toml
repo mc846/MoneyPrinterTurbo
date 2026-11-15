@@ -31,6 +31,8 @@ final_render_engine = "ffmpeg"
 # Altyazı görünümü de burada sabit: config.toml'daki WebUI değerleri değişse de (05.11'de eski bir WebUI
 # süreci altyazıyı kapatmış, sesi 0,8'e çekmişti) toplu iş aynı videoyu üretir; .srt için altyazı açık olmalı.
 subtitle_enabled = true
+# Videoya gömülü altyazıda cümle sonundaki "?" ve "!" korunur (metinden; .srt dosyaları değişmez).
+subtitle_keep_end_punctuation = true
 subtitle_position = "bottom"
 font_size = 60
 text_fore_color = "#FFFFFF"

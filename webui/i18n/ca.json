@@ -843,6 +843,7 @@
     "revision.words": "{words} paraules · uns {seconds} s de veu",
     "revision.subtitle_section": "Subtítols",
     "revision.subtitle_enabled": "Mostra els subtítols",
+    "revision.subtitle_end_punctuation": "Conserva els signes ? i ! del final de frase als subtítols del vídeo",
     "revision.font": "Tipus de lletra",
     "revision.font_size": "Mida",
     "revision.stroke_width": "Gruix del contorn",

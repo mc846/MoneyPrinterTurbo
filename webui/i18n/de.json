@@ -843,6 +843,7 @@
     "revision.words": "{words} Wörter · etwa {seconds} s Sprechtext",
     "revision.subtitle_section": "Untertitel",
     "revision.subtitle_enabled": "Untertitel anzeigen",
+    "revision.subtitle_end_punctuation": "Satzschließende ? und ! in den Untertiteln des Videos behalten",
     "revision.font": "Schriftart",
     "revision.font_size": "Schriftgröße",
     "revision.stroke_width": "Konturbreite",

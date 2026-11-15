@@ -96,6 +96,9 @@ def _form(tr, task_id: str, base: dict) -> tuple[str, dict]:
     with st.expander(tr("revision.subtitle_section"), expanded=True):
         enabled = st.checkbox(tr("revision.subtitle_enabled"), value=bool(params.get("subtitle_enabled", True)),
                               key=f"{key}_subtitle")
+        end_punctuation = st.checkbox(tr("revision.subtitle_end_punctuation"),
+                                      value=bool(params.get("subtitle_keep_end_punctuation")),
+                                      key=f"{key}_end_punctuation")
         columns = st.columns(3)
         fonts = _with(_fonts(), params.get("font_name"))
         font_name = columns[0].selectbox(tr("revision.font"), fonts, index=fonts.index(params.get("font_name")),
@@ -141,8 +144,11 @@ def _form(tr, task_id: str, base: dict) -> tuple[str, dict]:
         "stroke_color": stroke_color, "stroke_width": float(stroke_width), "subtitle_position": position,
         "custom_position": float(custom_position), "bgm_type": bgm_type, "bgm_file": bgm_file,
         "bgm_volume": float(bgm_volume), "nasa_credit_overlay": credit,
+        "subtitle_keep_end_punctuation": end_punctuation,
     }
-    changed = {name: value for name, value in values.items() if params.get(name) != value}
+    # A task made before a setting existed has no value for it: its default is not a change.
+    defaults = {"subtitle_keep_end_punctuation": False}
+    changed = {name: value for name, value in values.items() if params.get(name, defaults.get(name)) != value}
     if "custom_position" in changed and position != "custom":
         changed.pop("custom_position")
     if "bgm_file" in changed and bgm_type != "custom":

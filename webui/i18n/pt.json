@@ -843,6 +843,7 @@
     "revision.words": "{words} palavras · cerca de {seconds} s de narração",
     "revision.subtitle_section": "Legendas",
     "revision.subtitle_enabled": "Mostrar legendas",
+    "revision.subtitle_end_punctuation": "Manter ? e ! de fim de frase nas legendas do vídeo",
     "revision.font": "Fonte",
     "revision.font_size": "Tamanho",
     "revision.stroke_width": "Espessura do contorno",

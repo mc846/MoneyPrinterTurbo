@@ -34,6 +34,37 @@ def file_to_subtitles(filename):
     return times_texts
 
 
+_CLOSING = "\"'”’»)]"
+
+
+def restore_end_punctuation(cues, script, marks="?!"):
+    """
+    Burned-in subtitles: the split at punctuation drops a cue's closing "?" or "!" ("olsaydı?" -> "olsaydı").
+    Each cue is found in the script in order (its words, any separators between them) and gets back the
+    marks that follow it there (after a closing quote or bracket). A cue not found is left as it is.
+    ``cues`` are moviepy cues ((start, end), text); a new list is returned, nothing is written.
+    """
+    script = str(script or "")
+    if not script.strip():
+        return list(cues)
+    position, restored = 0, []
+    for timing, text in cues:
+        words = re.findall(r"\w+", str(text or ""))
+        match = None
+        if words:
+            pattern = r"\W*?".join(re.escape(word) for word in words)
+            match = re.compile(pattern).search(script, position)
+        if match is None:
+            restored.append((timing, text))
+            continue
+        position = match.end()
+        tail = re.match(rf"[{re.escape(_CLOSING)}]*([{re.escape(marks)}]+)", script[position:])
+        if tail and not str(text).rstrip().endswith(tail.group(1)):
+            text = str(text).rstrip() + tail.group(1)
+        restored.append((timing, text))
+    return restored
+
+
 def moviepy_subtitles(filename):
     """Convert only cue headers; timestamp-bearing text remains caption text."""
     from moviepy.tools import convert_to_seconds

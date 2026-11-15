@@ -1101,6 +1101,7 @@
     "revision.words": "{words} 个词 · 配音约 {seconds} 秒",
     "revision.subtitle_section": "字幕",
     "revision.subtitle_enabled": "显示字幕",
+    "revision.subtitle_end_punctuation": "在视频字幕中保留句末的 ? 和 !",
     "revision.font": "字体",
     "revision.font_size": "字号",
     "revision.stroke_width": "描边宽度",

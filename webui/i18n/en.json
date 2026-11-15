@@ -1101,6 +1101,7 @@
     "revision.words": "{words} words · about {seconds} s of voiceover",
     "revision.subtitle_section": "Subtitles",
     "revision.subtitle_enabled": "Show subtitles",
+    "revision.subtitle_end_punctuation": "Keep a sentence's closing ? and ! in the video's subtitles",
     "revision.font": "Font",
     "revision.font_size": "Font size",
     "revision.stroke_width": "Outline width",

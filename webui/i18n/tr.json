@@ -843,6 +843,7 @@
     "revision.words": "{words} kelime · yaklaşık {seconds} sn seslendirme",
     "revision.subtitle_section": "Altyazı",
     "revision.subtitle_enabled": "Altyazıyı göster",
+    "revision.subtitle_end_punctuation": "Cümle sonundaki ? ve ! işaretlerini videodaki altyazıda koru",
     "revision.font": "Yazı tipi",
     "revision.font_size": "Yazı boyutu",
     "revision.stroke_width": "Kontur kalınlığı",

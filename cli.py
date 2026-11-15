@@ -752,6 +752,15 @@ Batch manifests:
         ),
     )
     subtitle_group.add_argument(
+        "--subtitle-keep-end-punctuation",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "keep a sentence's closing '?' and '!' in the burned-in subtitles "
+            "(taken from the script; the .srt files do not change; default: off)"
+        ),
+    )
+    subtitle_group.add_argument(
         "--font-name",
         default=None,
         help=(
@@ -1190,6 +1199,7 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         "sonilo_bgm_prompt",
         "video_music_prompt",
         "font_name",
+        "subtitle_keep_end_punctuation",
         "subtitle_position",
         "subtitle_display_mode",
         "subtitle_animation",
