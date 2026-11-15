@@ -190,11 +190,11 @@ def _vision_record(vision: Any) -> dict[str, Any] | None:
     if not isinstance(vision, dict):
         return None
     record: dict[str, Any] = {}
-    for field in ("decision", "image_type", "subject", "person", "label", "model"):
+    for field in ("decision", "image_type", "subject", "person", "label", "model", "screening"):
         value = vision.get(field)
         if isinstance(value, str) and value:
             record[field] = value[:80]
-    for field in ("subject_matches_anchor", "text_overlay", "logo", "cached"):
+    for field in ("subject_matches_anchor", "text_overlay", "logo", "cached", "use_anyway"):
         if isinstance(vision.get(field), bool):
             record[field] = vision[field]
     if isinstance(vision.get("prompt_version"), int):

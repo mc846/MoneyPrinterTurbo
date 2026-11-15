@@ -575,6 +575,21 @@ def unscreened_scenes(material_sources) -> list[dict]:
     return scenes
 
 
+def clip_screening(material_sources) -> list[dict]:
+    """
+    Kurgu klip taramasının bulgusu olan sahneleri (``vision.screening`` kontrol / uyarı): bayrak, arma, logo,
+    yazı, yüz (render kullanıcının "yine de kullan" onayıyla) ya da yama ve istemden sapma.
+    """
+    scenes = []
+    for record in material_sources or []:
+        vision = record.get("vision") if isinstance(record, dict) else None
+        if isinstance(vision, dict) and vision.get("screening") in ("kontrol", "uyari"):
+            scenes.append({"asset_id": str(record.get("asset_id") or ""), "durum": vision["screening"],
+                           "bulgular": [str(reason) for reason in vision.get("reasons") or []],
+                           "yine_de_kullanildi": bool(vision.get("use_anyway")), "model": vision.get("model", "")})
+    return scenes
+
+
 def technical_checks(task_dir: Path, final_video: Path, script: str, params: dict, terms: list[str],
                      material_sources, log_lines: list[str], preset) -> dict:
     duration = round(_media_duration(final_video), 1)
@@ -595,6 +610,7 @@ def technical_checks(task_dir: Path, final_video: Path, script: str, params: dic
         "goruntuler": material_summary(material_sources),
         **label_checks(material_sources),
         "taranmamis_sahneler": unscreened_scenes(material_sources),
+        "klip_taramasi": clip_screening(material_sources),
     }
     checks.update(log_summary(log_lines, terms))
     return checks
@@ -633,6 +649,9 @@ def check_warnings(checks: dict) -> list[str]:
                         f"{vision.get('taranmadi', 0)} klip taranmadan kullanıldı")
     if checks.get("etiket_gerekli"):
         warnings.append(f"etiket gerekli: {', '.join(checks['etiket_gerekli'])} (veri görselleştirmesi)")
+    for scene in checks.get("klip_taramasi") or []:
+        approved = " (kullanıcı \"yine de kullan\" dedi)" if scene.get("yine_de_kullanildi") else ""
+        warnings.append(f"klip taraması: {scene['asset_id']}: {'; '.join(scene['bulgular'])}{approved}")
     return warnings
 
 
@@ -870,6 +889,9 @@ def _item_card(batch_dir: Path, item) -> str:
         *([("Taranmamış sahne", "; ".join(f"{s['provider']}:{s['asset_id']} ({s['terim']}; {s['neden']})"
                                           for s in checks["taranmamis_sahneler"]))]
           if checks.get("taranmamis_sahneler") else []),
+        *([("Klip taraması", "; ".join(
+            f"{s['asset_id']}: {', '.join(s['bulgular'])}" + (" (yine de kullanıldı)" if s["yine_de_kullanildi"] else "")
+            for s in checks["klip_taramasi"]))] if checks.get("klip_taramasi") else []),
         ("Boş terim", ", ".join(checks.get("bos_terimler", [])) or "yok"),
         ("Yedeğe geçen terim", ", ".join(checks.get("yedege_gecen_terimler", [])) or "yok"),
         ("Filtre elemeleri", ", ".join(f"{ELIMINATION_LABELS.get(k, k)} {v}" for k, v in elim.items() if v) or "yok"),

@@ -27,6 +27,7 @@ new material enters materials.json marked as added by the revision.
 """
 
 import os
+import re
 import shutil
 import uuid
 from dataclasses import asdict, dataclass
@@ -399,6 +400,20 @@ def add_fiction_clip(task_id: str, revision: str, scene: dict, path: str, previo
         "sha256": fiction._sha256(target), "uploaded_at": datetime.now().isoformat(timespec="seconds"),
         "scene_label": previous.get("scene_label") or fiction.SCENE_LABEL, "ai_generated": True,
     }
+    # Clip screening: the revision dialog screened this file with this prompt already (cached by SHA-256 and
+    # prompt), else it is screened now. Choosing the clip in a revision is the user's explicit "use anyway".
+    from app.services import fiction_screen
+
+    number = re.search(r"(\d+)$", str(previous.get("asset_id") or scene["id"]))
+    screening = fiction_screen.screen_clip(target, info_record["prompt"], int(number.group(1)) if number else 0, 0,
+                                           fiction.Settings())
+    summary = {"status": screening.get("status"), "model": screening.get("model", ""),
+               "findings": [finding.get("text", "") for finding in screening.get("findings") or []],
+               "warnings": list(screening.get("warnings") or []), "error": screening.get("error", ""),
+               "use_anyway": screening.get("status") == fiction.SCREEN_CHECK}
+    info_record["vision"] = fiction.vision_record(summary)
+    if screening.get("status") in (fiction.SCREEN_CHECK, fiction.SCREEN_WARN):
+        warnings = [*warnings, f"klip taraması: {fiction.screening_text(screening)}"]
     from app.services import material
 
     item = MaterialInfo(provider=fiction.PROVIDER, url=str(target), duration=max(1, int(info["duration"])),

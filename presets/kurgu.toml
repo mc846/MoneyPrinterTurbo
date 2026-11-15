@@ -3,7 +3,8 @@
 #
 # Akış iki aşamalıdır: hazırlık metni, denetimi ve sahne planını (istem paketi) üretir; metin ve istemler
 # onaylanınca her sahnenin klibi Flow'da üretilip yüklenir (WebUI'da sahne kartı ya da konu klasöründeki
-# gelen/ klasörü); bütün klipler gelince "batch.py render <klasör>". Ağ araması yok, görsel tarama yok.
+# gelen/ klasörü); bütün klipler gelince "batch.py render <klasör>". Ağ araması yok; stok görsel taraması
+# yok, ama yüklenen her klip taranır ([fiction] clip_screening: bayrak, arma, logo, yazı, yüz, istemden sapma).
 # Ayrıntı: CLAUDE.md "Kurgu kanalı" ve app/services/fiction.py.
 
 [video]
@@ -63,6 +64,12 @@ Doğruluk kuralları gerçek arka plan cümlelerine uygulanır. Akıcı, sade ve
 clip_seconds = 8
 tool = "Google Flow / Veo"
 style = "gerçekçi, sinematik bilimkurgu; yakın gelecek (2040'lar); sakin ve geniş planlar; ajans logosu ya da bayrak yok"
+# Yüklenen klibin üç karesi (başı, ortası, sonu) görsel tarama arka ucuyla taranır (app/services/fiction_screen.py).
+# Bayrak, arma, logo, okunabilir yazı ya da tanınabilir yüz: "kontrol gerekli", render "yine de kullan" onayı
+# ister; yama ve istemden büyük sapma uyarıdır. Gemini kullanılamazsa yedek model.
+clip_screening = true
+clip_screening_model = "gemini:gemini-3.5-flash-lite"
+clip_screening_fallback = "claude:sonnet"
 
 [quality]
 target_duration = [40, 70]

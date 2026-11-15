@@ -93,7 +93,8 @@ SCRIPT_CONTENTS = ("gercek", "kurgu")
 QUALITY_OPTIONS = {"target_duration", "audit", "review_before_render"}
 PACKAGE_OPTIONS = {"subtitle_translations"}
 # [fiction]: kurgu kanalının sahne planı ve klipleri (app/services/fiction.py).
-FICTION_OPTIONS = {"clip_seconds": int, "tool": str, "scene_label": str, "style": str}
+FICTION_OPTIONS = {"clip_seconds": int, "tool": str, "scene_label": str, "style": str, "clip_screening": bool,
+                   "clip_screening_model": str, "clip_screening_fallback": str}
 PRESET_SECTIONS = {"video", "app", "script", "quality", "package", "fiction"}
 PROMPT_PLACEHOLDERS = {"kelime_min", "kelime_max", "konu"}
 
@@ -365,7 +366,7 @@ def _fiction_settings(options: dict, content: str, video: dict, review_before_re
 
     for key, value in options.items():
         expected = FICTION_OPTIONS[key]
-        if not isinstance(value, expected) or isinstance(value, bool):
+        if not isinstance(value, expected) or (expected is not bool and isinstance(value, bool)):
             raise PresetError(f"[fiction] {key} {expected.__name__} olmalı")
     if video.get("video_source") != fiction.PROVIDER:
         if options:
@@ -382,9 +383,13 @@ def _fiction_settings(options: dict, content: str, video: dict, review_before_re
     if video.get("video_clip_duration") not in (None, clip_seconds):
         raise PresetError("[video] video_clip_duration ile [fiction] clip_seconds aynı olmalı")
     label = options.get("scene_label")
+    defaults = fiction.Settings()
     return fiction.Settings(clip_seconds=clip_seconds, tool=options.get("tool", fiction.TOOL),
                             scene_label=({"tr": label, "en": label} if label else dict(fiction.SCENE_LABEL)),
-                            style=options.get("style", ""))
+                            style=options.get("style", ""),
+                            screening=options.get("clip_screening", defaults.screening),
+                            screening_model=options.get("clip_screening_model", defaults.screening_model),
+                            screening_fallback=options.get("clip_screening_fallback", defaults.screening_fallback))
 
 
 def parse_languages(value, name: str) -> tuple[str, ...]:
@@ -871,7 +876,7 @@ def _render_snapshot(state: BatchState, batch_dir: Path, preset: Preset | None =
     (sahne planı olan) ancak bütün sahnelerin klibi gelmişse alınır; render planı (dosyalar, SHA-256'ları,
     istemler) yazılıp göreve verilir.
     """
-    from app.services import batch_review, fiction
+    from app.services import batch_review, fiction, fiction_screen
 
     snapshot = {}
     for item in state.items:
@@ -890,8 +895,12 @@ def _render_snapshot(state: BatchState, batch_dir: Path, preset: Preset | None =
         plan = approved.get("scene_plan")
         if plan:
             try:
-                label = preset.fiction.scene_label if preset is not None and preset.fiction else None
-                approved["ai_manual_plan"] = str(fiction.write_render_plan(folder, plan, item.subject, label))
+                settings = preset.fiction if preset is not None and preset.fiction else None
+                if settings is not None and settings.screening and fiction.clips_complete(folder, plan):
+                    # Taranmamış klip (ör. gelen/'e bırakılıp CLI'dan kontrol edilen) render'dan önce taranır.
+                    fiction_screen.screen_pending(folder, plan, settings)
+                approved["ai_manual_plan"] = str(fiction.write_render_plan(
+                    folder, plan, item.subject, settings.scene_label if settings else None, settings))
             except fiction.FictionError as exc:
                 logger.info(f"toplu üretim [{item.index}] klip bekleniyor: {item.subject} ({exc})")
                 continue

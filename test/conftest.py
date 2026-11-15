@@ -73,3 +73,19 @@ def no_real_batch_review_llm(monkeypatch):
 
     monkeypatch.setattr(batch_review, "prepare_item", refuse)
     monkeypatch.setattr(batch_review, "PipelineServices", refuse)
+
+
+@pytest.fixture(autouse=True)
+def no_real_clip_screening(monkeypatch, tmp_path_factory):
+    """The fiction clip screening (fiction_screen) would ask Gemini or the claude CLI about every uploaded
+    clip. In tests the backend is unavailable (the clip is recorded as not screened, nothing fails); tests
+    of the screening replace ``_ask_backend`` themselves. Its decision cache is per test: test clips are
+    byte-identical, a decision cached by one test would answer for the next."""
+    from app.services import fiction_screen, vision_screen
+
+    def unavailable(images, prompt, backend, model):
+        raise vision_screen.VisionUnavailable("tests: the real clip screening is off")
+
+    monkeypatch.setattr(fiction_screen, "_ask_backend", unavailable)
+    cache = tmp_path_factory.mktemp("cache_fiction_screen")
+    monkeypatch.setattr(fiction_screen, "_cache_path", lambda key: cache / f"fiction-{key}.json")
