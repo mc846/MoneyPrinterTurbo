@@ -174,6 +174,40 @@ def test_the_plan_style_book_and_prompt_rules(plan):
     assert fiction.plan_current(plan, SCRIPT) and not fiction.plan_current(plan, SCRIPT + " Ek.")
 
 
+def test_the_plan_prompt_rules_from_the_first_real_video():
+    assert fiction.PLAN_PROMPT_VERSION == 3
+    prompt = fiction.PLAN_PROMPT
+    for rule in ("plain, unmarked", 'Never write the words "flag", "flags", "patch" or "patches"',
+                 "far from the camera or seen from behind", "about two degrees wide", "its lit side faces the sun",
+                 "Stars only in night scenes", "name every light source", "no sun shadows"):
+        assert rule in prompt, rule
+    style_line = next(line for line in PRESET.read_text(encoding="utf-8").splitlines() if line.startswith("style = "))
+    assert "bayrak" not in style_line and "işaretsiz" in style_line
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("no text, numbers, screens with readouts, logos, insignia or flags anywhere.",
+     "no text, numbers, screens with readouts, logos, insignia anywhere."),
+    ("A white suit, no flags, no patches, opaque gold visor.", "A white suit, opaque gold visor."),
+    ("Matte white hardware with gold-foil accents.", "Matte white hardware with gold-foil accents."),
+])
+def test_flag_and_patch_words_are_scrubbed_from_the_llm_fields(text, expected):
+    assert fiction.scrub_prompt_words(text) == expected
+
+
+def test_a_plan_answer_with_flag_words_gives_prompts_without_them():
+    def answer(prompt):
+        data = json.loads(plan_answer(prompt))
+        data["style_book"]["visual_language"] = "photoreal sci-fi; no logos, insignia or flags anywhere"
+        data["style_book"]["recurring"][0]["description"] = "six-wheeled white rover, no flags or patches"
+        data["scenes"][0]["action"] = "An astronaut with flag patches walks."
+        return json.dumps(data)
+
+    plan = fiction.build_plan("x", SCRIPT, 40.0, ask=answer)
+    for scene in plan["scenes"]:
+        assert not re.search(r"\b(flags?|patch(es)?)\b", scene["prompt"], re.IGNORECASE), scene["prompt"]
+
+
 def test_a_long_style_field_is_cut_at_a_sentence_end():
     long_text = " ".join(["Shadows are hard and black with no fill light at all."] * 40)
     style = fiction._clean_style({"visual_language": "x", "science": long_text})

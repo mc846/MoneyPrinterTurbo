@@ -57,7 +57,14 @@ CLIPS_FILE = "klipler.json"
 RENDER_PLAN_FILE = "render-plani.json"
 INBOX = "gelen"
 PLAN_VERSION = 2  # 2: scenes split by the estimated narration (narration_groups), "timing": "narration"
-PLAN_PROMPT_VERSION = 2  # 2: compact style book, per-scene "elements" (E2E: 4000-character prompts)
+# 2: compact style book, per-scene "elements" (E2E: 4000-character prompts). 3: rules from the first real Veo
+# video (a US flag on a suit although "no flags" was asked; Earth 15x too large; a lit "night"): positive,
+# plain descriptions without the words flag/patch, people far or from behind, Earth's size and phase, night lights.
+PLAN_PROMPT_VERSION = 3
+# Words the video model draws when it reads them, even negated ("no flags"): removed from the LLM's fields.
+BANNED_PROMPT_WORDS = re.compile(
+    r"\bno\s+(?:flags?|patch(?:es)?)\b(?:\s*(?:,|\bor\b|\band\b|\bnor\b)\s*)?"
+    r"|(?:\s*,\s*|\s+(?:or|and|nor)\s+)?\b(?:flags?|patch(?:es)?)\b", re.IGNORECASE)
 # Anlatıma göre sahne süreleri. Planlama: cümle sınırlarından, sahne başına tahmini anlatım ≤ MAX_NARRATION_SECONDS
 # (Edge TR, EmelNeural 1.0, helyum-3 ölçümü: konuşma ≈ 0,066 sn/harf, cümleler arası duraklama 1,1–1,5 sn).
 # Render: sahne geçişleri TTS'in gerçek zamanlarına (altyazı) hizalanır; anlatım klipten uzunsa en çok
@@ -104,11 +111,22 @@ scene, vertical 9:16. Write ONE style book shared by every clip and, for every s
    shows what the narration of that scene is about. It is clearly an animated dramatization, not documentary
    footage. "elements": the names of the recurring objects seen in that shot (only their descriptions go into
    its prompt).
-3. Nothing on screen may be text, captions or numbers; no logos or insignia (no NASA meatball or worm, no
-   flags); no real or recognizable people (people only as small figures in suits with opaque visors).
-4. "visual_tr": one or two Turkish sentences for the user (what the clip shows). "action", "camera", "light":
+3. Nothing on screen may be text, captions or numbers, logos or insignia (no space agency emblem), and no real
+   or recognizable people. Describe what IS there instead of what is not: suits are plain, unmarked
+   white-and-grey suits with blank shoulders, chest and backpack; vehicles, modules and machines have bare,
+   unmarked panels. Never write the words "flag", "flags", "patch" or "patches", not even negated: naming them
+   makes the video model draw them.
+4. People appear only as small figures far from the camera or seen from behind, in bulky suits with opaque
+   mirrored gold visors; never a close-up of a face or of the front of a visor.
+5. A celestial body in the sky gets a numeric apparent size and a phase that fits the sun's position. From the
+   Moon, Earth is a small disc about two degrees wide (about four times the full Moon seen from Earth), never
+   filling the sky; its lit side faces the sun: with the sun low behind the camera Earth is nearly full, with
+   the sun high it is a crescent or a half, during the lunar night it is full. Stars only in night scenes.
+6. In a night scene name every light source (earthshine, floodlights, lit windows, helmet lamps), say there is
+   no sunlight and there are no sun shadows, and let the ground beyond the lights fall to near-black.
+7. "visual_tr": one or two Turkish sentences for the user (what the clip shows). "action", "camera", "light":
    concrete English for the video model (what is seen, how the camera moves, the light); no story, no narration.
-5. Respond ONLY with one minified JSON object, no markdown:
+8. Respond ONLY with one minified JSON object, no markdown:
 {{"style_book":{{"visual_language":"...","lighting":"...","color":"...","era":"...","recurring":[{{"name":"...","description":"..."}}],"science":"..."}},"scenes":[{{"index":1,"visual_tr":"...","action":"...","camera":"...","light":"...","elements":["..."]}}]}}
 {style_hint}
 ## Topic
@@ -348,6 +366,28 @@ def _clean_style(raw: Any) -> dict:
     return style
 
 
+def scrub_prompt_words(text: str) -> str:
+    """LLM'in yazdığı istem alanından "flag/patch" kelimelerini (olumsuzlarıyla) çıkarır; son çare (kural 3)."""
+    cleaned = BANNED_PROMPT_WORDS.sub("", str(text or ""))
+    if cleaned == str(text or ""):
+        return cleaned
+    cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
+    cleaned = re.sub(r"([,;:])\s*([.;:])", r"\2", cleaned)
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
+
+def _scrub_plan(style: dict, shots: list[dict]) -> tuple[dict, list[dict]]:
+    before = json.dumps([style, shots], ensure_ascii=False)
+    style = {key: (scrub_prompt_words(value) if isinstance(value, str) else value) for key, value in style.items()}
+    style["recurring"] = [{**item, "description": scrub_prompt_words(item.get("description", ""))}
+                          for item in style.get("recurring") or []]
+    shots = [{**shot, **{key: scrub_prompt_words(shot.get(key, "")) for key in ("action", "camera", "light")}}
+             for shot in shots]
+    if json.dumps([style, shots], ensure_ascii=False) != before:
+        logger.warning("sahne planı: istemlerden \"flag/patch\" kelimeleri çıkarıldı (Veo onları çizer)")
+    return style, shots
+
+
 def parse_plan_answer(text: str, count: int) -> tuple[dict, list[dict]]:
     """LLM yanıtı → (stil kitabı, sahneler); sahne sayısı tutmazsa ValueError."""
     data = _json_object(text)
@@ -365,7 +405,7 @@ def parse_plan_answer(text: str, count: int) -> tuple[dict, list[dict]]:
             shot["elements"] = [names[str(name).strip().casefold()] for name in scene["elements"]
                                 if str(name).strip().casefold() in names]
         cleaned.append(shot)
-    return style, cleaned
+    return _scrub_plan(style, cleaned)
 
 
 def _ask(prompt: str) -> str:
