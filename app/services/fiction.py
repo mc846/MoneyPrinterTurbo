@@ -63,8 +63,9 @@ PLAN_VERSION = 2  # 2: scenes split by the estimated narration (narration_groups
 PLAN_PROMPT_VERSION = 3
 # Words the video model draws when it reads them, even negated ("no flags"): removed from the LLM's fields.
 BANNED_PROMPT_WORDS = re.compile(
-    r"\bno\s+(?:flags?|patch(?:es)?)\b(?:\s*(?:,|\bor\b|\band\b|\bnor\b)\s*)?"
-    r"|(?:\s*,\s*|\s+(?:or|and|nor)\s+)?\b(?:flags?|patch(?:es)?)\b", re.IGNORECASE)
+    r"(?:\s*,\s*|\s+(?:and|or|nor|with)\s+)no\s+(?:flags?|patch(?:es)?)\b"  # "…visor and no patches"
+    r"|\bno\s+(?:flags?|patch(?:es)?)\b(?:\s*(?:,|\bor\b|\band\b|\bnor\b))?\s*"  # "No flags or …"
+    r"|(?:\s*,\s*|\s+(?:or|and|nor)\s+)?\b(?:flags?|patch(?:es)?)\b", re.IGNORECASE)  # "…insignia or flags"
 # Anlatıma göre sahne süreleri. Planlama: cümle sınırlarından, sahne başına tahmini anlatım ≤ MAX_NARRATION_SECONDS
 # (Edge TR, EmelNeural 1.0, helyum-3 ölçümü: konuşma ≈ 0,066 sn/harf, cümleler arası duraklama 1,1–1,5 sn).
 # Render: sahne geçişleri TTS'in gerçek zamanlarına (altyazı) hizalanır; anlatım klipten uzunsa en çok
@@ -551,6 +552,53 @@ def _ordered(plan: dict, rows: list[dict]) -> list[dict]:
 ORDER_NOTE = ("Günlük üretim kotası sınırlıysa klipleri bu sırayla üretin: anlatım için en kritik sahneler başta. "
               "Videodaki sahne sırası değişmez; sahneler aşağıda bu sırayla listelenir.")
 
+# Referans görseller (Flow "Ingredients"; resmî Flow yardımı, 15.11.2026): AI Pro'da var; Veo 3.1 Lite ve Fast
+# destekler (8 sn, 9:16), Veo 3.1 Quality desteklemez; Fast 05.12.2026'da kalkıyor. Görsel Flow'da (Image, Nano Banana
+# Pro; aylık kredi harcamaz) ya da Gemini uygulamasında üretilir. Flow yardımı üst sınır vermiyor; eski Flow blogu ve
+# Veo 3.1 API en çok 3 referans diyor: sahne başına en çok MAX_REFERENCES.
+MAX_REFERENCES = 3
+REFERENCE_PROMPT = ("Reference image for AI video consistency: {name}. {description} One single subject, shown whole "
+                    "and centered, front three-quarter view, on a plain light-grey studio background with soft even "
+                    "light, photorealistic, square image. Nothing else in the frame; no text, letters, numbers, logos "
+                    "or markings anywhere.")
+REFERENCE_STEPS = [
+    "Her öğe için görseli bir kez üretin: Flow'da model adı → Image (Nano Banana Pro; aylık krediden düşmez) ya da "
+    "Gemini uygulamasında. İstemi aşağıdan kopyalayın; düz arka planlı, tek özneli, birbirine benzer görünümlü olsun.",
+    "Görseli Flow projesinde öğenin adıyla saklayın (görselin üstünde More → Add to Prompt ile de eklenir).",
+    "Klip üretirken model adı → Video → Ingredients seçin; model Veo 3.1 Fast ya da Lite (Quality Ingredients "
+    "desteklemez; Fast 5 Aralık 2026'da kalkıyor), 9:16, 8 sn.",
+    "Sahnede yazan referansları sürükleyin, @ ile ada göre seçin ya da Add ile ekleyin (sahne başına en çok "
+    f"{MAX_REFERENCES}), sonra sahnenin istemini yapıştırın: istem öğeyi aynı adla anar, görselle çelişmez.",
+]
+
+
+def reference_images(plan: dict) -> list[dict]:
+    """
+    Tekrarlayan öğelerin referans görsel istemleri (Flow Ingredients): {"name", "prompt", "scenes"}; yalnız bir
+    sahnede görünen öğeler. Tarifteki "flag/patch" kelimeleri çıkarılır (kural 3).
+    """
+    style = plan.get("style_book") or {}
+    references = []
+    for item in style.get("recurring") or []:
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        scenes = [scene["index"] for scene in plan.get("scenes") or []
+                  if name.casefold() in {str(element).strip().casefold() for element in scene.get("elements") or []}]
+        if not scenes:
+            continue
+        description = scrub_prompt_words(str(item.get("description") or "").strip()).rstrip(".")
+        references.append({"name": name, "scenes": scenes,
+                           "prompt": REFERENCE_PROMPT.format(name=name, description=description + "." if description
+                                                             else "")})
+    return references
+
+
+def scene_references(plan: dict, scene: dict) -> list[str]:
+    """Sahnenin Ingredients'a eklenecek referansları (en çok MAX_REFERENCES, stil kitabındaki sırayla)."""
+    names = {reference["name"]: reference for reference in reference_images(plan)}
+    return [name for name in names if scene["index"] in names[name]["scenes"]][:MAX_REFERENCES]
+
 
 # ---------------------------------------------------------------- istem paketi
 
@@ -595,10 +643,20 @@ def prompts_markdown(plan: dict, clips: dict | None = None) -> str:
         lines += [f"{position}. Sahne {row['index']:02d} · {STATUS_TEXT.get(row['status'], row['status'])}"
                   + (f" — {row['why']}" if row["why"] else "") for position, row in enumerate(rows, start=1)]
         lines.append("")
+    references = reference_images(plan)
+    if references:
+        lines += ["## Önce bunları üret: referans görseller (Flow Ingredients)", ""]
+        lines += [f"{number}. {step}" for number, step in enumerate(REFERENCE_STEPS, start=1)] + [""]
+        for reference in references:
+            used = ", ".join(f"{index:02d}" for index in reference["scenes"])
+            lines += [f"### {reference['name']} (sahne {used})", "", "```text", reference["prompt"], "```", ""]
     lines += ["## Stil kitabı", "", "```text", style_text(plan["style_book"]), "```", ""]
     for row in rows:
         lines += [f"## Sahne {row['index']:02d} · `{row['file']}` · {STATUS_TEXT.get(row['status'], row['status'])}", "",
                   f"> {row['narration']}", "", f"**Görsel:** {row.get('visual_tr', '')}", ""]
+        if references:
+            names = scene_references(plan, row)
+            lines += [f"**Referanslar (Ingredients):** {', '.join(names) if names else 'yok (yalnız istem)'}", ""]
         if row["reason"]:
             lines += [f"**Uygun değil:** {row['reason']}", ""]
         if row["screening_note"]:
@@ -621,6 +679,8 @@ button{cursor:pointer;border:0;border-radius:6px;background:#2f6fde;color:#fff;p
 .note{font-size:13px;color:#7a2020}
 .order{border-left:4px solid #2f6fde}.order ol{margin:8px 0 0;padding-left:22px}.order li{margin:4px 0}
 .order a{color:#1d4fa8;font-weight:600;text-decoration:none}.order p{margin:0;font-size:14px}
+.refs{border-left:4px solid #1f8a4c}.refs h3{font-size:14px;margin:12px 0 4px;display:flex;gap:8px;align-items:center}
+.refs ol{margin:4px 0 8px;padding-left:22px;font-size:14px}.refs li{margin:3px 0}.refline{font-size:13px;color:#1f5f3a}
 """.strip()
 
 PACKAGE_SCRIPT = """
@@ -654,16 +714,29 @@ def package_html(plan: dict, clips: dict | None = None) -> str:
         "<section><h2>Nasıl kullanılır</h2><p>Her sahnenin istemini <b>Kopyala</b> ile alıp Flow'a yapıştırın "
         "(9:16, 8 sn). Klibi gösterilen dosya adıyla indirin ve konu klasöründeki <code>"
         f"{INBOX}/</code> klasörüne bırakın ya da WebUI'da sahne kartından yükleyin.</p></section>",
-        "<section><h2>Stil kitabı <button onclick=\"copyText('style',this)\">Kopyala</button></h2>"
-        f"<pre id='style'>{esc(style_text(plan['style_book']))}</pre></section>",
     ]
+    references = reference_images(plan)
+    if references:
+        steps = "".join(f"<li>{esc(step)}</li>" for step in REFERENCE_STEPS)
+        items = "".join(
+            f"<h3>{esc(reference['name'])} <span class='badge'>sahne "
+            f"{esc(', '.join(f'{index:02d}' for index in reference['scenes']))}</span> "
+            f"<button onclick=\"copyText('ref{number}',this)\">Kopyala</button></h3>"
+            f"<pre id='ref{number}'>{esc(reference['prompt'])}</pre>" for number, reference in enumerate(references, 1))
+        parts.append(f"<section class='refs' id='referanslar'><h2>Önce bunları üret: referans görseller "
+                     f"(Flow Ingredients)</h2><ol>{steps}</ol>{items}</section>")
+    parts.append("<section><h2>Stil kitabı <button onclick=\"copyText('style',this)\">Kopyala</button></h2>"
+                 f"<pre id='style'>{esc(style_text(plan['style_book']))}</pre></section>")
     for row in rows:
         anchor = f"p{row['index']:02d}"
+        names = scene_references(plan, row) if references else []
         parts.append(
             f"<section id='sahne-{row['index']:02d}'><h2>Sahne {row['index']:02d} <code>{esc(row['file'])}</code> "
             f"<span class='badge {esc(row['status'])}'>{esc(STATUS_TEXT.get(row['status'], row['status']))}</span> "
             f"<button onclick=\"copyText('{anchor}',this)\">Kopyala</button></h2>"
             f"<blockquote>{esc(row['narration'])}</blockquote><p>{esc(row.get('visual_tr', ''))}</p>"
+            + (f"<p class='refline'>Referanslar (Ingredients): <b>{esc(', '.join(names) or 'yok (yalnız istem)')}</b>"
+               "</p>" if references else "")
             + (f"<p class='note'>Uygun değil: {esc(row['reason'])}</p>" if row["reason"] else "")
             + (f"<p class='note'>Tarama: {esc(row['screening_note'])}</p>" if row["screening_note"] else "")
             + f"<pre id='{anchor}'>{esc(row['prompt'])}</pre></section>")
@@ -695,7 +768,8 @@ def write_package(folder: Path, plan: dict, clips: dict | None = None) -> list[P
     folder.mkdir(parents=True, exist_ok=True)
     clips = clips if clips is not None else load_clips(folder)
     data = {**plan, "clips": {str(row["index"]): {"status": row["status"], "reason": row["reason"]}
-                              for row in _clip_rows(plan, clips)}}
+                              for row in _clip_rows(plan, clips)},
+            "references": [{**reference, "scenes": reference["scenes"]} for reference in reference_images(plan)]}
     paths = [folder / PLAN_FILE, folder / PROMPTS_FILE, folder / PACKAGE_FILE]
     _write_text(paths[0], json.dumps(data, ensure_ascii=False, indent=1))
     _write_text(paths[1], prompts_markdown(plan, clips))

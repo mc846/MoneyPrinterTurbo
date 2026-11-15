@@ -190,6 +190,8 @@ def test_the_plan_prompt_rules_from_the_first_real_video():
      "no text, numbers, screens with readouts, logos, insignia anywhere."),
     ("A white suit, no flags, no patches, opaque gold visor.", "A white suit, opaque gold visor."),
     ("Matte white hardware with gold-foil accents.", "Matte white hardware with gold-foil accents."),
+    ("A bulky white-and-grey pressure suit with an opaque gold visor and no patches.",
+     "A bulky white-and-grey pressure suit with an opaque gold visor."),
 ])
 def test_flag_and_patch_words_are_scrubbed_from_the_llm_fields(text, expected):
     assert fiction.scrub_prompt_words(text) == expected
@@ -206,6 +208,35 @@ def test_a_plan_answer_with_flag_words_gives_prompts_without_them():
     plan = fiction.build_plan("x", SCRIPT, 40.0, ask=answer)
     for scene in plan["scenes"]:
         assert not re.search(r"\b(flags?|patch(es)?)\b", scene["prompt"], re.IGNORECASE), scene["prompt"]
+
+
+def test_reference_images_head_the_package_when_the_shots_share_objects(plan, tmp_path):
+    references = fiction.reference_images(plan)
+    assert [reference["name"] for reference in references] == ["mining rover"]
+    assert references[0]["scenes"] == [1, 3, 5]  # the shots whose elements name it
+    prompt = references[0]["prompt"]
+    assert "mining rover. six-wheeled white rover." in prompt and "plain light-grey studio background" in prompt
+    assert not re.search(r"\b(flags?|patch(es)?)\b", prompt, re.IGNORECASE)
+    assert fiction.scene_references(plan, plan["scenes"][0]) == ["mining rover"]
+    assert fiction.scene_references(plan, plan["scenes"][1]) == []
+    folder = tmp_path / "konu"
+    fiction.write_package(folder, plan)
+    page = (folder / fiction.PACKAGE_FILE).read_text(encoding="utf-8")
+    assert page.index("Önce bunları üret") < page.index("Stil kitabı") < page.index("id='sahne-01'")
+    assert "Video → Ingredients" in page and "Veo 3.1 Fast ya da Lite" in page and "en çok 3" in page
+    assert page.count("Referanslar (Ingredients): <b>mining rover</b>") == 3
+    assert page.count("Referanslar (Ingredients): <b>yok (yalnız istem)</b>") == 3
+    markdown = (folder / fiction.PROMPTS_FILE).read_text(encoding="utf-8")
+    assert "### mining rover (sahne 01, 03, 05)" in markdown and "**Referanslar (Ingredients):** mining rover" in markdown
+    data = json.loads((folder / fiction.PLAN_FILE).read_text(encoding="utf-8"))
+    assert data["references"][0]["name"] == "mining rover"
+    # At most three references per shot; no recurring object in any shot: no section.
+    many = json.loads(json.dumps(plan))
+    many["style_book"]["recurring"] = [{"name": f"o{i}", "description": f"object {i}"} for i in range(5)]
+    many["scenes"][0]["elements"] = [f"o{i}" for i in range(5)]
+    assert fiction.scene_references(many, many["scenes"][0]) == ["o0", "o1", "o2"]
+    bare = {**plan, "scenes": [{**scene, "elements": []} for scene in plan["scenes"]]}
+    assert fiction.reference_images(bare) == [] and "Önce bunları üret" not in fiction.package_html(bare)
 
 
 def test_a_long_style_field_is_cut_at_a_sentence_end():
@@ -243,7 +274,8 @@ def test_the_prompt_package(plan, tmp_path):
     assert "<script>" in page and "http" not in page.replace("http-equiv", "")  # offline: no external links
     assert "uygun değil" in page and "Uygun değil: kısa" in page and "0/6 klip geldi" in page
     markdown = paths[1].read_text(encoding="utf-8")
-    assert markdown.count("```text") == 7 and "## Sahne 02 · `sahne-02.mp4` · uygun değil" in markdown
+    # The style book, the reference image of the shared rover and the six scenes.
+    assert markdown.count("```text") == 8 and "## Sahne 02 · `sahne-02.mp4` · uygun değil" in markdown
     data = json.loads(paths[0].read_text(encoding="utf-8"))
     assert data["clips"]["2"]["status"] == fiction.UNSUITABLE and data["clips"]["1"]["status"] == fiction.WAITING
     assert "Üretim sırası" not in paths[2].read_text(encoding="utf-8") and "production_order" not in data
@@ -260,7 +292,7 @@ def test_the_production_order_heads_the_package_and_survives_rewrites(plan, tmp_
     page = (folder / fiction.PACKAGE_FILE).read_text(encoding="utf-8")
     assert page.index("Üretim sırası (önem sırasına göre)") < page.index("Nasıl kullanılır") < page.index("Stil kitabı")
     assert page.index("id='sahne-04'") < page.index("id='sahne-01'") < page.index("id='sahne-02'")
-    assert "— ana fikir: kazıcı" in page and page.count("<li>") == 6
+    assert "— ana fikir: kazıcı" in page and page.count("<li><a href='#sahne-") == 6
     markdown = (folder / fiction.PROMPTS_FILE).read_text(encoding="utf-8")
     assert "1. Sahne 04 · bekliyor — ana fikir: kazıcı" in markdown and "3. Sahne 02 · bekliyor" in markdown
     assert markdown.index("## Sahne 04") < markdown.index("## Sahne 01") < markdown.index("## Sahne 02")
