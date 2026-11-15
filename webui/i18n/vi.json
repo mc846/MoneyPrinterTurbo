@@ -843,6 +843,7 @@
     "revision.words": "{words} từ · khoảng {seconds} giây lồng tiếng",
     "revision.subtitle_section": "Phụ đề",
     "revision.subtitle_enabled": "Hiện phụ đề",
+    "revision.subtitle_end_punctuation": "Giữ dấu ? và ! cuối câu trong phụ đề của video",
     "revision.font": "Phông chữ",
     "revision.font_size": "Cỡ chữ",
     "revision.stroke_width": "Độ dày viền",

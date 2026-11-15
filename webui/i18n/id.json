@@ -843,6 +843,7 @@
     "revision.words": "{words} kata · sekitar {seconds} dtk suara",
     "revision.subtitle_section": "Subtitel",
     "revision.subtitle_enabled": "Tampilkan subtitel",
+    "revision.subtitle_end_punctuation": "Pertahankan tanda ? dan ! di akhir kalimat pada subtitle video",
     "revision.font": "Font",
     "revision.font_size": "Ukuran huruf",
     "revision.stroke_width": "Tebal garis tepi",

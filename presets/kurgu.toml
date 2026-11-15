@@ -23,6 +23,8 @@ font_name = "STHeitiMedium.ttc"
 stroke_width = 3
 final_render_engine = "ffmpeg"
 subtitle_enabled = true
+# Videoya gömülü altyazıda cümle sonundaki "?" ve "!" korunur ("Ya … olsaydı?"); .srt dosyaları değişmez.
+subtitle_keep_end_punctuation = true
 # Altyazı alt kenarın biraz üstünde: Flow'un görünür Veo filigranı sağ alt köşede (yüksekliğin son ~%8'i);
 # altyazı alt yarıda olduğu için sahne etiketi sol üstte kalır.
 subtitle_position = "custom"

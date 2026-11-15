@@ -57,7 +57,7 @@ ACTION = "revizyon"
 VOICE_FIELDS = ("voice_name", "voice_rate")
 SUBTITLE_FIELDS = (
     "subtitle_enabled", "font_name", "font_size", "text_fore_color", "stroke_color",
-    "stroke_width", "subtitle_position", "custom_position",
+    "stroke_width", "subtitle_position", "custom_position", "subtitle_keep_end_punctuation",
 )
 MUSIC_FIELDS = ("bgm_type", "bgm_file", "bgm_volume")
 EDITABLE = (*VOICE_FIELDS, *SUBTITLE_FIELDS, *MUSIC_FIELDS, "nasa_credit_overlay")
@@ -1212,6 +1212,8 @@ def build_settings(args: argparse.Namespace) -> dict:
         settings["voice_rate"] = args.ses_hizi
     if args.altyazi:
         settings["subtitle_enabled"] = args.altyazi == "acik"
+    if args.altyazi_noktalama:
+        settings["subtitle_keep_end_punctuation"] = args.altyazi_noktalama == "acik"
     for flag, name in (("yazi_tipi", "font_name"), ("yazi_boyutu", "font_size"),
                        ("yazi_rengi", "text_fore_color"), ("kontur_rengi", "stroke_color"),
                        ("kontur_kalinligi", "stroke_width"), ("altyazi_konumu", "subtitle_position"),
@@ -1259,6 +1261,8 @@ def settings_arguments(settings: dict) -> list[str]:
     for name, value in settings.items():
         if name == "subtitle_enabled":
             arguments.append(f"--altyazi={'acik' if value else 'kapali'}")
+        elif name == "subtitle_keep_end_punctuation":
+            arguments.append(f"--altyazi-noktalama={'acik' if value else 'kapali'}")
         elif name == "nasa_credit_overlay":
             arguments.append(f"--nasa-atif={'acik' if value else 'kapali'}")
         elif name == "bgm_type":
@@ -1280,6 +1284,8 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--ses", help="ses adı, ör. tr-TR-AhmetNeural-Male")
     command.add_argument("--ses-hizi", type=float)
     command.add_argument("--altyazi", choices=("acik", "kapali"))
+    command.add_argument("--altyazi-noktalama", choices=("acik", "kapali"),
+                         help="gömülü altyazıda cümle sonundaki ? ve ! (metinden; .srt değişmez)")
     command.add_argument("--yazi-tipi")
     command.add_argument("--yazi-boyutu", type=int)
     command.add_argument("--yazi-rengi", help="#RRGGBB")

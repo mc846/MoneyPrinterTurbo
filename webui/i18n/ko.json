@@ -843,6 +843,7 @@
     "revision.words": "{words}단어 · 음성 약 {seconds}초",
     "revision.subtitle_section": "자막",
     "revision.subtitle_enabled": "자막 표시",
+    "revision.subtitle_end_punctuation": "영상 자막에서 문장 끝의 ?와 !를 유지",
     "revision.font": "글꼴",
     "revision.font_size": "글자 크기",
     "revision.stroke_width": "외곽선 두께",

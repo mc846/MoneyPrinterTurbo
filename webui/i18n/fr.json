@@ -843,6 +843,7 @@
     "revision.words": "{words} mots · environ {seconds} s de voix",
     "revision.subtitle_section": "Sous-titres",
     "revision.subtitle_enabled": "Afficher les sous-titres",
+    "revision.subtitle_end_punctuation": "Conserver les ? et ! de fin de phrase dans les sous-titres de la vidéo",
     "revision.font": "Police",
     "revision.font_size": "Taille",
     "revision.stroke_width": "Épaisseur du contour",

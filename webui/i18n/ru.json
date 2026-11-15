@@ -843,6 +843,7 @@
     "revision.words": "{words} слов · около {seconds} с озвучки",
     "revision.subtitle_section": "Субтитры",
     "revision.subtitle_enabled": "Показывать субтитры",
+    "revision.subtitle_end_punctuation": "Сохранять ? и ! в конце предложения в субтитрах видео",
     "revision.font": "Шрифт",
     "revision.font_size": "Размер",
     "revision.stroke_width": "Толщина обводки",

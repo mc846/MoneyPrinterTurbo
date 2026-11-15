@@ -843,6 +843,7 @@
     "revision.words": "{words} söz · təxminən {seconds} san səsləndirmə",
     "revision.subtitle_section": "Altyazı",
     "revision.subtitle_enabled": "Altyazını göstər",
+    "revision.subtitle_end_punctuation": "Cümlə sonundakı ? və ! işarələrini videodakı altyazıda saxla",
     "revision.font": "Şrift",
     "revision.font_size": "Şrift ölçüsü",
     "revision.stroke_width": "Kontur qalınlığı",

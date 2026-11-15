@@ -843,6 +843,7 @@
     "revision.words": "{words} parole · circa {seconds} s di voce",
     "revision.subtitle_section": "Sottotitoli",
     "revision.subtitle_enabled": "Mostra sottotitoli",
+    "revision.subtitle_end_punctuation": "Mantieni ? e ! di fine frase nei sottotitoli del video",
     "revision.font": "Carattere",
     "revision.font_size": "Dimensione",
     "revision.stroke_width": "Spessore contorno",

@@ -193,6 +193,9 @@ class VideoParams(BaseModel):
     sonilo_bgm_prompt: str = Field(default="", max_length=2000)
 
     subtitle_enabled: Optional[bool] = True
+    # Burned-in subtitles: keep a sentence's closing "?" and "!" (taken from the script); the split at
+    # punctuation drops them, a full stop may still go. The .srt files do not change. Off: upstream behavior.
+    subtitle_keep_end_punctuation: Optional[bool] = False
     subtitle_position: Optional[str] = config.ui.get(
         "subtitle_position", "bottom"
     )  # top, bottom, center, custom, two_thirds_bottom

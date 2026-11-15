@@ -843,6 +843,7 @@
     "revision.words": "{words} palabras · unos {seconds} s de locución",
     "revision.subtitle_section": "Subtítulos",
     "revision.subtitle_enabled": "Mostrar subtítulos",
+    "revision.subtitle_end_punctuation": "Conservar los signos ? y ! de final de frase en los subtítulos del vídeo",
     "revision.font": "Fuente",
     "revision.font_size": "Tamaño",
     "revision.stroke_width": "Grosor del contorno",

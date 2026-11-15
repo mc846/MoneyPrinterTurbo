@@ -49,7 +49,7 @@ from app.services import bgm as bgm_service
 from app.services import task_materials
 from app.services.utils import subtitle_shaping, video_effects
 from app.utils import ffmpeg_inputs, file_security, logging_utils, utils
-from app.utils.subtitle_reader import moviepy_subtitles
+from app.utils.subtitle_reader import moviepy_subtitles, restore_end_punctuation
 
 # MoviePy's readers and writers start ffmpeg themselves; restrict their inputs too.
 ffmpeg_inputs.guard_libraries()
@@ -2565,6 +2565,19 @@ def credit_overlay_clip(
     )
 
 
+def _subtitle_script(params, subtitle_path: str) -> str:
+    """The narrated text for the burned-in subtitles' punctuation: the task's script (params), else the
+    script.json next to the subtitles (a task folder)."""
+    script = str(getattr(params, "video_script", "") or "").strip()
+    if script:
+        return script
+    try:
+        with open(os.path.join(os.path.dirname(subtitle_path), "script.json"), encoding="utf-8") as file:
+            return str(json.load(file).get("script") or "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
 def generate_video(
     video_path: str,
     audio_path: str,
@@ -2854,6 +2867,8 @@ def generate_video(
 
         if params.subtitle_enabled and subtitle_path and os.path.exists(subtitle_path):
             subtitles = moviepy_subtitles(subtitle_path)
+            if getattr(params, "subtitle_keep_end_punctuation", False):
+                subtitles = restore_end_punctuation(subtitles, _subtitle_script(params, subtitle_path))
             shaped_font = subtitle_shaping.video_font(
                 font_path, (text for _, text in subtitles)
             )
