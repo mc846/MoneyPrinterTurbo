@@ -346,6 +346,29 @@ def save_plan_edits(folder: Path, plan_edits: dict) -> dict:
     return review
 
 
+def save_production_order(folder: Path, order: list, reasons: dict | None = None) -> dict:
+    """
+    Kurgu istem paketinin üretim (önem) sırası (``fiction.set_production_order``). Metne, istemlere ve onaya
+    dokunmaz, bu yüzden onaydan sonra da verilir (LLM yok); istem paketi yeniden yazılır.
+    """
+    from app.services import fiction
+
+    folder = Path(folder)
+    review = load_review(folder)
+    if review is None:
+        raise ReviewError("not_prepared", "konu henüz hazırlanmadı")
+    if not review.get("scene_plan"):
+        raise ReviewError("no_plan", "bu konunun sahne planı yok")
+    try:
+        review["scene_plan"] = fiction.set_production_order(review["scene_plan"], order, reasons)
+    except (fiction.FictionError, ValueError) as exc:
+        raise ReviewError("production_order", str(exc)) from exc
+    _record(review, "production_order")
+    save_review(folder, review)
+    _write_package(folder, review)
+    return review
+
+
 def _write_package(folder: Path, review: dict) -> None:
     from app.services import fiction
 
@@ -859,6 +882,10 @@ def cli_main(argv: list[str], prog: str = "batch.py") -> int:
     command.add_argument("--kontrol", action="store_true", help="gelen/ klasöründeki yeni dosyaları sahnelere bağla")
     command.add_argument("--ata", action="append", default=[], metavar="DOSYA=SAHNE",
                          help="gelen/ klasöründeki numarasız bir dosyayı bir sahneye bağla (tekrarlanabilir)")
+    command.add_argument("--uretim-sirasi", metavar="4,1,6,…",
+                         help="istem paketindeki üretim (önem) sırası; verilmeyen sahneler sona; boş değer kaldırır")
+    command.add_argument("--neden", action="append", default=[], metavar="SAHNE=METİN",
+                         help="üretim sırasında sahnenin kısa nedeni (tekrarlanabilir; --uretim-sirasi ile)")
     args = parser.parse_args(argv)
 
     import app.config  # noqa: F401 -- yapılandırma ve günlük ayarları
@@ -922,6 +949,22 @@ def _clips_command(args, batch_dir: Path, state: bp.BatchState) -> int:
     if not is_approved(review):
         logger.error(f"{item.index}. {item.subject}: önce metni onaylayın; klipler onaylı planın istemleriyle üretilir")
         return 2
+    if args.neden and args.uretim_sirasi is None:
+        logger.error("--neden yalnız --uretim-sirasi ile verilebilir")
+        return 2
+    if args.uretim_sirasi is not None:
+        try:
+            order = [int(part) for part in re.split(r"[,\s]+", args.uretim_sirasi.strip()) if part]
+            reasons = {}
+            for pair in args.neden:
+                scene, separator, text = pair.partition("=")
+                if not separator:
+                    raise ValueError(f"--neden SAHNE=METİN bekleniyordu: {pair}")
+                reasons[int(scene)] = text
+            plan = save_production_order(folder, order, reasons)["scene_plan"]
+        except (ReviewError, ValueError) as exc:
+            logger.error(str(exc))
+            return 2
     fit = clip_fit_mode(state)
     try:
         if args.kontrol:
@@ -942,6 +985,8 @@ def _clips_command(args, batch_dir: Path, state: bp.BatchState) -> int:
         print(f"sahne {state_['index']:02d}: {label}{detail}{warnings} {state_['file']}".rstrip())
     if clips.get("unmatched"):
         print(f"eşleşmeyen dosyalar (--ata DOSYA=SAHNE): {', '.join(clips['unmatched'])}")
+    if plan.get("production_order"):
+        print("üretim sırası: " + ", ".join(f"{entry['index']:02d}" for entry in plan["production_order"]))
     print("render'a hazır" if fiction.clips_complete(folder, plan) else "klip bekleniyor")
     return 0
 

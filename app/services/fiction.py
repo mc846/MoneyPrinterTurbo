@@ -374,6 +374,50 @@ def apply_edits(plan: dict, prompts: dict | None = None, style_book: dict | None
     return plan
 
 
+def set_production_order(plan: dict, order: list, reasons: dict | None = None) -> dict:
+    """
+    Üretim (önem) sırası: günlük üretim kotası sınırlıysa klipler birkaç güne yayılır, anlatım için en kritik
+    sahneler önce üretilir. ``order`` sahne sıraları (listede olmayanlar anlatım sırasıyla sona eklenir),
+    ``reasons`` {sahne: kısa neden; verilmeyenin eski nedeni korunur}; boş ``order`` sırayı kaldırır. Videodaki
+    sahne sırası değişmez: yalnız istem paketi bu sırayla yazılır (en üstte not). Değişen plan döner.
+    """
+    plan = json.loads(json.dumps(plan))
+    indexes = [scene["index"] for scene in plan["scenes"]]
+    if not order:
+        plan.pop("production_order", None)
+        return plan
+    chosen: list[int] = []
+    for value in order:
+        index = int(value)
+        if index not in indexes:
+            raise FictionError(f"üretim sırası: sahne {index} planda yok (1–{len(indexes)})")
+        if index in chosen:
+            raise FictionError(f"üretim sırası: sahne {index} iki kez verildi")
+        chosen.append(index)
+    reasons = {int(key): str(value or "").strip() for key, value in (reasons or {}).items()}
+    unknown = sorted(set(reasons) - set(indexes))
+    if unknown:
+        raise FictionError(f"üretim sırası: sahne {unknown[0]} planda yok (1–{len(indexes)})")
+    previous = {entry["index"]: entry.get("why", "") for entry in plan.get("production_order") or []}
+    chosen += [index for index in indexes if index not in chosen]
+    plan["production_order"] = [{"index": index, "why": reasons.get(index, previous.get(index, ""))}
+                                for index in chosen]
+    return plan
+
+
+def _ordered(plan: dict, rows: list[dict]) -> list[dict]:
+    """Satırlar planın üretim sırasıyla (yoksa anlatım sırasıyla); her satıra ``why`` (neden) eklenir."""
+    order = [entry for entry in plan.get("production_order") or [] if isinstance(entry, dict)]
+    rank = {entry.get("index"): position for position, entry in enumerate(order)}
+    why = {entry.get("index"): str(entry.get("why") or "") for entry in order}
+    rows = [{**row, "why": why.get(row["index"], "")} for row in rows]
+    return sorted(rows, key=lambda row: (rank.get(row["index"], len(rank)), row["index"])) if order else rows
+
+
+ORDER_NOTE = ("Günlük üretim kotası sınırlıysa klipleri bu sırayla üretin: anlatım için en kritik sahneler başta. "
+              "Videodaki sahne sırası değişmez; sahneler aşağıda bu sırayla listelenir.")
+
+
 # ---------------------------------------------------------------- istem paketi
 
 
@@ -395,9 +439,15 @@ def prompts_markdown(plan: dict, clips: dict | None = None) -> str:
              f"{plan['scene_count']} sahne, her biri {plan['clip_seconds']} sn, 9:16. Araç: {plan.get('tool', TOOL)}. "
              f"Stil kitabı sürümü {plan['style_version']}.", "",
              "Her sahnenin istemini Flow'a yapıştırın, klibi verilen dosya adıyla indirip konu klasöründeki "
-             f"`{INBOX}/` klasörüne bırakın (ya da WebUI'da sahne kartından yükleyin).", "",
-             "## Stil kitabı", "", "```text", style_text(plan["style_book"]), "```", ""]
-    for row in _clip_rows(plan, clips):
+             f"`{INBOX}/` klasörüne bırakın (ya da WebUI'da sahne kartından yükleyin).", ""]
+    rows = _ordered(plan, _clip_rows(plan, clips))
+    if plan.get("production_order"):
+        lines += ["## Üretim sırası (önem sırasına göre)", "", ORDER_NOTE, ""]
+        lines += [f"{position}. Sahne {row['index']:02d} · {STATUS_TEXT.get(row['status'], row['status'])}"
+                  + (f" — {row['why']}" if row["why"] else "") for position, row in enumerate(rows, start=1)]
+        lines.append("")
+    lines += ["## Stil kitabı", "", "```text", style_text(plan["style_book"]), "```", ""]
+    for row in rows:
         lines += [f"## Sahne {row['index']:02d} · `{row['file']}` · {STATUS_TEXT.get(row['status'], row['status'])}", "",
                   f"> {row['narration']}", "", f"**Görsel:** {row.get('visual_tr', '')}", ""]
         if row["reason"]:
@@ -418,6 +468,8 @@ pre{white-space:pre-wrap;background:#f0f2f5;border-radius:8px;padding:10px;font-
 blockquote{margin:6px 0;padding-left:10px;border-left:3px solid #c5cad3;color:#4a5262}
 button{cursor:pointer;border:0;border-radius:6px;background:#2f6fde;color:#fff;padding:6px 12px;font-size:13px}
 .note{font-size:13px;color:#7a2020}
+.order{border-left:4px solid #2f6fde}.order ol{margin:8px 0 0;padding-left:22px}.order li{margin:4px 0}
+.order a{color:#1d4fa8;font-weight:600;text-decoration:none}.order p{margin:0;font-size:14px}
 """.strip()
 
 PACKAGE_SCRIPT = """
@@ -431,15 +483,23 @@ document.execCommand('copy');area.remove();done()}}
 
 def package_html(plan: dict, clips: dict | None = None) -> str:
     esc = html.escape
-    rows = _clip_rows(plan, clips)
+    rows = _ordered(plan, _clip_rows(plan, clips))
     arrived = sum(row["status"] == ARRIVED for row in rows)
+    order = ""
+    if plan.get("production_order"):
+        items = "".join(
+            f"<li><a href='#sahne-{row['index']:02d}'>Sahne {row['index']:02d}</a> "
+            f"<span class='badge {esc(row['status'])}'>{esc(STATUS_TEXT.get(row['status'], row['status']))}</span>"
+            + (f" — {esc(row['why'])}" if row["why"] else "") + "</li>" for row in rows)
+        order = (f"<section class='order' id='uretim-sirasi'><h2>Üretim sırası (önem sırasına göre)</h2>"
+                 f"<p>{esc(ORDER_NOTE)}</p><ol>{items}</ol></section>")
     parts = [
         "<!doctype html><html lang='tr'><head><meta charset='utf-8'><meta name='viewport' "
         "content='width=device-width, initial-scale=1'>", f"<title>İstem paketi · {esc(plan.get('subject', ''))}</title>",
         f"<style>{PACKAGE_STYLE}</style><script>{PACKAGE_SCRIPT}</script></head><body>",
         f"<header><h1>{esc(plan.get('subject', ''))}</h1><p>{plan['scene_count']} sahne · {plan['clip_seconds']} sn · "
         f"9:16 · {esc(plan.get('tool', TOOL))} · stil kitabı {esc(plan['style_version'])} · "
-        f"{arrived}/{len(rows)} klip geldi</p></header><main>",
+        f"{arrived}/{len(rows)} klip geldi</p></header><main>", order,
         "<section><h2>Nasıl kullanılır</h2><p>Her sahnenin istemini <b>Kopyala</b> ile alıp Flow'a yapıştırın "
         "(9:16, 8 sn). Klibi gösterilen dosya adıyla indirin ve konu klasöründeki <code>"
         f"{INBOX}/</code> klasörüne bırakın ya da WebUI'da sahne kartından yükleyin.</p></section>",
