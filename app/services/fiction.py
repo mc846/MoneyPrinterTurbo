@@ -67,6 +67,10 @@ RATIO_TOLERANCE = 0.03
 DURATION_TOLERANCE = 0.1
 VIDEO_SUFFIXES = (".mp4", ".mov", ".m4v", ".webm", ".mkv")
 WAITING, ARRIVED, UNSUITABLE = "bekliyor", "geldi", "uygun_degil"
+# Klip taraması (fiction_screen): kontrol = bayrak/arma/logo/yazı/yüz; render "yine de kullan" onayı ister.
+SCREEN_CLEAN, SCREEN_CHECK, SCREEN_WARN, SCREEN_UNSCREENED = "temiz", "kontrol", "uyari", "taranamadi"
+SCREEN_TEXT = {SCREEN_CLEAN: "temiz", SCREEN_CHECK: "kontrol gerekli", SCREEN_WARN: "uyarı",
+               SCREEN_UNSCREENED: "taranamadı"}
 # Flow'un görünür Veo filigranı sağ alt köşede (kesir: x0, y0, x1, y1). Altyazı bu bölgenin üstünde
 # (kurgu reçetesi: özel konum %85), sahne etiketi sol üstte kalmalı; test_fiction yerleşimi denetler.
 VEO_WATERMARK_BOX = (0.78, 0.92, 1.0, 1.0)
@@ -118,6 +122,10 @@ class Settings:
     tool: str = TOOL
     scene_label: Any = field(default_factory=lambda: dict(SCENE_LABEL))
     style: str = ""  # stil kitabı için yön (ör. "gerçekçi bilimkurgu, 2040'lar"); boşsa LLM seçer
+    # Yüklenen klibin görsel taraması (fiction_screen): model ve yedeği vision_screen biçiminde.
+    screening: bool = True
+    screening_model: str = "gemini:gemini-3.5-flash-lite"
+    screening_fallback: str = "claude:sonnet"
 
 
 # ---------------------------------------------------------------- sahne planı
@@ -421,13 +429,28 @@ ORDER_NOTE = ("Günlük üretim kotası sınırlıysa klipleri bu sırayla üret
 # ---------------------------------------------------------------- istem paketi
 
 
+def screening_text(record: dict | None) -> str:
+    """Tarama kaydının kısa Türkçe özeti: "kontrol gerekli: bayrak: sol omuzda…", "temiz", "taranamadı: …"."""
+    if not record:
+        return "taranmadı"
+    status = record.get("status")
+    if status == SCREEN_UNSCREENED:
+        return "taranamadı" + (f": {record.get('error')}" if record.get("error") else "")
+    parts = [finding.get("text", "") for finding in record.get("findings") or []] + list(record.get("warnings") or [])
+    return SCREEN_TEXT.get(status, str(status)) + (": " + "; ".join(parts) if parts else "")
+
+
 def _clip_rows(plan: dict, clips: dict | None) -> list[dict]:
     states = (clips or {}).get("scenes") or {}
     rows = []
     for scene in plan["scenes"]:
         state = states.get(str(scene["index"])) or {}
+        screening = _screening(state) if state.get("status") == ARRIVED else None
+        note = ""
+        if screening and screening.get("status") in (SCREEN_CHECK, SCREEN_WARN):
+            note = screening_text(screening) + (" (yine de kullanılacak)" if _used_anyway(state) else "")
         rows.append({**scene, "status": state.get("status", WAITING), "reason": state.get("reason", ""),
-                     "warnings": state.get("warnings") or []})
+                     "warnings": state.get("warnings") or [], "screening_note": note})
     return rows
 
 
@@ -452,6 +475,8 @@ def prompts_markdown(plan: dict, clips: dict | None = None) -> str:
                   f"> {row['narration']}", "", f"**Görsel:** {row.get('visual_tr', '')}", ""]
         if row["reason"]:
             lines += [f"**Uygun değil:** {row['reason']}", ""]
+        if row["screening_note"]:
+            lines += [f"**Tarama:** {row['screening_note']}", ""]
         lines += ["```text", row["prompt"], "```", ""]
     return "\n".join(lines)
 
@@ -514,6 +539,7 @@ def package_html(plan: dict, clips: dict | None = None) -> str:
             f"<button onclick=\"copyText('{anchor}',this)\">Kopyala</button></h2>"
             f"<blockquote>{esc(row['narration'])}</blockquote><p>{esc(row.get('visual_tr', ''))}</p>"
             + (f"<p class='note'>Uygun değil: {esc(row['reason'])}</p>" if row["reason"] else "")
+            + (f"<p class='note'>Tarama: {esc(row['screening_note'])}</p>" if row["screening_note"] else "")
             + f"<pre id='{anchor}'>{esc(row['prompt'])}</pre></section>")
     parts.append("</main></body></html>")
     return "".join(parts)
@@ -717,11 +743,27 @@ def check_inbox(folder: Path, plan: dict, fit_mode: str = "blur") -> dict:
             "unmatched": clips["unmatched"], "clips": clips}
 
 
+def _screening(entry: dict) -> dict | None:
+    """Sahnenin geçerli tarama kaydı: yalnız şu anki dosyanınki (SHA-256 tutmalı)."""
+    record = entry.get("screening") if isinstance(entry, dict) else None
+    return record if isinstance(record, dict) and record.get("sha256") == entry.get("sha256") else None
+
+
+def _used_anyway(entry: dict) -> bool:
+    approval = entry.get("use_anyway") if isinstance(entry, dict) else None
+    return isinstance(approval, dict) and approval.get("sha256") == entry.get("sha256")
+
+
 def scene_states(folder: Path, plan: dict) -> list[dict]:
-    """Sahne başına durum: {"index", "status", "reason", "warnings", "file"}."""
-    return [{"index": row["index"], "status": row["status"], "reason": row["reason"], "warnings": row["warnings"],
-             "file": ((load_clips(folder).get("scenes") or {}).get(str(row["index"])) or {}).get("file", "")}
-            for row in _clip_rows(plan, load_clips(folder))]
+    """Sahne başına durum: {"index", "status", "reason", "warnings", "file", "screening", "use_anyway"}."""
+    entries = load_clips(folder).get("scenes") or {}
+    states = []
+    for row in _clip_rows(plan, load_clips(folder)):
+        entry = entries.get(str(row["index"])) or {}
+        states.append({"index": row["index"], "status": row["status"], "reason": row["reason"],
+                       "warnings": row["warnings"], "file": entry.get("file", ""), "screening": _screening(entry),
+                       "use_anyway": _used_anyway(entry)})
+    return states
 
 
 def clips_complete(folder: Path, plan: dict | None) -> bool:
@@ -732,11 +774,72 @@ def clips_complete(folder: Path, plan: dict | None) -> bool:
         states[str(s["index"])].get("file") or "")).is_file() for s in plan["scenes"])
 
 
-def write_render_plan(folder: Path, plan: dict, subject: str, scene_label: Any = None) -> Path:
-    """Render'ın girdisi: sahneler sırayla, dosyalar ve SHA-256'ları, istemler, stil kitabı sürümü."""
+def screening_blockers(folder: Path, plan: dict | None) -> list[int]:
+    """Taramada bayrak/arma/logo/yazı/yüz bulunan ve kullanıcının "yine de kullan" demediği sahneler."""
+    entries = load_clips(folder).get("scenes") or {}
+    blocked = []
+    for scene in (plan or {}).get("scenes") or []:
+        entry = entries.get(str(scene["index"])) or {}
+        record = _screening(entry)
+        if entry.get("status") == ARRIVED and record and record.get("status") == SCREEN_CHECK \
+                and not _used_anyway(entry):
+            blocked.append(scene["index"])
+    return blocked
+
+
+def render_ready(folder: Path, plan: dict | None) -> bool:
+    """Bütün klipler geldi ve kontrol gerektiren tarama sonucu onaysız kalmadı."""
+    return clips_complete(folder, plan) and not screening_blockers(folder, plan)
+
+
+def use_anyway(folder: Path, plan: dict, index: int, revoke: bool = False) -> dict:
+    """
+    Kontrol gerektiren (bayrak, arma, logo, yazı, yüz) klibi kullanıcının açık onayıyla render'a açar; onay o
+    dosyaya bağlıdır (yeni klip yüklenince düşer). ``revoke`` onayı geri alır.
+    """
+    folder = Path(folder)
+    clips = load_clips(folder)
+    entry = (clips.get("scenes") or {}).get(str(index))
+    if not entry or entry.get("status") != ARRIVED:
+        raise FictionError(f"sahne {index:02d}: gelmiş bir klip yok")
+    record = _screening(entry)
+    if revoke:
+        entry.pop("use_anyway", None)
+    else:
+        if not record or record.get("status") != SCREEN_CHECK:
+            raise FictionError(f"sahne {index:02d}: taramada kontrol gerektiren bir bulgu yok")
+        entry["use_anyway"] = {"sha256": entry["sha256"], "at": datetime.now().isoformat(timespec="seconds")}
+    save_clips(folder, clips)
+    write_package(folder, plan, clips)
+    logger.info(f"kurgu klibi: sahne {index:02d} " + ("onayı geri alındı" if revoke else "yine de kullanılacak"))
+    return entry
+
+
+def _render_screening(entry: dict, enabled: bool) -> dict | None:
+    """Render planına ve kaynak kaydına giden tarama özeti."""
+    if not enabled:
+        return None
+    record = _screening(entry) or {}
+    return {"status": record.get("status") or SCREEN_UNSCREENED, "model": record.get("model", ""),
+            "findings": [finding.get("text", "") for finding in record.get("findings") or []],
+            "warnings": list(record.get("warnings") or []), "error": record.get("error", "")
+            if record else "taranmadı", "use_anyway": _used_anyway(entry)}
+
+
+def write_render_plan(folder: Path, plan: dict, subject: str, scene_label: Any = None,
+                      settings: Settings | None = None) -> Path:
+    """
+    Render'ın girdisi: sahneler sırayla, dosyalar ve SHA-256'ları, istemler, stil kitabı sürümü ve (tarama
+    açıkken) tarama özetleri. Kontrol gerektiren onaysız klip varsa FictionError.
+    """
     folder = Path(folder)
     if not clips_complete(folder, plan):
         raise FictionError("bütün sahnelerin klibi gelmedi")
+    blocked = screening_blockers(folder, plan)
+    if blocked:
+        raise FictionError("taramada kontrol gerekli: sahne " + ", ".join(f"{index:02d}" for index in blocked)
+                           + " (yeni klip yükleyin ya da \"yine de kullan\")")
+    screening = settings.screening if settings is not None else False
     clips = load_clips(folder)["scenes"]
     scenes = []
     for scene in plan["scenes"]:
@@ -747,6 +850,9 @@ def write_render_plan(folder: Path, plan: dict, subject: str, scene_label: Any =
         scenes.append({"index": scene["index"], "file": str(path), "sha256": entry["sha256"],
                        "uploaded_at": entry.get("uploaded_at", ""), "prompt": scene["prompt"],
                        "narration": scene["narration"], "duration": entry.get("duration", 0)})
+        summary = _render_screening(entry, screening)
+        if summary:
+            scenes[-1]["screening"] = summary
     data = {"version": PLAN_VERSION, "subject": subject, "tool": plan.get("tool", TOOL),
             "style_version": plan["style_version"], "clip_seconds": plan["clip_seconds"],
             "scene_label": scene_label or dict(SCENE_LABEL), "scenes": scenes}
@@ -756,6 +862,20 @@ def write_render_plan(folder: Path, plan: dict, subject: str, scene_label: Any =
 
 
 # ---------------------------------------------------------------- görev (ai_manual kaynağı)
+
+
+def vision_record(summary: dict | None) -> dict | None:
+    """
+    Tarama özetinden kaynak kaydının ``vision`` alanı (kalite raporu bunu okur): taranamayan klip
+    ``unscreened`` (gerçek kanalındaki gibi kontrol gerekli), diğerleri ``use`` + durum, bulgular, onay.
+    """
+    if not isinstance(summary, dict):
+        return None
+    status = summary.get("status") or SCREEN_UNSCREENED
+    reasons = ([summary.get("error") or "taranmadı"] if status == SCREEN_UNSCREENED
+               else list(summary.get("findings") or []) + list(summary.get("warnings") or []))
+    return {"decision": "unscreened" if status == SCREEN_UNSCREENED else "use", "screening": status,
+            "reasons": reasons, "model": summary.get("model") or "", "use_anyway": bool(summary.get("use_anyway"))}
 
 
 def scene_seconds(audio_duration: float, count: int) -> float:
@@ -806,6 +926,9 @@ def task_clips(task_id: str, plan_path: str | Path, audio_duration: float) -> li
                 "style_version": plan.get("style_version", ""), "sha256": scene["sha256"],
                 "uploaded_at": scene.get("uploaded_at", ""), "scene_label": plan.get("scene_label") or SCENE_LABEL,
                 "ai_generated": True}
+        vision = vision_record(scene.get("screening"))
+        if vision:
+            info["vision"] = vision
         item = MaterialInfo(provider=PROVIDER, url=str(target), duration=max(1, int(duration)), source_info=info)
         records.append(material._material_source_record(item, str(target)))
         paths.append(str(target))

@@ -602,7 +602,7 @@ def overview(batch_dir: Path, running: bool = False) -> Overview:
         review = load_review(folder) if item.prepared else None
         status = effective_status(item, review, running)
         if status == bp.APPROVED and review and review.get("scene_plan") \
-                and not fiction.clips_complete(folder, review["scene_plan"]):
+                and not fiction.render_ready(folder, review["scene_plan"]):
             status = AWAITING_CLIPS
         entries.append(ItemReview(item, folder, status, review,
                                   load_preparation(folder) if item.prepared else None, busy(folder)))
@@ -886,6 +886,14 @@ def cli_main(argv: list[str], prog: str = "batch.py") -> int:
                          help="istem paketindeki üretim (önem) sırası; verilmeyen sahneler sona; boş değer kaldırır")
     command.add_argument("--neden", action="append", default=[], metavar="SAHNE=METİN",
                          help="üretim sırasında sahnenin kısa nedeni (tekrarlanabilir; --uretim-sirasi ile)")
+    command.add_argument("--tara", action="store_true",
+                         help="gelmiş ve taranmamış klipleri görsel taramadan geçir (bayrak, arma, logo, yazı, yüz)")
+    command.add_argument("--yeniden-tara", action="append", default=[], type=int, metavar="SAHNE",
+                         help="sahnenin klibini önbelleğe bakmadan yeniden tara (tekrarlanabilir)")
+    command.add_argument("--yine-de-kullan", action="append", default=[], type=int, metavar="SAHNE",
+                         help="taramada kontrol gerekli çıkan klibi yine de kullan (tekrarlanabilir)")
+    command.add_argument("--onayi-geri-al", action="append", default=[], type=int, metavar="SAHNE",
+                         help="\"yine de kullan\" onayını geri al (tekrarlanabilir)")
     args = parser.parse_args(argv)
 
     import app.config  # noqa: F401 -- yapılandırma ve günlük ayarları
@@ -932,8 +940,18 @@ def clip_fit_mode(state: bp.BatchState) -> str:
         return "blur"
 
 
-def _clips_command(args, batch_dir: Path, state: bp.BatchState) -> int:
+def fiction_settings(state: bp.BatchState):
+    """Toplu işin kurgu ayarları (reçetenin [fiction]'ı; klip taraması dahil); okunamazsa varsayılanlar."""
     from app.services import fiction
+
+    try:
+        return bp.load_preset(state.preset).fiction or fiction.Settings()
+    except (bp.PresetError, OSError):
+        return fiction.Settings()
+
+
+def _clips_command(args, batch_dir: Path, state: bp.BatchState) -> int:
+    from app.services import fiction, fiction_screen
 
     try:
         item = _item(state, args.indexes[0])
@@ -974,6 +992,16 @@ def _clips_command(args, batch_dir: Path, state: bp.BatchState) -> int:
         for pair in args.ata:
             name, _, scene = pair.rpartition("=")
             fiction.assign(folder, plan, name, int(scene), fit_mode=fit)
+        settings = fiction_settings(state)
+        screened = []
+        if settings.screening and (args.kontrol or args.ata or args.tara):
+            screened += fiction_screen.screen_pending(folder, plan, settings)
+        if args.yeniden_tara:
+            screened += fiction_screen.screen_pending(folder, plan, settings, force=True, indexes=args.yeniden_tara)
+        for index in args.yine_de_kullan:
+            fiction.use_anyway(folder, plan, index)
+        for index in args.onayi_geri_al:
+            fiction.use_anyway(folder, plan, index, revoke=True)
     except (fiction.FictionError, ValueError) as exc:
         logger.error(str(exc))
         return 2
@@ -982,12 +1010,27 @@ def _clips_command(args, batch_dir: Path, state: bp.BatchState) -> int:
         label = fiction.STATUS_TEXT.get(state_["status"], state_["status"])
         detail = f" — {state_['reason']}" if state_["reason"] else ""
         warnings = f" ({'; '.join(state_['warnings'])})" if state_["warnings"] else ""
-        print(f"sahne {state_['index']:02d}: {label}{detail}{warnings} {state_['file']}".rstrip())
+        screening = ""
+        if state_["status"] == fiction.ARRIVED and settings.screening:
+            screening = " · tarama: " + fiction.screening_text(state_["screening"])
+            screening += " · yine de kullanılacak" if state_["use_anyway"] else ""
+        print(f"sahne {state_['index']:02d}: {label}{detail}{warnings} {state_['file']}{screening}".rstrip())
     if clips.get("unmatched"):
         print(f"eşleşmeyen dosyalar (--ata DOSYA=SAHNE): {', '.join(clips['unmatched'])}")
     if plan.get("production_order"):
         print("üretim sırası: " + ", ".join(f"{entry['index']:02d}" for entry in plan["production_order"]))
-    print("render'a hazır" if fiction.clips_complete(folder, plan) else "klip bekleniyor")
+    fresh = [record for _index, record in screened if not record.get("cached") and record.get("model")]
+    if fresh:
+        cost = fiction_screen.total_cost(fresh)
+        print(f"tarama: {len(fresh)} çağrı" + (f", ~{cost:.4f} $ (ücretli katman fiyatıyla)" if cost is not None else ""))
+    blocked = fiction.screening_blockers(folder, plan)
+    if not fiction.clips_complete(folder, plan):
+        print("klip bekleniyor")
+    elif blocked:
+        print("kontrol gerekli: sahne " + ", ".join(f"{index:02d}" for index in blocked)
+              + " (yeni klip yükleyin ya da --yine-de-kullan)")
+    else:
+        print("render'a hazır")
     return 0
 
 

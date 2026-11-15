@@ -13,11 +13,13 @@ from pathlib import Path
 
 import streamlit as st
 
-from app.services import batch_review, fiction, scene_edits
+from app.services import batch_review, fiction, fiction_screen, scene_edits
 from app.services import batch_production as bp
 
 STYLE_TEXT_FIELDS = ("visual_language", "lighting", "color", "era", "science")
 STATUS_COLORS = {fiction.WAITING: "orange", fiction.ARRIVED: "green", fiction.UNSUITABLE: "red"}
+SCREEN_COLORS = {fiction.SCREEN_CLEAN: "green", fiction.SCREEN_CHECK: "red", fiction.SCREEN_WARN: "orange",
+                 fiction.SCREEN_UNSCREENED: "gray"}
 
 
 def _md(text) -> str:
@@ -118,15 +120,54 @@ def _scene_label(tr, status: str) -> str:
     return tr(f"batch.fiction.status.{status}")
 
 
+def _screen(tr, folder: Path, plan: dict, settings, indexes=None, force: bool = False) -> None:
+    """Gelmiş ve taranmamış klipleri tarar (görsel tarama arka ucu; birkaç saniye sürer)."""
+    if not settings.screening:
+        return
+    with st.spinner(tr("batch.fiction.screening.running")):
+        fiction_screen.screen_pending(folder, plan, settings, force=force, indexes=indexes)
+
+
+def _render_screening(tr, folder: Path, plan: dict, settings, state: dict, base: str) -> None:
+    """Sahne kartında tarama sonucu: rozet, bulgular, "Yine de kullan" / "Onayı geri al", "Yeniden tara"."""
+    index, record = state["index"], state["screening"]
+    status = (record or {}).get("status")
+    label = tr(f"batch.fiction.screening.{status}") if record else tr("batch.fiction.screening.pending")
+    text = fiction.screening_text(record) if record else ""
+    detail = text.split(": ", 1)[1] if ": " in text else ""
+    st.markdown(f":{SCREEN_COLORS.get(status, 'gray')}-badge[{label}]" + (f" {_md(detail)}" if detail else ""))
+    if record and record.get("model"):
+        cost = record.get("cost_usd")
+        st.caption(f"{record['model']}" + (f" · ~{cost:.4f} $" if isinstance(cost, (int, float)) else ""))
+    columns = st.columns(2)
+    if status == fiction.SCREEN_CHECK:
+        if state["use_anyway"]:
+            st.caption(f":orange[{tr('batch.fiction.screening.used_anyway')}]")
+            if columns[0].button(tr("batch.fiction.screening.revoke"), key=f"{base}_revoke_{index}"):
+                fiction.use_anyway(folder, plan, index, revoke=True)
+                st.rerun()
+        else:
+            st.error(tr("batch.fiction.screening.check_hint"), icon=":material/flag:")
+            if columns[0].button(tr("batch.fiction.screening.use_anyway"), key=f"{base}_use_anyway_{index}"):
+                fiction.use_anyway(folder, plan, index)
+                st.rerun()
+    if columns[1].button(tr("batch.fiction.screening.rescan"), key=f"{base}_rescan_{index}",
+                         icon=":material/refresh:"):
+        _screen(tr, folder, plan, settings, indexes=[index], force=True)
+        st.rerun()
+
+
 def render_clips(tr, view, entry, flash) -> None:
-    """Onaylı kurgu konusu: sahne kartları (istem, durum, yükleme), gelen/ kontrolü ve eşleştirme."""
+    """Onaylı kurgu konusu: sahne kartları (istem, durum, yükleme, tarama), gelen/ kontrolü ve eşleştirme."""
     review, item, folder = entry.review, entry.item, entry.folder
     plan = review["scene_plan"]
     fit = batch_review.clip_fit_mode(view.state)
+    settings = batch_review.fiction_settings(view.state)
     states = {state["index"]: state for state in fiction.scene_states(folder, plan)}
     arrived = sum(state["status"] == fiction.ARRIVED for state in states.values())
     base = f"fx_{view.batch_dir.name}_{item.index}"
-    ready = arrived == len(states) and fiction.clips_complete(folder, plan)
+    blocked = fiction.screening_blockers(folder, plan)
+    ready = arrived == len(states) and fiction.clips_complete(folder, plan) and not blocked
     with st.container(border=True, key=f"batch_review_item_{item.index}"):
         badge = (f":green-badge[{tr('batch.fiction.ready_badge')}]" if ready
                  else f":orange-badge[{tr('batch.status.awaiting_clips')}]")
@@ -137,6 +178,7 @@ def render_clips(tr, view, entry, flash) -> None:
         st.caption(tr("batch.fiction.package_path").format(path=str(folder / fiction.PACKAGE_FILE)))
         if st.button(tr("batch.fiction.check"), key=f"{base}_check", icon=":material/folder_open:"):
             result = fiction.check_inbox(folder, plan, fit)
+            _screen(tr, folder, plan, settings)
             matched = ", ".join(f"{m['file']} → {m['scene']:02d}" for m in result["matched"]) or "—"
             flash("success", tr("batch.fiction.checked").format(matched=matched))
             st.rerun()
@@ -155,11 +197,15 @@ def render_clips(tr, view, entry, flash) -> None:
                 if columns[2].button(tr("batch.fiction.assign"), key=f"{base}_assign_btn_{slug}"):
                     try:
                         fiction.assign(folder, plan, name, int(chosen), fit_mode=fit)
+                        _screen(tr, folder, plan, settings, indexes=[int(chosen)])
                     except fiction.FictionError as exc:
                         flash("error", tr("batch.fiction.error").format(error=exc))
                     st.rerun()
         if ready:
             st.success(tr("batch.fiction.ready"), icon=":material/check_circle:")
+        elif blocked:
+            st.warning(tr("batch.fiction.screening.blocked").format(
+                scenes=", ".join(f"{index:02d}" for index in blocked)), icon=":material/flag:")
         for scene in plan["scenes"]:
             state = states[scene["index"]]
             with st.container(border=True, key=f"{base}_clip_{scene['index']}"):
@@ -171,6 +217,8 @@ def render_clips(tr, view, entry, flash) -> None:
                     st.error(state["reason"], icon=":material/block:")
                 for warning in state["warnings"]:
                     st.caption(f":orange[{_md(warning)}]")
+                if state["status"] == fiction.ARRIVED and settings.screening:
+                    _render_screening(tr, folder, plan, settings, state, base)
                 st.caption(f"{tr('batch.fiction.narration')}: {_md(scene['narration'])}")
                 st.caption(f"{tr('batch.fiction.visual')}: {_md(scene.get('visual_tr', ''))}")
                 st.code(scene["prompt"], language=None, wrap_lines=True)
@@ -181,6 +229,7 @@ def render_clips(tr, view, entry, flash) -> None:
                     st.session_state[f"{key}_done"] = upload.file_id
                     try:
                         entry_ = fiction.accept_upload(folder, plan, scene["index"], upload.name, upload.getvalue(), fit)
+                        _screen(tr, folder, plan, settings, indexes=[scene["index"]])
                     except fiction.FictionError as exc:
                         flash("error", tr("batch.fiction.error").format(error=exc))
                     else:
@@ -228,7 +277,22 @@ def revision_replace(tr, task_id: str, base: dict, scene_id: str, materials: dic
             st.error(reason, icon=":material/block:")
         for warning in warnings:
             st.caption(f":orange[{_md(warning)}]")
-        if st.button(tr("revision.replace.add"), key=f"{key}_add", type="primary", disabled=status != fiction.ARRIVED):
+        blocked = False
+        if status == fiction.ARRIVED:
+            # The same screening as the batch intake; the revision records it from the cache (same clip, prompt).
+            number = re.search(r"(\d+)$", str(source.get("asset_id") or scene_id))
+            with st.spinner(tr("revision.fiction.screening_running")):
+                record = fiction_screen.screen_clip(path, prompt or source.get("prompt", ""),
+                                                    int(number.group(1)) if number else 0, 0, fiction.Settings())
+            screening = record.get("status")
+            st.markdown(f":{SCREEN_COLORS.get(screening, 'gray')}-badge[{tr(f'batch.fiction.screening.{screening}')}] "
+                        + _md(fiction.screening_text(record).split(': ', 1)[-1] if ': ' in fiction.screening_text(record)
+                              else ""))
+            if screening == fiction.SCREEN_CHECK:
+                st.error(tr("batch.fiction.screening.check_hint"), icon=":material/flag:")
+                blocked = not st.checkbox(tr("revision.fiction.use_anyway"), key=f"{key}_use_anyway")
+        if st.button(tr("revision.replace.add"), key=f"{key}_add", type="primary",
+                     disabled=status != fiction.ARRIVED or blocked):
             edited = prompt.strip() if prompt.strip() != str(source.get("prompt") or "").strip() else ""
             add_op(task_id, base["revision"], scene_edits.SceneOp(scene_edits.REPLACE, scene_id, path=path,
                                                                   prompt=edited))

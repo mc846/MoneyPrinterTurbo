@@ -191,8 +191,8 @@ def fallback_setting(primary: tuple[str, str]) -> tuple[str, str] | None:
 # ---------------------------------------------------------------- the model's answer
 
 
-def parse(text: str) -> dict | None:
-    """The JSON object of an answer (code fences and surrounding text tolerated), validated."""
+def parse_object(text: str) -> dict | None:
+    """The JSON object of an answer (code fences and surrounding text tolerated); None when there is none."""
     if not text:
         return None
     text = re.sub(r"^```(?:json)?|```$", "", str(text).strip(), flags=re.M).strip()
@@ -204,7 +204,13 @@ def parse(text: str) -> dict | None:
             data = json.loads(match.group(0)) if match else None
         except ValueError:
             data = None
-    if not isinstance(data, dict):
+    return data if isinstance(data, dict) else None
+
+
+def parse(text: str) -> dict | None:
+    """The JSON object of an answer (code fences and surrounding text tolerated), validated."""
+    data = parse_object(text)
+    if data is None:
         return None
     image_type = str(data.get("image_type") or "").strip().lower()
     person = str(data.get("person") or "").strip().lower()
@@ -240,10 +246,10 @@ def decide(result: dict, anchors: Sequence[str]) -> tuple[bool, list[str], str |
 # ---------------------------------------------------------------- backends
 
 
-def _encode(path: str) -> str:
+def _encode(path: str, long_edge: int = LONG_EDGE) -> str:
     with Image.open(path) as image:
         image = image.convert("RGB")
-        image.thumbnail((LONG_EDGE, LONG_EDGE), Image.LANCZOS)
+        image.thumbnail((long_edge, long_edge), Image.LANCZOS)
         buffer = io.BytesIO()
         image.save(buffer, "JPEG", quality=85)
     return base64.b64encode(buffer.getvalue()).decode()
@@ -257,7 +263,7 @@ def _claude_cli() -> str:
     return path
 
 
-def ask_claude(images: list[str], prompt: str, model: str) -> str:
+def ask_claude(images: list[str], prompt: str, model: str, system: str = SYSTEM, **_options) -> str:
     """One headless claude CLI call: stream-json input with the images, no tools, safe mode."""
     from app.services import llm
 
@@ -266,7 +272,7 @@ def ask_claude(images: list[str], prompt: str, model: str) -> str:
     content.append({"type": "text", "text": prompt})
     message = {"type": "user", "message": {"role": "user", "content": content}}
     command = [_claude_cli(), "-p", "--input-format", "stream-json", "--output-format", "stream-json",
-               "--verbose", "--system-prompt", SYSTEM, "--tools", "", "--safe-mode"]
+               "--verbose", "--system-prompt", system, "--tools", "", "--safe-mode"]
     if model:
         command += ["--model", model]
     env, _removed = llm.build_claude_code_env()
@@ -297,12 +303,12 @@ def ask_claude(images: list[str], prompt: str, model: str) -> str:
     return str(result.get("result") or "")
 
 
-def ask_ollama(images: list[str], prompt: str, model: str) -> str:
+def ask_ollama(images: list[str], prompt: str, model: str, system: str = SYSTEM, **_options) -> str:
     """One Ollama /api/chat call with the images (temperature 0, no thinking)."""
     base = str(config.app.get("ollama_base_url") or "http://localhost:11434").rstrip("/")
     base = base[:-3] if base.endswith("/v1") else base
     body = {"model": model, "stream": False, "think": False, "options": {"temperature": 0},
-            "messages": [{"role": "system", "content": SYSTEM},
+            "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": prompt, "images": images}]}
     try:
         response = requests.post(f"{base}/api/chat", json=body, timeout=CALL_TIMEOUT)
@@ -370,12 +376,15 @@ def _thinking(model: str) -> dict:
     return {}
 
 
-def ask_gemini(images: list[str], prompt: str, model: str) -> str:
+def ask_gemini(images: list[str], prompt: str, model: str, system: str = SYSTEM, schema: dict | None = None,
+               usage: dict | None = None) -> str:
     """
     One Gemini generateContent call with the images (google-genai, no SDK retries): requests
     spaced by material_vision_gemini_rpm; 429 and 5xx wait (the server's retryDelay, else
     10, 20, 40 s) and try again up to GEMINI_RETRIES times; a daily quota or a quota of 0
-    (the model is not in the project's tier) stops at once.
+    (the model is not in the project's tier) stops at once. ``system`` and ``schema`` default to
+    the stock screening's; ``usage`` (a dict) receives the answer's token counts (input, output,
+    thinking) for the cost.
     """
     from google import genai
     from google.genai import errors, types
@@ -385,14 +394,19 @@ def ask_gemini(images: list[str], prompt: str, model: str) -> str:
         raise VisionUnavailable("gemini: no API key (gemini_api_key)")
     parts = [types.Part.from_bytes(data=base64.b64decode(data), mime_type="image/jpeg") for data in images]
     parts.append(types.Part.from_text(text=prompt))
-    generation = types.GenerateContentConfig(system_instruction=SYSTEM, response_mime_type="application/json",
-                                             response_json_schema=RESPONSE_SCHEMA, **_thinking(model))
+    generation = types.GenerateContentConfig(system_instruction=system, response_mime_type="application/json",
+                                             response_json_schema=schema or RESPONSE_SCHEMA, **_thinking(model))
     for attempt in range(GEMINI_RETRIES + 1):
         _gemini_pace()
         try:
             with genai.Client(api_key=key, http_options=types.HttpOptions(timeout=CALL_TIMEOUT * 1000)) as client:
                 response = client.models.generate_content(
                     model=model, contents=[types.Content(role="user", parts=parts)], config=generation)
+            if usage is not None:
+                meta = getattr(response, "usage_metadata", None)
+                usage.update({name: int(getattr(meta, field, 0) or 0) for name, field in (
+                    ("input", "prompt_token_count"), ("output", "candidates_token_count"),
+                    ("thinking", "thoughts_token_count"))})
             return str(response.text or "")
         except errors.APIError as exc:
             code, status, message = exc.code, exc.status, exc.message
