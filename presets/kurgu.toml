@@ -65,7 +65,9 @@ Doğruluk kuralları gerçek arka plan cümlelerine uygulanır. Akıcı, sade ve
 [fiction]
 clip_seconds = 8
 tool = "Google Flow / Veo"
-style = "gerçekçi, sinematik bilimkurgu; yakın gelecek (2040'lar); sakin ve geniş planlar; ajans logosu ya da bayrak yok"
+# Yön Türkçe; LLM İngilizce stil kitabına çevirir. "Bayrak/yama" yazılmaz: olumsuz bile olsa Veo onları çizer
+# (ilk gerçek videoda astronotun omzunda ABD bayrağı çıktı); sade ve işaretsiz diye olumlu tarif edilir.
+style = "gerçekçi, sinematik bilimkurgu; yakın gelecek (2040'lar); sakin ve geniş planlar; giysiler ve araçlar sade ve işaretsiz; insanlar uzakta ya da arkadan"
 # Yüklenen klibin üç karesi (başı, ortası, sonu) görsel tarama arka ucuyla taranır (app/services/fiction_screen.py).
 # Bayrak, arma, logo, okunabilir yazı ya da tanınabilir yüz: "kontrol gerekli", render "yine de kullan" onayı
 # ister; yama ve istemden büyük sapma uyarıdır. Gemini kullanılamazsa yedek model.
