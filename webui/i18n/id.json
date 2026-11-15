@@ -698,6 +698,7 @@
     "batch.fiction.screening.running": "Memeriksa klip (bendera, lambang, logo, teks, wajah)…",
     "batch.fiction.screening.blocked": "Pemeriksaan perlu dicek: adegan {scenes}. Unggah klip baru atau tekan \"Tetap gunakan\" pada kartu adegan.",
     "batch.fiction.screening.check_hint": "Ditemukan bendera, lambang, logo, teks yang terbaca, atau wajah yang dapat dikenali: unggah klip baru atau setujui secara eksplisit untuk merender.",
+    "batch.fiction.timing_warnings": "Durasi narasi: narasi adegan-adegan ini panjang. Render menyelaraskan adegan dengan narasi; klip diperlambat paling banyak 1,2×, jika lebih panjang adegan berikutnya mulai lebih awal. Edit teks untuk memecah kalimat yang panjang.",
     "batch.review.error.plan_edit": "Suntingan rencana adegan tidak valid.",
     "batch.review.error.no_plan": "Topik ini tidak punya rencana adegan.",
     "batch.review.action.plan_edit": "Sunting rencana",

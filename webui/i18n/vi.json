@@ -698,6 +698,7 @@
     "batch.fiction.screening.running": "Đang kiểm tra các clip (cờ, huy hiệu, logo, chữ, khuôn mặt)…",
     "batch.fiction.screening.blocked": "Kết quả kiểm tra cần xem lại: cảnh {scenes}. Tải lên clip mới hoặc bấm \"Vẫn sử dụng\" trên thẻ cảnh.",
     "batch.fiction.screening.check_hint": "Phát hiện cờ, huy hiệu, logo, chữ đọc được hoặc khuôn mặt nhận ra được: tải lên clip mới hoặc phê duyệt rõ ràng để kết xuất.",
+    "batch.fiction.timing_warnings": "Thời lượng lời kể: các cảnh này có lời kể dài. Khi kết xuất, các cảnh được căn theo lời kể; clip được làm chậm tối đa 1,2×, nếu dài hơn thì cảnh tiếp theo bắt đầu sớm hơn. Hãy sửa văn bản để tách câu dài.",
     "batch.review.error.plan_edit": "Chỉnh sửa kế hoạch cảnh không hợp lệ.",
     "batch.review.error.no_plan": "Chủ đề này không có kế hoạch cảnh.",
     "batch.review.action.plan_edit": "Sửa kế hoạch",

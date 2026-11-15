@@ -956,6 +956,7 @@
     "batch.fiction.screening.running": "正在筛查片段（旗帜、徽章、标志、文字、人脸）…",
     "batch.fiction.screening.blocked": "筛查需要检查：场景 {scenes}。请上传新片段，或在场景卡片上点击“仍然使用”。",
     "batch.fiction.screening.check_hint": "发现旗帜、徽章、标志、可读文字或可识别的人脸：请上传新片段，或明确批准后再渲染。",
+    "batch.fiction.timing_warnings": "旁白时长：这些场景的旁白较长。渲染时场景会与旁白对齐；片段最多放慢 1.2 倍，超出时下一场景会提前开始。可编辑文本拆分长句。",
     "batch.review.error.plan_edit": "分镜计划的修改无效。",
     "batch.review.error.no_plan": "这个主题没有分镜计划。",
     "batch.review.action.plan_edit": "编辑计划",

@@ -698,6 +698,7 @@
     "batch.fiction.screening.running": "Clips werden geprüft (Flaggen, Embleme, Logos, Text, Gesichter)…",
     "batch.fiction.screening.blocked": "Die Prüfung verlangt eine Kontrolle: Szene {scenes}. Laden Sie einen neuen Clip hoch oder klicken Sie auf der Szenenkarte auf \"Trotzdem verwenden\".",
     "batch.fiction.screening.check_hint": "Flagge, Emblem, Logo, lesbarer Text oder erkennbares Gesicht gefunden: Laden Sie für das Rendern einen neuen Clip hoch oder geben Sie ihn ausdrücklich frei.",
+    "batch.fiction.timing_warnings": "Sprechdauer: Diese Szenen werden lange gesprochen. Beim Rendern werden die Szenen an den Sprechtext angepasst; ein Clip wird höchstens 1,2× verlangsamt, darüber hinaus beginnt die nächste Szene früher. Bearbeiten Sie den Text, um einen langen Satz zu teilen.",
     "batch.review.error.plan_edit": "Die Änderung am Szenenplan ist ungültig.",
     "batch.review.error.no_plan": "Dieses Thema hat keinen Szenenplan.",
     "batch.review.action.plan_edit": "Plan bearbeiten",

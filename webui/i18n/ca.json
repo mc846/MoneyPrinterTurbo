@@ -698,6 +698,7 @@
     "batch.fiction.screening.running": "S'estan revisant els clips (banderes, emblemes, logotips, text, cares)…",
     "batch.fiction.screening.blocked": "La revisió requereix comprovació: escena {scenes}. Puja un clip nou o prem \"Fes-lo servir igualment\" a la targeta de l'escena.",
     "batch.fiction.screening.check_hint": "S'ha trobat una bandera, un emblema, un logotip, text llegible o una cara reconeixible: puja un clip nou o aprova'l explícitament per renderitzar.",
+    "batch.fiction.timing_warnings": "Durada de la narració: aquestes escenes tenen una narració llarga. El renderitzat alinea les escenes amb la narració; un clip s'alenteix com a molt 1,2×, i si cal més l'escena següent comença abans. Edita el text per dividir una frase llarga.",
     "batch.review.error.plan_edit": "L’edició del pla d’escenes no és vàlida.",
     "batch.review.error.no_plan": "Aquest tema no té pla d’escenes.",
     "batch.review.action.plan_edit": "Edició del pla",

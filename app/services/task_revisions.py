@@ -518,7 +518,7 @@ def _image_source(task_id: str, material: dict, work: Path, crop=None, params: V
 
 
 def _render_clip(task_id: str, material: dict, scene: timing.Scene, duration: float,
-                 params: VideoParams, work: Path, number: int, crop=None) -> Path:
+                 params: VideoParams, work: Path, number: int, crop=None, speed: float = 1.0) -> Path:
     from app.services import video
 
     width, height = VideoAspect(params.video_aspect).to_resolution()
@@ -536,13 +536,22 @@ def _render_clip(task_id: str, material: dict, scene: timing.Scene, duration: fl
         fit = VideoFitMode.cover
     else:
         source = _footage(task_id, material)
+        start = scene.start
+        if speed > 1.0005:
+            # A fiction scene longer than its clip: the clip slowed down (fiction.MAX_SLOWDOWN at most).
+            from app.services import fiction
+
+            slowed = work / f"slow-{number:03d}.mp4"
+            fiction.prepare_scene_clip(source, ((scene.source_duration or 0.0) or duration) * speed + 1.0, speed,
+                                       slowed)
+            source, start = slowed, scene.start * speed
         clip = video._open_video_clip_quietly(str(source))
         try:
             clip_width, clip_height = clip.size
         finally:
             video.close_clip(clip)
         item = video.SubClippedVideoClip(
-            file_path=str(source), start_time=scene.start, end_time=scene.start + duration,
+            file_path=str(source), start_time=start, end_time=start + duration,
             width=clip_width, height=clip_height,
         )
         fit = video._clip_fit_mode(clip_width, clip_height, width, height, params.video_fit_mode,
@@ -646,7 +655,7 @@ CLIP_VERSION = 2
 CLIP_CACHE = ".klipler"
 
 
-def _clip_key(material: dict, scene: timing.Scene, frames: int, crop, params: VideoParams) -> str:
+def _clip_key(material: dict, scene: timing.Scene, frames: int, crop, params: VideoParams, speed: float = 1.0) -> str:
     files = material.get("files") or {}
     if scene.kind == timing.IMAGE:
         source = (files.get("original") or files.get("local")) if crop else (files.get("prepared") or files.get("local"))
@@ -659,7 +668,40 @@ def _clip_key(material: dict, scene: timing.Scene, frames: int, crop, params: Vi
         str(getattr(params.video_fit_mode, "value", params.video_fit_mode)),
         bool(params.crop_materials_to_aspect),
     ]
+    if abs(speed - 1.0) > 1e-4:  # a slowed fiction scene; other clips keep their keys
+        payload.append(round(speed, 4))
     return hashlib.sha256(json.dumps(payload).encode("utf-8")).hexdigest()[:32]
+
+
+def _scene_timing_of(task_id: str, revision: dict) -> str:
+    """How a fiction revision's scenes are timed: "narration" or "equal" (r001: the task's ai_clips/zamanlama.json)."""
+    from app.services import fiction
+
+    if revision.get("scene_timing"):
+        return revision["scene_timing"]
+    if revision.get("source") != "revision":
+        try:
+            data = json.loads((Path(utils.task_dir(task_id)) / "ai_clips" / fiction.TIMING_FILE).read_text(encoding="utf-8"))
+            return data.get("mode") or fiction.TIMING_EQUAL
+        except (OSError, ValueError):
+            pass
+    return fiction.TIMING_EQUAL
+
+
+def _fiction_timing(scenes, materials: dict, subtitle: Path, audio_duration: float):
+    """(scenes in order, narration timing or None, warnings): a fiction task's scenes aligned to its narration
+    (the scene's narration is its material's search term); equal scenes when it cannot be aligned."""
+    from app.services import fiction
+
+    ordered = sorted(scenes, key=lambda scene: scene.order)
+    narrations = [str(materials[scene.material].get("search_term") or "") for scene in ordered]
+    durations = [max(0.1, (scene.source_duration or 0.0) - scene.start) for scene in ordered]
+    try:
+        return ordered, fiction.narration_timing(narrations, fiction.subtitle_cues(subtitle), audio_duration,
+                                                 durations), []
+    except fiction.FictionError as exc:
+        logger.warning(f"revizyon: kurgu sahneleri anlatıma hizalanamadı ({exc}); eşit süreli sahneler")
+        return ordered, None, [f"sahneler anlatıma hizalanamadı ({exc}); eşit süreli sahneler"]
 
 
 def _revision_scene_labels(clips, scenes, combined, materials: dict, language: str) -> list[dict]:
@@ -835,6 +877,11 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
     ops = list(scene_ops or [])
     if ops:
         changes["scenes"] = [op.describe() for op in ops]
+    fiction_task = params_dict.get("video_source") == "ai_manual"
+    parent_timing = _scene_timing_of(task_id, parent) if fiction_task else None
+    if fiction_task and parent_timing != "narration":
+        # A fiction video made with equal scenes: a revision aligns the scenes to the narration (fiction.py).
+        changes["scene_timing"] = {"from": parent_timing, "to": "narration"}
     if not changes:
         raise RevisionError("nothing changed")
     resolved_performance = performance(task_id, performance_settings)
@@ -917,8 +964,17 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
                 crops[record["id"]] = tuple(record["crop"])
         candidates, entries = _candidates(manifest, materials, blocked_terms)
         fetcher = _Fetcher(task_id, name, params, entries)
-        plan = timing.plan(base_scenes, audio_duration, float(params.video_clip_duration),
-                           reserve=reserve, candidates=candidates, fetch=fetcher)
+        speeds, scene_timing, timing_warnings = {}, None, []
+        if fiction_task:
+            ordered, scene_timing, timing_warnings = _fiction_timing(base_scenes, materials, subtitle, audio_duration)
+        if scene_timing is not None:
+            # Every fiction scene stays, each for its own narration (slowed down at most 1.2x).
+            plan = timing.Plan(scenes=[timing.PlannedScene(scene=scene, duration=detail["duration"], status="kept")
+                                       for scene, detail in zip(ordered, scene_timing["scenes"])])
+            speeds = {scene.id: detail["speed"] for scene, detail in zip(ordered, scene_timing["scenes"])}
+        else:
+            plan = timing.plan(base_scenes, audio_duration, float(params.video_clip_duration),
+                               reserve=reserve, candidates=candidates, fetch=fetcher)
         network["downloads"] += fetcher.downloads
         manifest, materials = _materials(task_id)
         timings["scenes"] = round(time.monotonic() - step, 1)
@@ -932,11 +988,12 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
         frames = _frame_counts([planned.duration for planned in plan.scenes], video.fps)
         for number, planned in enumerate(plan.scenes, start=1):
             duration = planned.duration
+            speed = speeds.get(planned.scene.id, 1.0)
             if number == len(plan.scenes):
                 # A little past the voiceover, as the pipeline renders; a video stays in its source.
                 room = math.inf
                 if planned.scene.kind == timing.VIDEO:
-                    room = (planned.scene.source_duration or 0.0) - planned.scene.start - duration
+                    room = ((planned.scene.source_duration or 0.0) - planned.scene.start) * speed - duration
                 frames[-1] += round(min(_RENDER_MARGIN, max(0.0, room)) * video.fps)
             # Clip boundaries on whole frames, rounded on the running total, so the clips add
             # up to the voiceover instead of losing a fraction of a frame each.
@@ -944,13 +1001,13 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
             scene_id = planned.scene.id
             crop = crops.get(scene_id)
             material = materials[planned.scene.material]
-            cached = cache / f"{_clip_key(material, planned.scene, frames[number - 1], crop, params)}.mp4"
+            cached = cache / f"{_clip_key(material, planned.scene, frames[number - 1], crop, params, speed)}.mp4"
             if cached.is_file() and cached.stat().st_size > 0:
                 reused.append(scene_id)
                 logger.info(f"revizyon {name}: sahne {scene_id} önbellekten, yeniden işlenmedi")
             else:
                 progress(f"clips {number}/{len(plan.scenes)}: {scene_id}")
-                clip = _render_clip(task_id, material, planned.scene, duration, params, work, number, crop)
+                clip = _render_clip(task_id, material, planned.scene, duration, params, work, number, crop, speed)
                 os.replace(clip, cached)
                 rendered.append(scene_id)
                 logger.info(f"revizyon {name}: sahne {scene_id} işlendi")
@@ -1039,7 +1096,10 @@ def create(task_id: str, *, script: str | None = None, settings: dict | None = N
                       for c, s in plan.added],
             "skipped_candidates": fetcher.skipped,
             "extended": plan.extended,
-            "warnings": ([warning] if warning else []) + edit_warnings,
+            **({"scene_timing": scene_timing["mode"] if scene_timing else "equal",
+                "scene_timing_detail": scene_timing} if fiction_task else {}),
+            "warnings": ([warning] if warning else []) + edit_warnings + timing_warnings
+            + list((scene_timing or {}).get("warnings") or []),
             "audit": audit,
             "check_required": bool(reasons),
             "check_reasons": reasons,

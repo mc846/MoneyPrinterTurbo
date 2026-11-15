@@ -698,6 +698,7 @@
     "batch.fiction.screening.running": "Klipler taranıyor (bayrak, arma, logo, yazı, yüz)…",
     "batch.fiction.screening.blocked": "Taramada kontrol gerekli: sahne {scenes}. Yeni klip yükleyin ya da sahne kartında \"Yine de kullan\".",
     "batch.fiction.screening.check_hint": "Bayrak, arma, logo, okunabilir yazı ya da tanınabilir yüz bulundu: render için yeni klip yükleyin ya da açıkça onaylayın.",
+    "batch.fiction.timing_warnings": "Anlatım süresi: bu sahnelerin anlatımı uzun. Sahneler render'da anlatıma hizalanır; klip en çok 1,2× yavaşlatılır, daha uzunsa sonraki sahne erken başlar. Uzun cümleyi bölmek için metni düzenleyin.",
     "batch.review.error.plan_edit": "Sahne planı düzenlemesi geçerli değil.",
     "batch.review.error.no_plan": "Bu konunun sahne planı yok.",
     "batch.review.action.plan_edit": "Plan düzenleme",
