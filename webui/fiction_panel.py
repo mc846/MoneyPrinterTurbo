@@ -261,16 +261,33 @@ def shows_clips(entry) -> bool:
 # ---------------------------------------------------------------- revizyon: kurgu sahnesinin yeni klibi
 
 
-def revision_replace(tr, task_id: str, base: dict, scene_id: str, materials: dict, add_op, close) -> None:
-    """Kurgu görevinde sahne değiştirme: istem (düzenlenip kopyalanır) ve Flow'dan gelen yeni klip."""
+def revision_key(task_id: str, base_name: str, scene_id: str) -> str:
+    """Revizyon penceresinde bir sahnenin oturum anahtarlarının öneki (yüklenen klip, istem, onay); temel
+    revizyona göre ayrıdır: üretilen revizyondan sonra yeni temelde pencere boş açılır."""
+    return f"revision_fiction_{task_id}_{base_name}_{scene_id}"
+
+
+def revision_replace(tr, task_id: str, base: dict, scene_id: str, materials: dict, pending, add_op, drop_op,
+                     close) -> None:
+    """
+    Kurgu görevinde sahne değiştirme: istem (düzenlenip kopyalanır) ve Flow'dan gelen yeni klip.
+
+    Klip doğrulanıp tarandıktan sonra render'ı engellemiyorsa değişiklik kendiliğinden bekleyenlere girer
+    (kontrol gerekliyse "Yine de kullan" işaretlenince); istem sonradan düzenlenirse bekleyen değişiklik de
+    güncellenir, onay kaldırılırsa çıkar. ``pending`` bu sahnenin bekleyen değiştirmesi: pencere kapanıp
+    yeniden açılınca klip ve istem oradan gelir (yüklenen klip kaybolmaz). ``add_op`` / ``drop_op`` bekleyen
+    listeyi değiştirir; değişince sayfa baştan çalışır (üstteki uyarı ve liste görsün), pencere açık kalır.
+    """
     from app.services import material_upload
 
     scene = next(s for s in base["scenes"] if s["id"] == scene_id)
     source = (materials.get(scene["material"]) or {}).get("source") or {}
-    key = f"revision_fiction_{task_id}_{scene_id}"
+    original = str(source.get("prompt") or "").strip()
+    key = revision_key(task_id, base["revision"], scene_id)
     st.caption(tr("revision.fiction.hint").format(seconds=f"{float(scene.get('duration') or 0):.1f}"))
-    prompt = st.text_area(tr("revision.fiction.prompt"), value=source.get("prompt", ""), key=f"{key}_prompt",
-                          height=170)
+    prompt = st.text_area(tr("revision.fiction.prompt"), value=(pending.prompt if pending and pending.prompt
+                                                                else source.get("prompt", "")),
+                          key=f"{key}_prompt", height=170)
     st.code(prompt, language=None, wrap_lines=True)
     upload = st.file_uploader(tr("revision.fiction.upload"), key=f"{key}_upload",
                               type=[suffix.lstrip(".") for suffix in fiction.VIDEO_SUFFIXES])
@@ -279,8 +296,9 @@ def revision_replace(tr, task_id: str, base: dict, scene_id: str, materials: dic
         # save_material_upload returns the stored file's name in the uploads folder, not a path.
         stored = material_upload.save_material_upload(upload.name, upload)
         st.session_state[f"{key}_path"] = str(Path(material_upload.uploaded_material_dir()) / stored)
-    path = st.session_state.get(f"{key}_path")
+    path = st.session_state.get(f"{key}_path") or (pending.path if pending else "")
     if path:
+        st.caption(tr("revision.fiction.clip").format(name=_md(Path(path).name)))
         info = fiction.probe(path)
         status, reason, warnings = fiction.validate_clip(info, float(scene.get("duration") or 0))
         if status != fiction.ARRIVED:
@@ -300,12 +318,22 @@ def revision_replace(tr, task_id: str, base: dict, scene_id: str, materials: dic
                               else ""))
             if screening == fiction.SCREEN_CHECK:
                 st.error(tr("batch.fiction.screening.check_hint"), icon=":material/flag:")
-                blocked = not st.checkbox(tr("revision.fiction.use_anyway"), key=f"{key}_use_anyway")
-        if st.button(tr("revision.replace.add"), key=f"{key}_add", type="primary",
-                     disabled=status != fiction.ARRIVED or blocked):
-            edited = prompt.strip() if prompt.strip() != str(source.get("prompt") or "").strip() else ""
-            add_op(task_id, base["revision"], scene_edits.SceneOp(scene_edits.REPLACE, scene_id, path=path,
-                                                                  prompt=edited))
-            st.session_state.pop(f"{key}_path", None)
-            close()
-            st.rerun()
+                # Reopened with this clip already pending: it was approved before.
+                blocked = not st.checkbox(tr("revision.fiction.use_anyway"), key=f"{key}_use_anyway",
+                                          value=bool(pending and pending.path == path))
+        if status == fiction.ARRIVED and not blocked:
+            wanted = scene_edits.SceneOp(scene_edits.REPLACE, scene_id, path=path,
+                                         prompt=prompt.strip() if prompt.strip() != original else "")
+            if pending != wanted:
+                add_op(task_id, base["revision"], wanted)
+                st.rerun()
+            st.success(tr("revision.fiction.added"), icon=":material/playlist_add_check:")
+        else:
+            if pending is not None:  # the latest clip is not usable (yet): the older choice does not stay
+                drop_op(task_id, base["revision"], pending)
+                st.rerun()
+            if blocked:
+                st.caption(tr("revision.fiction.needs_approval"))
+    if st.button(tr("revision.fiction.done"), key=f"{key}_done", type="primary" if path else "secondary"):
+        close()
+        st.rerun()

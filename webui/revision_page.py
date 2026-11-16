@@ -176,6 +176,22 @@ def _add_op(task_id: str, base_name: str, op: scene_edits.SceneOp) -> None:
     _set_ops(task_id, base_name, [*ops, op])
 
 
+def _drop_op(task_id: str, base_name: str, op: scene_edits.SceneOp) -> None:
+    _set_ops(task_id, base_name, [other for other in _ops(task_id, base_name) if other != op])
+
+
+def _forget_uploads(task_id: str, base_name: str, scene: str | None = None) -> None:
+    """A fiction scene's uploaded clip lives in the session until it is generated or undone; then it goes, or
+    the dialog would offer it again (and add it back)."""
+    from webui import fiction_panel
+
+    # "…_v1-s1_" so that v1-s10's keys stay; without a scene "…_<base>_" (every scene).
+    prefix = fiction_panel.revision_key(task_id, base_name, scene) + "_" if scene \
+        else fiction_panel.revision_key(task_id, base_name, "")
+    for key in [key for key in st.session_state if str(key).startswith(prefix)]:
+        st.session_state.pop(key, None)
+
+
 @st.cache_data(show_spinner=False, max_entries=64)
 def _thumbnail(path: str, mtime: float, max_side: int) -> Image.Image:
     with Image.open(path) as image:
@@ -263,7 +279,10 @@ def _replace_dialog(tr, task_id: str, base: dict, scene_id: str) -> None:
         # Fiction: no search; the scene's Veo prompt (edit, copy to Flow) and the new clip.
         from webui import fiction_panel
 
-        fiction_panel.revision_replace(tr, task_id, base, scene_id, materials, _add_op, _close_dialog)
+        pending = next((op for op in _ops(task_id, base["revision"])
+                        if op.scene == scene_id and op.op == scene_edits.REPLACE and op.path), None)
+        fiction_panel.revision_replace(tr, task_id, base, scene_id, materials, pending, _add_op, _drop_op,
+                                       _close_dialog)
         return
     scene = next(s for s in base["scenes"] if s["id"] == scene_id)
     aspect = VideoAspect((base.get("params") or {}).get("video_aspect") or VideoAspect.portrait)
@@ -430,6 +449,7 @@ def _render_pending(tr, task_id: str, base_name: str) -> None:
         columns[0].markdown(f"- {_describe(tr, op)}")
         if columns[1].button(tr("revision.pending.undo"), key=f"revision_undo_{index}_{op.scene}_{op.op}"):
             _set_ops(task_id, base_name, [other for other in ops if other != op])
+            _forget_uploads(task_id, base_name, op.scene)
             st.rerun()
 
 
@@ -596,6 +616,9 @@ def render_revision_page(tr) -> None:
         if progress.get("stage") == "failed":
             st.error(tr("revision.failed").format(error=progress.get("error") or ""))
 
+    # Filled at the end, when the changes are known: pending changes are announced above the form, with the
+    # same "Generate" button (a clip added in the scene dialog is easy to leave without generating).
+    top = st.container()
     names = [record["revision"] for record in records]
     base_name = st.selectbox(tr("revision.base"), names, index=len(names) - 1, key=f"revision_base_{task_id}")
     base = records[names.index(base_name)]
@@ -606,9 +629,16 @@ def render_revision_page(tr) -> None:
     ops = _ops(task_id, base_name)
     _render_pending(tr, task_id, base_name)
     explicit = _render_performance(tr, task_id)
-    nothing = not changed and not script_changed and not ops
-    if st.button(tr("revision.generate"), key="revision_generate", type="primary", disabled=running or nothing,
-                 icon=":material/movie:"):
+    waiting = len(ops) + len(changed) + int(script_changed)
+    generate = st.button(tr("revision.generate"), key="revision_generate", type="primary",
+                         disabled=running or not waiting, icon=":material/movie:")
+    if not waiting:
+        st.caption(tr("revision.nothing_changed"))
+    elif not running:
+        top.warning(tr("revision.pending_banner").format(count=waiting), icon=":material/pending_actions:")
+        generate = top.button(tr("revision.generate"), key="revision_generate_top", type="primary",
+                              icon=":material/movie:") or generate
+    if generate:
         arguments = [f"--temel-revizyon={base_name}", *task_revisions.settings_arguments(changed),
                      *scene_edits.to_arguments(ops), *task_revisions.performance_arguments(explicit)]
         if script_changed:
@@ -619,8 +649,7 @@ def render_revision_page(tr) -> None:
             st.error(tr("revision.busy"))
         else:
             _set_ops(task_id, base_name, [])
+            _forget_uploads(task_id, base_name)
             st.session_state["revision_flash"] = ("info", tr("revision.started"))
             st.rerun(scope="app")
-    if nothing:
-        st.caption(tr("revision.nothing_changed"))
     _render_history(tr, task_id, records, running)
