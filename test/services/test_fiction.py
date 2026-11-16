@@ -175,11 +175,14 @@ def test_the_plan_style_book_and_prompt_rules(plan):
 
 
 def test_the_plan_prompt_rules_from_the_first_real_video():
-    assert fiction.PLAN_PROMPT_VERSION == 3
+    assert fiction.PLAN_PROMPT_VERSION == 4
     prompt = fiction.PLAN_PROMPT
     for rule in ("plain, unmarked", 'Never write the words "flag", "flags", "patch" or "patches"',
-                 "far from the camera or seen from behind", "about two degrees wide", "its lit side faces the sun",
-                 "Stars only in night scenes", "name every light source", "no sun shadows"):
+                 "far from the camera or seen from behind", "about two degrees wide", "its lit side facing the sun",
+                 "Stars only in night scenes", "name every source", "there are no sun shadows",
+                 # 4: a scene gets only the lighting of its time; the sky is defined once.
+                 '"time": "day" or "night"', '"lighting_night"', "A clip gets only the lighting of its own time",
+                 'The style book\'s "sky" fixes, once for the whole video', "scenes never restate or change them"):
         assert rule in prompt, rule
     style_line = next(line for line in PRESET.read_text(encoding="utf-8").splitlines() if line.startswith("style = "))
     assert "bayrak" not in style_line and "işaretsiz" in style_line
@@ -195,6 +198,81 @@ def test_the_plan_prompt_rules_from_the_first_real_video():
 ])
 def test_flag_and_patch_words_are_scrubbed_from_the_llm_fields(text, expected):
     assert fiction.scrub_prompt_words(text) == expected
+
+
+DAY_LIGHT = "A single harsh white sun low on the horizon, hard black shadows."
+NIGHT_LIGHT = "No sunlight and no sun shadows: faint blue earthshine and warm amber floodlight pools."
+SKY = "Earth: a small half-lit disc about two degrees wide, low above the horizon, always in the same place."
+
+
+def timed_plan_answer(prompt: str, times=None) -> str:
+    """İstem sürümü 4'ün yanıtı: gündüz ve gece ışığı, gökyüzü, sahne zamanı (çift sahneler gece)."""
+    data = json.loads(plan_answer(prompt))
+    style = data["style_book"]
+    style.pop("lighting")
+    style.update(lighting_day=DAY_LIGHT, lighting_night=NIGHT_LIGHT, sky=SKY)
+    for scene in data["scenes"]:
+        scene["time"] = (times or {}).get(scene["index"], "night" if scene["index"] % 2 == 0 else "day")
+        scene["light"] = "amber floodlights on the rover" if scene["time"] == "night" else "long shadows"
+    return json.dumps(data)
+
+
+def test_a_night_scene_gets_only_the_night_lighting_and_every_scene_the_same_sky():
+    plan = fiction.build_plan("x", SCRIPT, 40.0, ask=timed_plan_answer)
+    assert fiction.timed_lighting(plan["style_book"])
+    assert [s["time"] for s in plan["scenes"]] == ["day", "night"] * 3
+    for scene in plan["scenes"]:
+        prompt = scene["prompt"]
+        night = scene["time"] == "night"
+        assert ("Night lighting: " + NIGHT_LIGHT in prompt) == night
+        assert ("Day lighting: " + DAY_LIGHT in prompt) == (not night)
+        assert ("sun low on the horizon" in prompt) == (not night)  # the sun sentence never reaches the night
+        assert prompt.count("Sky (the same in every clip): " + SKY) == 1
+        assert prompt.startswith("Style book (shared by every clip): photoreal cinematic sci-fi.")
+    # The whole style book (package, style version) shows both lightings.
+    whole = fiction.style_text(plan["style_book"])
+    assert "Day lighting: " in whole and "Night lighting: " in whole and plan["style_version"] == \
+        fiction.style_version(plan["style_book"])
+    assert fiction.style_fields(plan["style_book"]) == ("visual_language", "lighting_day", "lighting_night", "sky",
+                                                        "color", "era", "science")
+
+
+def test_a_scene_without_a_time_takes_it_from_its_own_light():
+    def answer(prompt):
+        data = json.loads(timed_plan_answer(prompt))
+        data["scenes"][0].pop("time")
+        data["scenes"][0]["light"] = "Night with no sunlight, lit windows only"
+        data["scenes"][1]["time"] = "dusk"  # not a time: from its light ("amber floodlights…": day)
+        return json.dumps(data)
+
+    plan = fiction.build_plan("x", SCRIPT, 40.0, ask=answer)
+    assert [s["time"] for s in plan["scenes"][:2]] == ["night", "day"]
+    assert "Night lighting: " in plan["scenes"][0]["prompt"] and "Day lighting: " in plan["scenes"][1]["prompt"]
+    assert fiction.scene_time({"action": "During the lunar night, a rover waits."}) == "night"
+    assert fiction.scene_time({"action": "A rover crawls.", "light": "low sun"}) == "day"
+
+
+def test_an_older_plan_keeps_its_single_lighting_its_prompts_and_its_style_version(plan):
+    style = plan["style_book"]
+    assert not fiction.timed_lighting(style) and "time" in plan["scenes"][0]  # new plans record the time
+    # The text before version 4, byte for byte: the prompts and the style version of older plans stay.
+    assert fiction.style_text(style) == (
+        "Style book (identical in every clip): photoreal cinematic sci-fi. Lighting: low sun, hard shadows. "
+        "Color palette: grey regolith, black sky. Era and setting: 2040s lunar base. Recurring elements, always "
+        "the same: mining rover: six-wheeled white rover. Physical plausibility: Moon: black sky, hard shadows, "
+        "no atmosphere.")
+    old = {key: value for key, value in style.items() if key in ("visual_language", "lighting", "color", "era",
+                                                                 "science", "recurring")}
+    assert fiction.style_text(old, None, "night") == fiction.style_text(style)
+    assert fiction.style_version(old) == fiction.style_version(style)
+    assert fiction.style_fields(style) == ("visual_language", "lighting", "sky", "color", "era", "science")
+    # Editing an older style book (the panel sends only its fields) keeps the single lighting.
+    edited = {name: style.get(name, "") for name in fiction.style_fields(style)}
+    edited.update(color="pale regolith", recurring=style["recurring"])
+    changed = fiction.apply_edits(plan, style_book=edited)
+    assert changed["style_book"]["lighting"] == "low sun, hard shadows"
+    assert all("Lighting: low sun, hard shadows" in s["prompt"] and "pale regolith" in s["prompt"]
+               for s in changed["scenes"])
 
 
 def test_a_plan_answer_with_flag_words_gives_prompts_without_them():

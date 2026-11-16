@@ -80,6 +80,29 @@ def test_the_review_panel_shows_the_plan_and_saves_prompt_edits(batch):
     assert "edited: kept when the plan is regenerated" in markdown(app)
 
 
+def test_the_review_panel_edits_the_day_and_night_lighting_of_a_newer_plan(batch):
+    from test.services.test_fiction import NIGHT_LIGHT, SCRIPT, timed_plan_answer
+
+    folder = folder_of(batch)
+    review = batch_review.load_review(folder)
+    review["scene_plan"] = fiction.build_plan("Ya olsaydı", SCRIPT, 40.0, ask=timed_plan_answer)
+    batch_review.save_review(folder, review)
+    app = page()
+    labels = [area.label for area in app.text_area]
+    assert "Day lighting (day scenes only)" in labels and "Night lighting (night scenes only)" in labels
+    assert "Sky (Earth's size, place and phase; the same in every scene)" in labels and "Lighting" not in labels
+    night = next(area for area in app.text_area if area.label.startswith("Night lighting"))
+    assert night.value == NIGHT_LIGHT
+    night.set_value("Only earthshine and two amber floodlights; no sunlight.")
+    app = run(app)
+    app.button(key=f"fx_{batch.name}_1_save").click()
+    run(app)
+    plan = batch_review.load_review(folder)["scene_plan"]
+    assert plan["style_book"]["lighting_night"] == "Only earthshine and two amber floodlights; no sunlight."
+    for scene in plan["scenes"]:
+        assert ("Only earthshine and two amber floodlights" in scene["prompt"]) == (scene["time"] == "night")
+
+
 def test_after_approval_the_scene_cards_wait_for_clips(batch):
     folder = folder_of(batch)
     batch_review.approve(folder)

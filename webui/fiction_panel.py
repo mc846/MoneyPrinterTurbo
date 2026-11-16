@@ -16,7 +16,6 @@ import streamlit as st
 from app.services import batch_review, fiction, fiction_screen, scene_edits
 from app.services import batch_production as bp
 
-STYLE_TEXT_FIELDS = ("visual_language", "lighting", "color", "era", "science")
 STATUS_COLORS = {fiction.WAITING: "orange", fiction.ARRIVED: "green", fiction.UNSUITABLE: "red"}
 SCREEN_COLORS = {fiction.SCREEN_CLEAN: "green", fiction.SCREEN_CHECK: "red", fiction.SCREEN_WARN: "orange",
                  fiction.SCREEN_UNSCREENED: "gray"}
@@ -35,7 +34,7 @@ def plan_keys(batch_dir: Path, entry) -> dict:
     version = batch_review.script_sha256(json.dumps(plan, ensure_ascii=False, sort_keys=True))[:12]
     base = f"fx_{batch_dir.name}_{entry.item.index}"
     keys = {"base": base, "save": f"{base}_save"}
-    for name in STYLE_TEXT_FIELDS + ("recurring",):
+    for name in fiction.STYLE_FIELDS + ("recurring",):
         keys[f"style_{name}"] = f"{base}_style_{name}_{version}"
     for scene in plan["scenes"]:
         keys[f"prompt_{scene['index']}"] = f"{base}_prompt_{scene['index']}_{version}"
@@ -63,15 +62,17 @@ def plan_edits(batch_dir: Path, entry) -> dict | None:
         return None
     keys = plan_keys(batch_dir, entry)
     style = plan["style_book"]
+    # An older plan's single lighting, a newer one's day and night lighting (fiction.style_fields).
+    fields = fiction.style_fields(style)
     edited_style = {name: str(st.session_state.get(keys[f"style_{name}"], style.get(name, ""))).strip()
-                    for name in STYLE_TEXT_FIELDS}
+                    for name in fields}
     edited_style["recurring"] = _recurring_list(st.session_state.get(keys["style_recurring"], _recurring_text(style)))
     prompts = {}
     for scene in plan["scenes"]:
         text = str(st.session_state.get(keys[f"prompt_{scene['index']}"], scene["prompt"])).strip()
         if text and text != scene["prompt"].strip():
             prompts[scene["index"]] = text
-    style_changed = any(edited_style[name] != str(style.get(name, "")).strip() for name in STYLE_TEXT_FIELDS) \
+    style_changed = any(edited_style[name] != str(style.get(name, "")).strip() for name in fields) \
         or edited_style["recurring"] != (style.get("recurring") or [])
     if not prompts and not style_changed:
         return None
@@ -83,7 +84,8 @@ def render_plan_editor(tr, batch_dir: Path, entry, text: str, busy: bool) -> boo
     plan = entry.review["scene_plan"]
     keys = plan_keys(batch_dir, entry)
     style = plan["style_book"]
-    defaults = {keys[f"style_{name}"]: style.get(name, "") for name in STYLE_TEXT_FIELDS}
+    fields = fiction.style_fields(style)
+    defaults = {keys[f"style_{name}"]: style.get(name, "") for name in fields}
     defaults[keys["style_recurring"]] = _recurring_text(style)
     defaults.update({keys[f"prompt_{s['index']}"]: s["prompt"] for s in plan["scenes"]})
     for key, value in defaults.items():
@@ -96,7 +98,7 @@ def render_plan_editor(tr, batch_dir: Path, entry, text: str, busy: bool) -> boo
         _timing_warnings(tr, plan)
         st.markdown(f"**{tr('batch.fiction.style_book')}**")
         columns = st.columns(2)
-        for position, name in enumerate(STYLE_TEXT_FIELDS):
+        for position, name in enumerate(fields):
             columns[position % 2].text_area(tr(f"batch.fiction.style.{name}"), key=keys[f"style_{name}"], height=90,
                                             disabled=busy)
         st.text_area(tr("batch.fiction.style.recurring"), key=keys["style_recurring"], height=90, disabled=busy)
