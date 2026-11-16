@@ -60,7 +60,10 @@ PLAN_VERSION = 2  # 2: scenes split by the estimated narration (narration_groups
 # 2: compact style book, per-scene "elements" (E2E: 4000-character prompts). 3: rules from the first real Veo
 # video (a US flag on a suit although "no flags" was asked; Earth 15x too large; a lit "night"): positive,
 # plain descriptions without the words flag/patch, people far or from behind, Earth's size and phase, night lights.
-PLAN_PROMPT_VERSION = 3
+# 4: day and night lighting in the style book, a scene gets only its own ("Single harsh white sunlight", sent with
+# every clip, outweighed the night scene's light: helyum-3 scene 6 came out lit like day twice); the sky (Earth's
+# size, place and phase) defined once in the style book, the same in every clip; every scene has a "time".
+PLAN_PROMPT_VERSION = 4
 # Words the video model draws when it reads them, even negated ("no flags"): removed from the LLM's fields.
 BANNED_PROMPT_WORDS = re.compile(
     r"(?:\s*,\s*|\s+(?:and|or|nor|with)\s+)no\s+(?:flags?|patch(?:es)?)\b"  # "…visor and no patches"
@@ -103,15 +106,15 @@ A Turkish "what if" science video is narrated over {count} clips of {seconds} se
 scene, vertical 9:16. Write ONE style book shared by every clip and, for every scene, what its clip shows.
 
 ## Rules
-1. Style book: the visual language, lighting, color palette, era and setting, the recurring objects with one
-   fixed description each (e.g. a mining rover, the base modules) and the physical plausibility of the setting
-   (e.g. on the Moon: black sky, hard shadows, no atmosphere, no haze or clouds, low gravity). Every clip must
-   look like the same world. Keep it compact, it opens every prompt: one or two sentences per field, at most 5
-   recurring objects with one sentence each.
+1. Style book: the visual language, the day lighting and the night lighting, the sky, the color palette, era and
+   setting, the recurring objects with one fixed description each (e.g. a mining rover, the base modules) and
+   the physical plausibility of the setting (e.g. on the Moon: black sky, no atmosphere, no haze or clouds, low
+   gravity). Every clip must look like the same world. Keep it compact, it opens every prompt: one or two
+   sentences per field, at most 5 recurring objects with one sentence each.
 2. Every scene is ONE continuous {seconds}-second shot (no cuts) with its own camera movement and light, and
    shows what the narration of that scene is about. It is clearly an animated dramatization, not documentary
-   footage. "elements": the names of the recurring objects seen in that shot (only their descriptions go into
-   its prompt).
+   footage. "time": "day" or "night" (when the shot happens). "elements": the names of the recurring objects
+   seen in that shot (only their descriptions go into its prompt).
 3. Nothing on screen may be text, captions or numbers, logos or insignia (no space agency emblem), and no real
    or recognizable people. Describe what IS there instead of what is not: suits are plain, unmarked
    white-and-grey suits with blank shoulders, chest and backpack; vehicles, modules and machines have bare,
@@ -119,16 +122,23 @@ scene, vertical 9:16. Write ONE style book shared by every clip and, for every s
    makes the video model draw them.
 4. People appear only as small figures far from the camera or seen from behind, in bulky suits with opaque
    mirrored gold visors; never a close-up of a face or of the front of a visor.
-5. A celestial body in the sky gets a numeric apparent size and a phase that fits the sun's position. From the
-   Moon, Earth is a small disc about two degrees wide (about four times the full Moon seen from Earth), never
-   filling the sky; its lit side faces the sun: with the sun low behind the camera Earth is nearly full, with
-   the sun high it is a crescent or a half, during the lunar night it is full. Stars only in night scenes.
-6. In a night scene name every light source (earthshine, floodlights, lit windows, helmet lamps), say there is
-   no sunlight and there are no sun shadows, and let the ground beyond the lights fall to near-black.
+5. The style book's "sky" fixes, once for the whole video, every celestial body seen in the sky: its numeric
+   apparent size, its place and its phase. Every clip gets this same text; scenes never restate or change them
+   (an action may only say whether Earth is in view). From the Moon, Earth is a small disc
+   about two degrees wide (about four times the full Moon seen from Earth), never filling the sky, fixed in the
+   same place. Pick one phase that fits every scene, its lit side facing the sun: with day and night scenes,
+   set the days at a low sun near the horizon and Earth half lit; with only night scenes Earth is nearly full;
+   with only midday scenes a thin crescent. Stars only in night scenes.
+6. Lighting: "lighting_day" is the light of the day scenes (e.g. a low harsh sun, hard black shadows);
+   "lighting_night" the light of the night scenes: name every source (earthshine, floodlights, lit windows,
+   helmet lamps), say there is no sunlight and there are no sun shadows, and let the ground beyond the lights
+   fall to near-black. A clip gets only the lighting of its own time, so the night lighting never mentions the
+   sun except to say it is absent. Leave a field empty when no scene needs it. A scene's "light" adds only what
+   is particular to that shot.
 7. "visual_tr": one or two Turkish sentences for the user (what the clip shows). "action", "camera", "light":
    concrete English for the video model (what is seen, how the camera moves, the light); no story, no narration.
 8. Respond ONLY with one minified JSON object, no markdown:
-{{"style_book":{{"visual_language":"...","lighting":"...","color":"...","era":"...","recurring":[{{"name":"...","description":"..."}}],"science":"..."}},"scenes":[{{"index":1,"visual_tr":"...","action":"...","camera":"...","light":"...","elements":["..."]}}]}}
+{{"style_book":{{"visual_language":"...","lighting_day":"...","lighting_night":"...","sky":"...","color":"...","era":"...","recurring":[{{"name":"...","description":"..."}}],"science":"..."}},"scenes":[{{"index":1,"time":"day","visual_tr":"...","action":"...","camera":"...","light":"...","elements":["..."]}}]}}
 {style_hint}
 ## Topic
 {subject}
@@ -137,7 +147,13 @@ scene, vertical 9:16. Write ONE style book shared by every clip and, for every s
 {scenes}
 """.strip()
 
-STYLE_FIELDS = ("visual_language", "lighting", "color", "era", "science")
+# "lighting": one lighting for every clip (plans before PLAN_PROMPT_VERSION 4; kept as written, their prompts and
+# style versions do not change). Since 4: "lighting_day" / "lighting_night", a clip gets its scene's ("time").
+STYLE_FIELDS = ("visual_language", "lighting", "lighting_day", "lighting_night", "sky", "color", "era", "science")
+DAY, NIGHT = "day", "night"
+TIMES = (DAY, NIGHT)
+# A scene without "time" (an older plan, a missing answer): night when its own light or action says so.
+NIGHT_WORDS = re.compile(r"\bnight\b|\bno sunlight\b", re.IGNORECASE)
 
 
 class FictionError(RuntimeError):
@@ -297,15 +313,47 @@ def file_name(index: int) -> str:
     return f"sahne-{index:02d}.mp4"
 
 
-def style_text(style: dict, elements: list | None = None) -> str:
+def timed_lighting(style: dict | None) -> bool:
+    """Stil kitabında gündüz/gece ışığı ayrı mı (istem sürümü 4'ten beri); değilse tek "lighting" her klibe."""
+    style = style or {}
+    return any(str(style.get(f"lighting_{time}") or "").strip() for time in TIMES)
+
+
+def style_fields(style: dict | None) -> tuple[str, ...]:
+    """Bu stil kitabının düzenlenen metin alanları: eski planda tek ışık, yenisinde gündüz ve gece ışığı."""
+    style = style or {}
+    if str(style.get("lighting") or "").strip() and not timed_lighting(style):
+        lighting = ("lighting",)
+    else:
+        lighting = ("lighting_day", "lighting_night")
+    return ("visual_language", *lighting, "sky", "color", "era", "science")
+
+
+def scene_time(scene: dict) -> str:
+    """Sahnenin zamanı ("day" / "night"): plandaki, yoksa çekimin kendi ışığından ya da eyleminden."""
+    time = str(scene.get("time") or "").strip().lower()
+    if time in TIMES:
+        return time
+    return NIGHT if NIGHT_WORDS.search(f"{scene.get('light') or ''} {scene.get('action') or ''}") else DAY
+
+
+def style_text(style: dict, elements: list | None = None, time: str | None = None) -> str:
     """
     Her istemin başına eklenen stil kitabı metni (İngilizce). ``elements`` verilirse tekrarlayan öğelerden
     yalnız o çekimde görünenlerin tarifi girer (istem kısa kalır; Veo istemi ~1024 token); None: hepsi.
+    ``time`` ("day" / "night") verilirse gündüz/gece ışığından yalnız o zamanınki girer (gece sahnesine güneş
+    cümlesi gitmez); None: ikisi de (paket, stil kitabı sürümü). Eski tek "lighting" her zaman girer.
     """
     style = style or {}
     wanted = None if elements is None else {str(name).strip().casefold() for name in elements}
-    parts = [f"Style book (identical in every clip): {style.get('visual_language', '').strip()}".rstrip(": ")]
-    for key, label in (("lighting", "Lighting"), ("color", "Color palette"), ("era", "Era and setting")):
+    timed = timed_lighting(style)
+    # Plans before version 4 keep their exact text (the label, the order): their prompts and style versions stay.
+    label = "Style book (shared by every clip)" if timed else "Style book (identical in every clip)"
+    parts = [f"{label}: {style.get('visual_language', '').strip()}".rstrip(": ")]
+    fields = [("lighting", "Lighting")] if not timed else \
+        [(f"lighting_{t}", f"{t.capitalize()} lighting") for t in TIMES if time is None or t == time]
+    fields += [("sky", "Sky (the same in every clip)"), ("color", "Color palette"), ("era", "Era and setting")]
+    for key, label in fields:
         if str(style.get(key) or "").strip():
             parts.append(f"{label}: {str(style[key]).strip()}")
     recurring = [f"{str(item.get('name') or '').strip()}: {str(item.get('description') or '').strip()}"
@@ -330,8 +378,8 @@ def compose_prompt(style: dict, scene: dict, count: int, seconds: int) -> str:
     if str(scene.get("light") or "").strip():
         shot.append(f"Lighting: {str(scene['light']).strip()}")
     elements = scene.get("elements") if isinstance(scene.get("elements"), list) else None
-    return "\n\n".join([style_text(style, elements), "\n".join(line.rstrip(".") + "." for line in shot),
-                        FIXED_RULES.format(seconds=seconds)])
+    return "\n\n".join([style_text(style, elements, scene_time(scene)),
+                        "\n".join(line.rstrip(".") + "." for line in shot), FIXED_RULES.format(seconds=seconds)])
 
 
 def _json_object(text: str) -> dict:
@@ -401,6 +449,7 @@ def parse_plan_answer(text: str, count: int) -> tuple[dict, list[dict]]:
         if not isinstance(scene, dict) or not str(scene.get("action") or "").strip():
             raise ValueError(f"sahne {position}: çekim tarifi yok")
         shot = {key: str(scene.get(key) or "").strip()[:600] for key in ("visual_tr", "action", "camera", "light")}
+        shot["time"] = scene_time({**shot, "time": scene.get("time")})
         if isinstance(scene.get("elements"), list):
             names = {item["name"].casefold(): item["name"] for item in style["recurring"]}
             shot["elements"] = [names[str(name).strip().casefold()] for name in scene["elements"]
